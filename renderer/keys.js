@@ -1,29 +1,36 @@
-// Skróty klawiszowe. Domyślnie takie jak w SketchUpie; każdy można zmienić w oknie skrótów (klawisz ?).
+// Skróty klawiszowe. Domyślne to układ Michała (Q W E R jak w 3ds Maxie, A S D, Z X C); każdy można zmienić w oknie skrótów (klawisz ?).
 // Zapis: kod klawisza (KeyboardEvent.code bez „Key”/„Digit”) z modyfikatorami, np. „L”, „Shift+Z”, „Mod+S”.
 // „Mod” to ⌘ na Macu i Ctrl na Windows.
 
 export const ACTIONS = [
-  { group: 'Rysowanie', id: 'line', name: 'Linia', keys: ['L'] },
-  { group: 'Rysowanie', id: 'rect', name: 'Prostokąt', keys: ['R'] },
-  { group: 'Rysowanie', id: 'circle', name: 'Okrąg', keys: ['C'] },
-  { group: 'Rysowanie', id: 'arc', name: 'Łuk', keys: ['A'] },
-  { group: 'Edycja', id: 'select', name: 'Zaznacz', keys: ['Space'] },
-  { group: 'Edycja', id: 'push', name: 'Wypchnij / wciśnij', keys: ['P'] },
-  { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor bryły)', keys: ['B'] },
-  { group: 'Edycja', id: 'move', name: 'Przesuń', keys: ['M'] },
-  { group: 'Edycja', id: 'rotate', name: 'Obróć', keys: ['Q'] },
-  { group: 'Edycja', id: 'offset', name: 'Odsunięcie', keys: ['F'] },
-  { group: 'Edycja', id: 'tape', name: 'Taśma', keys: ['T'] },
-  { group: 'Edycja', id: 'eraser', name: 'Gumka', keys: ['E'] },
-  { group: 'Edycja', id: 'clearGuides', name: 'Usuń wszystkie prowadnice', keys: [] },
+  { group: 'Rysowanie', id: 'line', name: 'Linia', keys: ['A'] },
+  { group: 'Rysowanie', id: 'rect', name: 'Prostokąt', keys: ['D'] },
+  { group: 'Rysowanie', id: 'circle', name: 'Okrąg', keys: ['V'] },
+  { group: 'Rysowanie', id: 'arc', name: 'Łuk', keys: ['B'] },
+  { group: 'Rysowanie', id: 'offset', name: 'Odsunięcie', keys: ['T'] },
+  { group: 'Rysowanie', id: 'tape', name: 'Taśma i prowadnice', keys: ['Y'] },
+  { group: 'Rysowanie', id: 'clearGuides', name: 'Usuń wszystkie prowadnice', keys: [] },
+  { group: 'Edycja', id: 'select', name: 'Zaznacz', keys: ['Q', 'Space'] },
+  { group: 'Edycja', id: 'move', name: 'Przesuń', keys: ['W'] },
+  { group: 'Edycja', id: 'rotate', name: 'Obróć', keys: ['E'] },
+  { group: 'Edycja', id: 'scale', name: 'Skaluj', keys: ['R'] },
+  { group: 'Edycja', id: 'push', name: 'Wypchnij / wciśnij', keys: ['X'] },
+  { group: 'Edycja', id: 'cut', name: 'Bryła wycinająca / zwykła', keys: ['Shift+X'] },
+  { group: 'Edycja', id: 'eraser', name: 'Gumka', keys: ['S'] },
+  { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor bryły)', keys: ['M'] },
   { group: 'Edycja', id: 'delete', name: 'Usuń zaznaczone', keys: ['Delete', 'Backspace'] },
   { group: 'Edycja', id: 'selectAll', name: 'Zaznacz wszystko', keys: ['Mod+A'] },
   { group: 'Edycja', id: 'undo', name: 'Cofnij', keys: ['Mod+Z'] },
   { group: 'Edycja', id: 'redo', name: 'Ponów', keys: ['Mod+Shift+Z', 'Mod+Y'] },
+  { group: 'Widok', id: 'hideRest', name: 'Ukryj resztę modelu (drugi raz: pokaż)', keys: ['F'] },
+  { group: 'Widok', id: 'hideSimilar', name: 'Ukryj podobne bryły', keys: ['G'] },
+  { group: 'Widok', id: 'hideSel', name: 'Ukryj zaznaczone', keys: ['H'] },
+  { group: 'Widok', id: 'unhideAll', name: 'Pokaż wszystko', keys: ['Shift+H'] },
+  { group: 'Widok', id: 'extents', name: 'Pokaż cały model', keys: ['Z'] },
+  { group: 'Widok', id: 'persp', name: 'Perspektywa / rzut równoległy', keys: ['C'] },
   { group: 'Widok', id: 'orbit', name: 'Orbita', keys: ['O'] },
-  { group: 'Widok', id: 'pan', name: 'Przesuń widok', keys: ['H'] },
-  { group: 'Widok', id: 'zoom', name: 'Powiększ', keys: ['Z'] },
-  { group: 'Widok', id: 'extents', name: 'Pokaż wszystko', keys: ['Shift+Z'] },
+  { group: 'Widok', id: 'pan', name: 'Przesuń widok', keys: ['P'] },
+  { group: 'Widok', id: 'zoom', name: 'Powiększ (przeciąganiem)', keys: [] },
   { group: 'Widok', id: 'style1', name: 'Styl: Szkic', keys: ['Shift+1'] },
   { group: 'Widok', id: 'style2', name: 'Styl: Kreska', keys: ['Shift+2'] },
   { group: 'Widok', id: 'style3', name: 'Styl: Model', keys: ['Shift+3'] },
@@ -38,7 +45,7 @@ export const ACTIONS = [
   { group: 'Plik', id: 'keys', name: 'Lista skrótów', keys: ['Shift+Slash'] }
 ];
 
-const STORE = 'modo.keys';
+const STORE = 'modo.keys2';   // nowy klucz: stare zmiany dotyczyły poprzedniego układu
 export function loadKeys() {
   let over = {};
   try { over = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (e) {}

@@ -2,7 +2,8 @@
 // i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
 
 import * as THREE from './vendor/three.module.js';
-import { triangulate, edges as shapeEdges, bounds, onTopOf, V } from './model.js';
+import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, V } from './model.js';
+import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
 
 /* ---------- style rysunku ---------- */
@@ -123,6 +124,9 @@ export class Viewer {
     this.cam.up.set(0, 0, 1);
     this.cam.position.set(30, -34, 22);
     this.cam.lookAt(4, 4, 2);
+    // rzut równoległy: kamera ortograficzna podąża za perspektywiczną (ta sama orbita i kierunek)
+    this.ocam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 12000);
+    this.ortho = false; this.orthoH = 20;
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xe9e4d8, 1.6);
     this.hemi.position.set(0, 0, 1);
@@ -147,6 +151,7 @@ export class Viewer {
     this.underlayGroup = new THREE.Group(); this.scene.add(this.underlayGroup);
     this.previewGroup = new THREE.Group(); this.scene.add(this.previewGroup);
     this.guideGroup = new THREE.Group(); this.scene.add(this.guideGroup);
+    this.ghostGroup = new THREE.Group(); this.scene.add(this.ghostGroup);
 
     this.edgeMat = new THREE.ShaderMaterial({
       vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false,
@@ -173,6 +178,31 @@ export class Viewer {
   }
 
   st() { return styleOf(this.style, this.dark); }
+  vc() {
+    if (!this.ortho) return this.cam;
+    const o = this.ocam, f = this.cam.getWorldDirection(new THREE.Vector3());
+    o.position.copy(this.cam.position).addScaledVector(f, -3000);
+    o.quaternion.copy(this.cam.quaternion);
+    const a = this.cam.aspect;
+    o.left = -this.orthoH * a; o.right = this.orthoH * a; o.top = this.orthoH; o.bottom = -this.orthoH;
+    o.updateProjectionMatrix(); o.updateMatrixWorld();
+    return o;
+  }
+  toggleOrtho() {
+    const f = this.cam.getWorldDirection(new THREE.Vector3()), t = Math.tan(this.cam.fov * Math.PI / 360);
+    if (!this.ortho) {
+      const P = this.pivotAt(this.w / 2, this.h / 2);
+      this.orthoH = Math.max(0.5, P.clone().sub(this.cam.position).dot(f) * t);
+      this.ortho = true;
+    } else {
+      const P = this.pivotAt(this.w / 2, this.h / 2);
+      this.ortho = false;
+      const d = this.orthoH / t;
+      const along = P.clone().sub(this.cam.position).dot(f);
+      this.cam.position.addScaledVector(f, along - d);
+    }
+    this.needs = true;
+  }
   setDark(v) { this.dark = !!v; if (this.model) this.rebuild(); else this.needs = true; }
 
   makeAxes() {
@@ -211,7 +241,21 @@ export class Viewer {
     const st = this.st();
     const paper = new THREE.Color(st.paper);
     const edgeList = [];
+    // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
+    const cutters = this.model.shapes.filter(s => s.op === 'cut' && !s.hidden && s.h > 0).map(s => ({ s, box: boxOf(s) }));
+    const polysOf = s => {
+      const out = [];
+      for (const f of triangulate(s)) for (const t of f.tris) {
+        const g = V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0]));
+        out.push({ vs: V.dot(g, f.normal) < 0 ? [t[0], t[2], t[1]] : t, shared: { id: s.id, key: f.key, soft: !!s.soft } });
+      }
+      return out;
+    };
+    this.rebuildGhosts(cutters.map(c => c.s));
     for (const s of this.model.shapes) {
+      if (s.hidden || s.op === 'cut') continue;
+      const cut = s.h > 0 ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
+      if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
       const pos = [], nor = [], keys = [];
       for (const f of triangulate(s)) {
         const n = new THREE.Vector3(...f.normal);
@@ -249,6 +293,7 @@ export class Viewer {
       }
     }
     if (st.lines) for (const l of this.model.lines) {
+      if (l.hidden) continue;
       const sel = this.selected.has('l' + l.id);
       edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
     }
@@ -261,6 +306,44 @@ export class Viewer {
     this.rebuildGuides();
     this.updateSun();
     this.needs = true;
+  }
+
+  colorFor(s, st, paper) {
+    const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
+    if (s.color) base.lerp(paper, st.tint);
+    if (this.selected.has(s.id)) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
+    return base;
+  }
+  // bryła z odjętymi wycięciami: siatka z wielokątów wyniku, krawędzie bez szwów
+  addCsgMesh(s, polys, edgeList, st, paper) {
+    const pos = [], nor = [], keys = [], ids = [];
+    for (const p of polys) {
+      for (let i = 1; i + 1 < p.vs.length; i++) {
+        for (const v of [p.vs[0], p.vs[i], p.vs[i + 1]]) { pos.push(v[0], v[1], v[2]); nor.push(p.n[0], p.n[1], p.n[2]); }
+        keys.push(p.shared.key); ids.push(p.shared.id);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    const mat = new THREE.MeshLambertMaterial({ color: this.colorFor(s, st, paper), polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData = { shapeId: s.id, keys, ids };
+    this.modelGroup.add(mesh); this.meshes.push(mesh);
+    if (st.lines) { const col = this.selected.has(s.id) ? hex3('#3f5f99') : null; for (const e of resultEdges(polys)) edgeList.push({ ...e, col }); }
+  }
+  // wycięcia widać jako cienkie przerywane obrysy (nie trafiają do eksportu)
+  rebuildGhosts(list) {
+    for (const c of [...this.ghostGroup.children]) { c.geometry.dispose(); c.material.dispose(); this.ghostGroup.remove(c); }
+    for (const s of list) {
+      const pts = []; for (const e of shapeEdges(s)) pts.push(new THREE.Vector3(...e.a), new THREE.Vector3(...e.b));
+      const sel = this.selected.has(s.id);
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const m = new THREE.LineDashedMaterial({ color: sel ? 0x3f5f99 : (this.dark ? 0x8d8d89 : 0x8a857b), dashSize: 0.15, gapSize: 0.12, transparent: true, opacity: sel ? 0.95 : 0.55, depthTest: !sel, depthWrite: false });
+      const l = new THREE.LineSegments(geo, m); l.computeLineDistances(); l.renderOrder = 4;
+      this.ghostGroup.add(l);
+    }
   }
 
   // prowadnice (taśma): długie linie przerywane, jak w SketchUpie
@@ -337,7 +420,7 @@ export class Viewer {
     u.nearZ.value = this.cam.near;
     const b = this.model && bounds(this.model);
     if (b) {
-      const d = this.cam.position.distanceTo(new THREE.Vector3(...b.center));
+      const d = this.vc().position.distanceTo(new THREE.Vector3(...b.center));   // w rzucie równoległym kamera stoi daleko
       u.fadeNear.value = Math.max(0.1, d - b.radius * 0.6); u.fadeFar.value = d + b.radius * 1.2;
     }
   }
@@ -346,7 +429,7 @@ export class Viewer {
     this.scene.background = new THREE.Color(st.paper);
     this.axes.visible = this.showAxes;
     this.applyStyleUniforms();
-    this.renderer.render(this.scene, this.cam);
+    this.renderer.render(this.scene, this.vc());
     this.drawOverlay();
   }
   drawOverlay() {
@@ -358,7 +441,7 @@ export class Viewer {
   // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
   async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false } = {}) {
     const keepDark = this.dark; if (dark !== keepDark) { this.dark = dark; this.rebuild(); }
-    const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides;
+    const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides; this.ghostGroup.visible = false;
     const r = this.renderer, st = this.st();
     const keepAxes = this.showAxes, keepUnder = this.underlayGroup.visible, keepMap = this.sun.shadow.mapSize.x;
     this.showAxes = axes; this.axes.visible = axes; this.underlayGroup.visible = underlay && keepUnder;
@@ -371,12 +454,12 @@ export class Viewer {
     const scale = W / (this.w * dpr);
     this.applyStyleUniforms(scale, this.w, this.h);
     this.edgeMat.uniforms.res.value.set(W, H);
-    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.cam); r.setRenderTarget(null);
+    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); r.setRenderTarget(null);
     const px = new Uint8Array(W * H * 4);
     r.readRenderTargetPixels(rt, 0, 0, W, H, px);
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
-    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides;
+    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
     if (this.dark !== keepDark) { this.dark = keepDark; this.rebuild(); }
     this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
     this.needs = true;
@@ -390,17 +473,17 @@ export class Viewer {
   /* ---------- rzutowanie i promienie ---------- */
   ray(x, y) {
     const v = new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1);
-    const rc = new THREE.Raycaster(); rc.setFromCamera(v, this.cam);
+    const rc = new THREE.Raycaster(); rc.setFromCamera(v, this.vc());
     return rc.ray;
   }
   toScreen(p) {
-    const v = new THREE.Vector3(p[0], p[1], p[2]).project(this.cam);
+    const v = new THREE.Vector3(p[0], p[1], p[2]).project(this.vc());
     return { x: (v.x + 1) / 2 * this.w, y: (1 - v.y) / 2 * this.h, behind: v.z > 1 };
   }
   // ściana pod kursorem: { shapeId, key, point, normal }
   pick(x, y) {
     const rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1), this.cam);
+    rc.setFromCamera(new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1), this.vc());
     const hits = rc.intersectObjects(this.meshes || [], false);
     // ściany w tej samej płaszczyźnie (np. ściana z odsunięcia na dachu bryły): wygrywa płaska, potem nowsza
     if (hits.length > 1) {
@@ -411,9 +494,9 @@ export class Viewer {
       hits.splice(0, near.length, ...near);
     }
     for (const h of hits) {
-      const key = h.object.userData.keys[h.faceIndex];
+      const ud = h.object.userData, key = ud.keys[h.faceIndex];
       if (!key) continue;
-      return { shapeId: h.object.userData.shapeId, key, point: [h.point.x, h.point.y, h.point.z], normal: h.face ? [h.face.normal.x, h.face.normal.y, h.face.normal.z] : [0, 0, 1], dist: h.distance };
+      return { shapeId: ud.ids ? ud.ids[h.faceIndex] : ud.shapeId, key, solidId: ud.shapeId, point: [h.point.x, h.point.y, h.point.z], normal: h.face ? [h.face.normal.x, h.face.normal.y, h.face.normal.z] : [0, 0, 1], dist: h.distance };
     }
     return null;
   }
@@ -423,7 +506,7 @@ export class Viewer {
     const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(...n), new THREE.Vector3(...o));
     const p = new THREE.Vector3();
     if (!ray.intersectPlane(pl, p)) return null;
-    if (p.distanceTo(this.cam.position) > 5000) return null;
+    if (p.distanceTo(this.cam.position) > 20000) return null;
     return [p.x, p.y, p.z];
   }
   // najbliższy kursorowi punkt prostej (o, d): zwraca { p, t }
@@ -439,6 +522,7 @@ export class Viewer {
   }
   pixelSize(p) {
     // rozmiar piksela w metrach w odległości punktu p (do tolerancji)
+    if (this.ortho) return 2 * this.orthoH / this.h;
     const d = this.cam.position.distanceTo(new THREE.Vector3(...p));
     return 2 * d * Math.tan(this.cam.fov * Math.PI / 360) / this.h;
   }
@@ -475,7 +559,7 @@ export class Viewer {
   pan(dx, dy, pivot) {
     const cam = this.cam;
     const d = pivot ? pivot.clone().sub(cam.position).dot(cam.getWorldDirection(new THREE.Vector3())) : 30;
-    const s = 2 * Math.max(d, 0.1) * Math.tan(cam.fov * Math.PI / 360) / this.h;
+    const s = this.ortho ? 2 * this.orthoH / this.h : 2 * Math.max(d, 0.1) * Math.tan(cam.fov * Math.PI / 360) / this.h;
     const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
     const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
     cam.position.addScaledVector(right, -dx * s).addScaledVector(up, dy * s);
@@ -485,6 +569,14 @@ export class Viewer {
     // factor > 1 przybliża; kamera jedzie w stronę punktu pod kursorem
     const target = this.pivotAt(x, y);
     const cam = this.cam;
+    if (this.ortho) {
+      // rzut równoległy: zmienia się skala, a punkt pod kursorem zostaje na miejscu
+      const a = this.toScreen(target.toArray());
+      this.orthoH = Math.max(0.05, this.orthoH / factor);
+      const b = this.toScreen(target.toArray());
+      this.pan(a.x - b.x, a.y - b.y);
+      this.needs = true; return;
+    }
     const dist = cam.position.distanceTo(target);
     let k = 1 - 1 / factor;
     if (factor > 1 && dist * (1 - k) < 0.3) k = Math.max(0, 1 - 0.3 / dist);
@@ -499,13 +591,15 @@ export class Viewer {
     const fwd = cam.getWorldDirection(new THREE.Vector3());
     const d = r / Math.sin(Math.min(cam.fov, cam.fov * cam.aspect) * Math.PI / 360) * 1.05;
     cam.position.copy(center).addScaledVector(fwd, -d);
+    if (this.ortho) this.orthoH = r * 1.08 / Math.min(1, cam.aspect);
     cam.lookAt(center);
     this.needs = true;
   }
-  getCamera() { const f = this.cam.getWorldDirection(new THREE.Vector3()); return { p: this.cam.position.toArray(), f: f.toArray(), fov: this.cam.fov }; }
+  getCamera() { const f = this.cam.getWorldDirection(new THREE.Vector3()); return { p: this.cam.position.toArray(), f: f.toArray(), fov: this.cam.fov, ortho: this.ortho, orthoH: this.orthoH }; }
   setCamera(c) {
     if (!c) return;
     this.cam.position.fromArray(c.p); if (c.fov) this.cam.fov = c.fov;
+    this.ortho = !!c.ortho; if (c.orthoH) this.orthoH = c.orthoH;
     this.cam.up.set(0, 0, 1); this.cam.lookAt(this.cam.position.clone().add(new THREE.Vector3().fromArray(c.f)));
     this.cam.updateProjectionMatrix(); this.needs = true;
   }

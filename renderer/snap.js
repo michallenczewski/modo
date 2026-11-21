@@ -72,11 +72,11 @@ export class Snapper {
     const segs = [];
     if (model) {
       for (const s of model.shapes) {
-        if (s.id === opts.exclude || (ex && ex.has(s.id))) continue;
+        if (s.hidden || s.id === opts.exclude || (ex && ex.has(s.id))) continue;
         for (const p of vertices(s)) tryPt(p, 'end');
         for (const e of edges(s)) { tryPt(V.lerp(e.a, e.b, 0.5), 'mid', V.norm(V.sub(e.b, e.a))); segs.push([e.a, e.b]); }
       }
-      for (const l of model.lines) { if (ex && ex.has('l' + l.id)) continue; tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid', V.norm(V.sub(l.b, l.a))); segs.push([l.a, l.b]); }
+      for (const l of model.lines) { if (l.hidden || (ex && ex.has('l' + l.id))) continue; tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid', V.norm(V.sub(l.b, l.a))); segs.push([l.a, l.b]); }
       // prowadnice: przyklejanie do nich i do ich przecięć z innymi prowadnicami i krawędziami
       const gs = (model.guides || []).filter(g => !(ex && ex.has('g' + g.id))).map(g => [V.sub(g.o, V.mul(g.d, 400)), V.add(g.o, V.mul(g.d, 400)), g]);
       const nModel = segs.length;

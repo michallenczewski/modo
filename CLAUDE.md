@@ -5,7 +5,7 @@
 - Przed większą zmianą przeczytaj `ARCHITEKTURA.md`.
 - Interfejs testuj w wersji przeglądarkowej: `npm run web` (albo `python3 -m http.server` w folderze `renderer/`), potem http://localhost:8765. Most do Electrona zastępuje tam `renderer/web-api.js`.
 - Michał pracuje na Windows w biurze i na Macu w domu: opisy skrótów i podpowiedzi muszą się zgadzać dla obu systemów (⌘/⌥ i Ctrl/Alt).
-- Skróty mają odpowiadać SketchUpowi 1:1. Michał ma przysłać eksport swoich skrótów ze SketchUpa — wtedy dopisać import w `renderer/keys.js`.
+- Domyślne skróty to układ Michała (Q zaznacz, W przesuń, E obróć, R skaluj, A linia, S gumka, D prostokąt, F ukryj resztę, G ukryj podobne, Z pokaż wszystko, X push/pull, C perspektywa/równoległy, M wiaderko) — w `renderer/keys.js`. Nie zmieniaj ich bez jego prośby.
 - three.js leży w `renderer/vendor/` (wersja r187, bez npm), żeby program i wersja przeglądarkowa działały bez budowania. Aktualizacja: podmień `three.module.js` i `three.core.js` z `build/` wydania three.js.
 - ODA File Converter (DWG → DXF) nie może być dołączany do programu — licencja ODA zabrania rozpowszechniania. Modo tylko wywołuje program zainstalowany na komputerze.
 - Plików .skp nie otwieramy (format zamknięty).

@@ -15,6 +15,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |
 | `renderer/tools.js` | Narzędzia: zaznacz, linia, prostokąt, okrąg, łuk, wypchnij/wciśnij, przesuń, obróć, odsunięcie, taśma, gumka, wiaderko, orbita/przesuw/zoom lewym przyciskiem. Każde narzędzie pamięta swoją ostatnią operację (`last` z numerem `app.opSeq`), żeby wymiar wpisany po zakończeniu ją poprawił. |
 | `renderer/keys.js` | Lista poleceń ze skrótami (domyślnie SketchUp), zapis własnych skrótów w `localStorage`. |
+| `renderer/csg.js` | Odejmowanie brył (drzewa BSP na wzór csg.js) i wyciąganie krawędzi z wyniku: dzielenie na złączach T, pomijanie szwów w jednej płaszczyźnie, łączenie kawałków w całe krawędzie. |
 | `renderer/dxf.js` | Czytnik DXF do podkładu (linie, polilinie z łukami, okręgi, łuki, elipsy, splajny, bloki). |
 | `renderer/sun.js` | Położenie słońca (algorytm NOAA) dla daty, godziny i miejsca, z czasem letnim. |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
@@ -28,6 +29,12 @@ Szkic to lista **brył**, luźnych **linii** i **prowadnic** (nieskończone lini
 - z `Ctrl` (Windows) albo `⌥` (Mac) push/pull robi nową bryłę na wierzchu ściany.
 
 Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę, gdy domkną obrys w jednej płaszczyźnie (`closeLoop` szuka najkrótszego cyklu przez nową linię). Okrąg to wielokąt o 24 bokach z flagą `soft`: krawędzie między jego bokami rysują się tylko jako kontur sylwetki. Przesuwanie i obracanie zmienia `o`, `u`, `v`, `n` bryły (bryła się nie deformuje); kopia dostaje nowe `id`.
+
+**Wycięcia.** Bryła z `op: 'cut'` nie ma własnych ścian: przy budowaniu sceny (`Viewer.rebuild`) odejmuje się od każdej bryły, której prostopadłościan otaczający dotyka. Wynik CSG zachowuje w każdym wielokącie źródło (`shared`: bryła i ściana), więc ściany otworu należą do wycięcia — kliknięcie w nie wybiera wycięcie, a push/pull wydłuża je. Płaska ścianka leżąca na ścianie bryły (`hostFace`) wciśnięta w nią sama staje się wycięciem. Wycięcia rysuje się jako przerywany obrys (`ghostGroup`), którego nie ma w eksporcie.
+
+**Ukrywanie** to flaga `hidden` w bryle albo linii; ukryte nie są rysowane, nie przyklejają i nie liczą się do „pokaż cały model”. „Podobne” bryły (`similar`) mają ten sam obrys z dokładnością do przesunięcia i obrotu, tę samą wysokość, rodzaj i kolor — czyli przede wszystkim kopie.
+
+**Rzut równoległy**: kamera ortograficzna (`ocam`) jest ustawiana przy każdej klatce z kamery perspektywicznej (`vc()`), 3 km za nią, z wysokością kadru `orthoH`. Nawigacja zawsze porusza kamerą perspektywiczną, a w rzucie równoległym przybliżanie zmienia `orthoH`.
 
 Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model, kamera, styl, słońce, podkład (już przeliczony na metry, więc działa na obu komputerach bez oryginalnego DXF).
 
@@ -48,4 +55,5 @@ Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model
 
 - **Wydajność przy dużych modelach** — dziś każda zmiana przebudowuje całą geometrię. Przy setkach brył trzeba przebudowywać tylko zmienione.
 - **Geometria łączona** (dzielenie ścian liniami, wspólne krawędzie brył) — to zmiana modelu, nie dodatek. Zastanowić się przed.
+- **Wiele wycięć w dużych bryłach** — CSG liczy się przy każdej przebudowie sceny (także w trakcie push/pull). Przy dziesiątkach okien w jednej bryle trzeba będzie zapamiętywać wynik i liczyć tylko zmienione bryły.
 - **Bardzo duże podkłady** — przyklejanie korzysta z siatki odcinków (`Snapper.setUnderlay`), rysowanie z jednego `LineSegments` na warstwę. Powyżej ~600 tys. odcinków czytnik przerywa.

@@ -2,7 +2,7 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
+import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
@@ -205,7 +205,7 @@ export class PushTool extends Tool {
     const mod = this.app.isMac ? '⌥' : 'Ctrl';
     return this.active
       ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
-      : `Kliknij ścianę i przesuń, żeby wypchnąć. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
+      : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle i wciśnięta w nią wycina otwór. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
   }
   vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
@@ -231,7 +231,11 @@ export class PushTool extends Tool {
     const k = A.flip ? -d : d;   // płaska ściana oglądana od spodu: ciągniemy przeciwnie do jej normalnej
     let target = null;
     if (this.copy) target = extrudeFace(m, s, A.key, k);
-    else { pushPull(s, A.key, k); target = s; }
+    else {
+      pushPull(s, A.key, k); target = s;
+      // ścianka narysowana na bryle i wciśnięta w nią staje się wycięciem (otwór, wnęka, dziedziniec)
+      if (A.host) { if (V.dot(V.mul(A.d, d), A.host.normal) < -1e-9) s.op = 'cut'; else delete s.op; }
+    }
     this.app.setModelLive(m);
     const nk = this.copy ? 'top' : (A.key === 'face' ? (k >= 0 ? 'top' : 'bottom') : A.key);
     const f = target && faceByKey(target, target.h === 0 ? 'face' : nk);
@@ -243,7 +247,7 @@ export class PushTool extends Tool {
     let d = f.normal;
     // płaska ściana: ciągniemy w stronę, z której patrzymy
     if (s.h === 0 && V.dot(d, V.sub(this.v.cam.position.toArray(), hit.point)) < 0) d = V.mul(d, -1);
-    this.active = { shapeId: s.id, key: hit.key, o: hit.point, d, start: cloneModel(this.model), flip: d !== f.normal };
+    this.active = { shapeId: s.id, key: hit.key, o: hit.point, d, start: cloneModel(this.model), flip: d !== f.normal, host: s.h === 0 ? hostFace(this.model, s) : null };
     this.dist = 0;
     return true;
   }
@@ -269,11 +273,13 @@ export class PushTool extends Tool {
   }
   value(str) {
     const L = parseLength(str); if (L == null) return false;
-    if (this.active) { this.dist = L; this.apply(L); this.finish(L); return true; }
+    // wpisana odległość idzie w stronę, w którą ciągniesz (jak w SketchUpie); minus ją odwraca
+    if (this.active) { const d = L * (Math.sign(this.dist) || 1); this.dist = d; this.apply(d); this.finish(d); return true; }
     // po zakończeniu: wpisana odległość poprawia ostatnie wypchnięcie
     if (this.lastValid() && this.app.revertLast()) {
       const keep = this.copy; this.copy = this.last.copy;
-      this.active = { ...this.last }; this.dist = L; this.apply(L); this.finish(L);
+      const d = L * (Math.sign(this.last.dist) || 1);
+      this.active = { ...this.last }; this.dist = d; this.apply(d); this.finish(d);
       this.copy = keep; return true;
     }
     return false;
@@ -323,7 +329,7 @@ export class PaintTool extends Tool {
   }
   down(e, x, y) {
     const hit = this.v.pick(x, y); if (!hit) return;
-    const s = this.model.shapes.find(q => q.id === hit.shapeId); if (!s) return;
+    const s = this.model.shapes.find(q => q.id === (hit.solidId ?? hit.shapeId)); if (!s) return;
     if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint(s.color || null); return; }
     if ((s.color || null) === this.app.paint) return;
     this.app.checkpoint(); s.color = this.app.paint; this.app.changed();
@@ -359,8 +365,14 @@ export function pickEntity(app, x, y) {
     return Math.hypot(A.x + dx * t - x, A.y + dy * t - y);
   };
   let best = null, bd = 6;
-  for (const l of m.lines) { const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
+  for (const l of m.lines) { if (l.hidden) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
   if (best) return best;
+  // wycięcia: wybierane po przerywanym obrysie
+  for (const s of m.shapes) {
+    if (s.op !== 'cut' || s.hidden) continue;
+    for (const e of shapeEdges(s)) { const d = segDist(e.a, e.b); if (d < bd) { bd = d; best = s.id; } }
+  }
+  if (best != null) return best;
   const hit = v.pick(x, y);
   if (hit) return hit.shapeId;
   bd = 5;
@@ -811,3 +823,83 @@ export class EraserTool extends Tool {
     this.app.changed();
   }
 }
+
+/* ---------- skaluj ---------- */
+export class ScaleTool extends Tool {
+  reset() { this.b = null; this.r = null; this.targets = null; this.start = null; this.cur = null; this.k = 1; this.axis = null; }
+  hint() {
+    const k = copyKey(this.app);
+    if (!this.b) return `Kliknij punkt bazowy skalowania (zaznaczenia albo bryły pod kursorem). Strzałka ustawia oś, wzdłuż której skalujesz. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: od środka</b>' : 'od środka'}.`;
+    if (!this.r) return 'Kliknij punkt odniesienia — jego odległość od bazy to 100%.';
+    return 'Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>, <kbd>-1</kbd> odbija) albo docelową długość z jednostką (np. <kbd>6m</kbd>).';
+  }
+  lastValid() { return this.last && this.last.seq === this.app.opSeq; }
+  vcb() { return { label: 'Skala', value: this.r ? fmtK(this.k) : this.lastValid() ? fmtK(this.last.k) : '' }; }
+  center() {
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const add = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
+    eachTarget(this.start || this.model, this.targets, s => vertices(s).forEach(add), l => { add(l.a); add(l.b); }, g => add(g.o));
+    return V.lerp(lo, hi, 0.5);
+  }
+  move(e, x, y) {
+    this.mx = x; this.my = y;
+    if (!this.b) { if (!this.app.selection.size) hoverShape(this.app, x, y); this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
+    const anchor = this.b;
+    this.cur = this.app.snapper.find(x, y, { model: this.start || this.model, anchor, lockAxis: this.app.lockAxis, excludeSet: this.r ? this.targets : null });
+    if (!this.cur || !this.r) return;
+    this.axis = this.app.lockAxis ? AXES[this.app.lockAxis] : null;
+    const dir = this.axis || this.refDir, d0 = this.axis ? V.dot(V.sub(this.r, this.b), this.axis) : V.dist(this.r, this.b);
+    if (Math.abs(d0) < 1e-9) return;
+    this.apply(V.dot(V.sub(this.cur.p, this.b), dir) / d0);
+  }
+  apply(k) {
+    const m = cloneModel(this.start), c = this.copy ? this.center() : this.b;
+    let ok = true;
+    eachTarget(m, this.targets, s => { ok = scaleShape(s, c, k, this.axis) && ok; }, l => { l.a = scalePoint(l.a, c, k, this.axis); l.b = scalePoint(l.b, c, k, this.axis); }, g => { g.o = scalePoint(g.o, c, k, this.axis); });
+    this.k = k; this.ok = ok;
+    this.app.setModelLive(m);
+  }
+  down(e, x, y) {
+    if (!this.cur) return;
+    if (!this.b) { const t = targetsAt(this.app, x, y); if (!t) return; this.targets = t; this.b = this.cur.p.slice(); this.v.setHoverFace(null); return; }
+    if (!this.r) {
+      if (V.dist(this.cur.p, this.b) < 1e-6) return;
+      this.r = this.cur.p.slice(); this.refDir = V.norm(V.sub(this.r, this.b));
+      this.axis = this.app.lockAxis ? AXES[this.app.lockAxis] : null;
+      this.start = cloneModel(this.model); this.k = 1; return;
+    }
+    this.finish();
+  }
+  finish() {
+    if (!this.start) return;
+    if (Math.abs(this.k - 1) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
+    if (!this.ok) this.app.toast?.('Część brył da się skalować tylko jednolicie albo wzdłuż ich wysokości.');
+    this.app.commitLive(this.start);
+    this.last = { start: this.start, targets: this.targets, b: this.b, r: this.r, refDir: this.refDir, axis: this.axis, k: this.k, center: this.copy, seq: this.app.opSeq };
+    this.reset();
+  }
+  value(str) {
+    const t = String(str).trim();
+    let k = null, len = null;
+    if (/^[-+]?\d*[.,]?\d+$/.test(t)) k = parseFloat(t.replace(',', '.')); else len = parseLength(t);
+    if (k == null && len == null) return false;
+    const go = () => {
+      const d0 = this.axis ? Math.abs(V.dot(V.sub(this.r, this.b), this.axis)) : V.dist(this.r, this.b);
+      this.apply(k != null ? k : len / d0); this.finish(); return true;
+    };
+    if (this.r) return go();
+    if (this.lastValid() && this.app.revertLast()) { const l = this.last; Object.assign(this, { start: l.start, targets: l.targets, b: l.b, r: l.r, refDir: l.refDir, axis: l.axis }); const keep = this.copy; this.copy = l.center; const r = go(); this.copy = keep; return r; }
+    return false;
+  }
+  key(e) { if (isCopyKey(this.app, e)) { this.copy = !this.copy; if (this.r) this.apply(this.k); this.app.updateHint(); return true; } return false; }
+  cancel() { if (this.start) this.app.setModelLive(this.start); super.cancel(); }
+  draw(c, v) {
+    if (this.copy) drawPlus(c, this.mx, this.my);
+    const s = this.cur; if (!s) return;
+    if (this.b) drawSeg(c, v, this.b, this.r || s.p, INK, { width: 1, dash: [3, 3] });
+    if (this.r) drawSeg(c, v, this.b, s.p, this.axis ? AXIS_COLOR[this.app.lockAxis] || INK : INK, { width: 1.5 });
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.r ? 'Skala ' + fmtK(this.k) : s.label);
+  }
+}
+const fmtK = k => (Math.round(k * 1000) / 1000).toString().replace('.', ',') + '×';

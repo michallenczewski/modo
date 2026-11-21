@@ -5,7 +5,9 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 ## Co potrafi
 
 - Okno 3D z nawigacją: środkowy przycisk obraca (z ⇧ przesuwa), kółko przybliża do kursora; na gładziku dwa palce obracają, z ⇧ przesuwają, szczypanie przybliża. Prawy przycisk przesuwa widok.
-- Narzędzia jak w SketchUpie: linia (L), prostokąt (R), okrąg (C), łuk dwupunktowy (A), wypchnij/wciśnij (P), przesuń (M), obróć (Q), odsunięcie (F), taśma z prowadnicami (T), gumka (E), kolor bryły (B).
+- Narzędzia: zaznacz (Q), przesuń (W), obróć (E), skaluj (R), linia (A), gumka (S), prostokąt (D), okrąg (V), łuk (B), odsunięcie (T), taśma z prowadnicami (Y), wypchnij/wciśnij (X), kolor bryły (M).
+- Widok: Z pokazuje cały model, C przełącza perspektywę i rzut równoległy, F ukrywa resztę modelu (drugi raz pokazuje), G ukrywa bryły podobne do zaznaczonej, H ukrywa zaznaczone, ⇧H pokazuje wszystko.
+- Bryły wycinające: prostokąt (albo inny obrys) narysowany na ścianie bryły i wciśnięty w nią wycina otwór, wnękę albo dziedziniec; każdą bryłę można też przełączyć na wycinającą (⇧X). Wycięcia widać jako przerywany obrys — można je przesuwać, skalować i wypychać dalej.
 - Przyklejanie do końców, środków, krawędzi, ścian, osi, prowadnic i ich przecięć; linie pomocnicze „od punktu”; blokada osi strzałkami (→ czerwona, ← zielona, ↑ niebieska).
 - Wymiary z klawiatury w trakcie i po zakończeniu operacji (np. `3,5`, `350cm`, `6;4`, kąt `15`); po kopii `x3` robi szyk, `/3` dzieli odstęp. Liczba bez jednostki jest w jednostce szkicu (m, cm albo mm — przełącznik obok pola wymiarów).
 - `Ctrl` (Windows) albo `⌥` (Mac): przy wypychaniu nowa bryła z zostawieniem istniejących krawędzi, przy przesuwaniu i obracaniu kopia.
@@ -13,7 +15,7 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 - Słońce według daty i godziny (domyślnie Warszawa), miękkie cienie; trzy style: Szkic, Kreska, Model (`⇧1`, `⇧2`, `⇧3`); wygląd automatyczny, jasny albo ciemny.
 - Podkład z DXF (warstwy, wysokość, krycie, przyklejanie); DWG przez ODA File Converter, jeśli jest zainstalowany.
 - Zapis i otwieranie plików `.modo`, eksport PNG w wysokiej rozdzielczości (jasny albo ciemny).
-- Skróty jak w SketchUpie, do zmiany w oknie skrótów (`?`).
+- Skróty w układzie Q W E R / A S D / Z X C, każdy do zmiany w oknie skrótów (`?`).
 
 ## Instalacja
 

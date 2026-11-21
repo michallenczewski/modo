@@ -2,8 +2,8 @@
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
-import { newModel, cloneModel, fixModel } from './model.js';
-import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { newModel, cloneModel, fixModel, similar } from './model.js';
+import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -31,6 +31,7 @@ const IC = {
   paint: '<path d="M3 7.5 7.5 3l5 5L8 12.5z"/><path d="M3 7.5h9.5"/><path d="M13.3 10.2s1.2 1.4 1.2 2.2a1.2 1.2 0 0 1-2.4 0c0-.8 1.2-2.2 1.2-2.2z"/>',
   orbit: '<ellipse cx="8" cy="8" rx="5.5" ry="2.6"/><path d="M8 2.5v11"/><path d="M11.3 4.2 13.5 5.5l-.8 2.3"/>',
   pan: '<path d="M5.5 8V4a1 1 0 0 1 2 0v3.5V3a1 1 0 0 1 2 0v4.5V4.2a1 1 0 0 1 2 0V10c0 2.2-1.5 4-4 4-1.8 0-2.7-.8-3.6-2L2.6 9.4a1 1 0 0 1 1.5-1.3L5.5 9.5"/>',
+  scale: '<rect x="2.5" y="6.5" width="7" height="7" rx=".5"/><path d="M9 2.5h4.5V7M13.5 2.5 8 8"/>',
   extents: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>'
 };
 const ic = n => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -58,7 +59,7 @@ app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.leng
 // cofnięcie ostatniej operacji bez zapisywania jej do „ponów” (przed powtórzeniem jej z nowym wymiarem)
 app.revertLast = () => { if (!app.undo.length) return false; app.model = app.undo.pop(); viewer.setModel(app.model); app.opSeq++; return true; };
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); };
-app.changed = () => { viewer.setModel(app.model); app.markDirty(); app.refresh(); };
+app.changed = () => { viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
 app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; app.markDirty(); viewer.setModel(app.model); app.refresh(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
@@ -68,11 +69,11 @@ app.setPaint = c => { app.paint = c; renderSwatches(); };
 /* ---------- narzędzia ---------- */
 const tools = {
   select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), circle: new CircleTool(app), arc: new ArcTool(app),
-  push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
+  push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
 };
 let tool = tools.select;
-const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
+const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -97,7 +98,7 @@ function setTool(id) {
   tool.deactivate(); tool = tools[id]; tool.activate();
   app.lockAxis = null; vcbBuf = '';
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id);
-  $('#view').className = ['line', 'rect', 'circle', 'arc', 'push', 'move', 'rotate', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['line', 'rect', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
   app.refresh();
 }
@@ -227,7 +228,9 @@ window.addEventListener('keydown', e => {
   // ⇧ + cyfra to skrót (np. styl), a nie początek wymiaru
   if (canValue && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.shiftKey && !vcbBuf)) {
     // szyk po kopii zaczyna się od „x”, „*” albo „/” (np. x5, /4)
-    if (/^[0-9.,;×xX*/\-+]$/.test(e.key) && (vcbBuf || /[0-9.,\-+x*×/]/.test(e.key)) || (vcbBuf && /^[a-zA-Z"'° ]$/.test(e.key))) {
+    // „x” zaczyna wpis tylko zaraz po kopii (inaczej to skrót narzędzia)
+    const arr = tool.lastValid?.() && tool.last?.copy;
+    if (/^[0-9.,;×xX*/\-+]$/.test(e.key) && (vcbBuf || /[0-9.,\-+]/.test(e.key) || (arr && /[x*×/]/.test(e.key))) || (vcbBuf && /^[a-zA-Z"'° ]$/.test(e.key))) {
       e.preventDefault(); vcbBuf += e.key; app.updateVcb(); return;
     }
     if (vcbBuf && e.key === 'Backspace') { e.preventDefault(); vcbBuf = vcbBuf.slice(0, -1); app.updateVcb(); return; }
@@ -245,7 +248,13 @@ function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'push': case 'move': case 'rotate': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'hideRest': hideRest(); break;
+    case 'hideSimilar': hideSimilar(); break;
+    case 'hideSel': hideSel(); break;
+    case 'unhideAll': unhideAll(); break;
+    case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); break;
+    case 'cut': toggleCut(); break;
     case 'clearGuides': if (app.model.guides.length) { app.checkpoint(); app.model.guides = []; app.changed(); } break;
     case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
@@ -266,6 +275,46 @@ function run(act) {
     case 'keys': openKeys(); break;
   }
 }
+/* ---------- chowanie brył ---------- */
+const hiddenCount = () => app.model.shapes.filter(s => s.hidden).length + app.model.lines.filter(l => l.hidden).length;
+function setHidden(fn) {
+  app.checkpoint();
+  for (const s of app.model.shapes) { const h = fn(s.id, s); if (h !== undefined) s.hidden = h || undefined; }
+  for (const l of app.model.lines) { const h = fn('l' + l.id, l); if (h !== undefined) l.hidden = h || undefined; }
+  for (const id of [...app.selection]) { const s = typeof id === 'number' ? app.model.shapes.find(q => q.id === id) : app.model.lines.find(q => 'l' + q.id === id); if (!s || s.hidden) app.selection.delete(id); }
+  app.changed(); renderViewChip();
+}
+function hideRest() {
+  // drugi raz F (albo F bez zaznaczenia, gdy coś jest ukryte) pokazuje wszystko
+  if ((app.isolated || !app.selection.size) && hiddenCount()) return unhideAll();
+  if (!app.selection.size) return toast('Zaznacz bryły, które mają zostać widoczne.');
+  setHidden(id => !app.selection.has(id));
+  app.isolated = true;
+}
+function hideSimilar() {
+  const sel = app.model.shapes.filter(s => app.selection.has(s.id));
+  if (!sel.length) return toast('Zaznacz bryłę — ukryję ją razem z podobnymi.');
+  let n = 0;
+  setHidden((id, s) => { if (typeof id !== 'number') return undefined; if (sel.some(q => similar(q, s))) { n++; return true; } return undefined; });
+  app.selection.clear(); viewer.rebuild(); toast('Ukryto podobne bryły: ' + n);
+}
+function hideSel() { if (!app.selection.size) return; setHidden(id => app.selection.has(id) ? true : undefined); app.selection.clear(); viewer.rebuild(); }
+function unhideAll() { if (!hiddenCount()) return; setHidden(() => false); app.isolated = false; }
+function toggleCut() {
+  const sel = app.model.shapes.filter(s => app.selection.has(s.id) && s.h > 0);
+  if (!sel.length) return toast('Zaznacz bryłę, która ma wycinać (albo przestać wycinać).');
+  app.checkpoint();
+  const on = !sel.every(s => s.op === 'cut');
+  for (const s of sel) s.op = on ? 'cut' : undefined;
+  app.changed(); toast(on ? 'Bryła wycina z brył, które przecina' : 'Zwykła bryła');
+}
+function renderViewChip() {
+  const n = hiddenCount(), b = $('#hiddenChip');
+  b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
+  $('#orthoChip').hidden = !viewer.ortho;
+}
+app.renderViewChip = renderViewChip;
+
 function deleteSelection() {
   if (!app.selection.size) return;
   app.checkpoint();
@@ -557,7 +606,7 @@ function load(text, name, path) {
   viewer.showAxes = d.axes !== false;
   app.underlay = d.underlay || null; applyUnderlay();
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
-  setFile(path, name); app.markDirty(false); renderSun(); setTool('select');
+  setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
 }
 function setFile(path, name) { app.file.path = path; app.file.name = name || 'Bez nazwy'; $('#fileName').textContent = app.file.name; document.title = app.file.name + ' — Modo'; }
 async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma niezapisane zmiany. Porzucić je?'); }
@@ -600,6 +649,8 @@ function toast(text, action) {
 }
 
 app.toast = (t, a) => toast(t, a);
+$('#hiddenChip').addEventListener('click', () => unhideAll());
+$('#orthoChip').addEventListener('click', () => run('persp'));
 
 /* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */
 const THEME_NAME = { auto: 'automatyczny', light: 'jasny', dark: 'ciemny' };

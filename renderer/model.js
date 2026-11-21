@@ -189,8 +189,8 @@ export function faceFromLoop(model, loop) {
 export function bounds(model, extra) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   const add = p => { for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; } };
-  for (const s of model.shapes) vertices(s).forEach(add);
-  for (const l of model.lines) { add(l.a); add(l.b); }
+  for (const s of model.shapes) if (!s.hidden) vertices(s).forEach(add);
+  for (const l of model.lines) if (!l.hidden) { add(l.a); add(l.b); }
   if (extra) extra.forEach(add);
   if (lo[0] === Infinity) return null;
   return { lo, hi, center: V.lerp(lo, hi, 0.5), radius: Math.max(V.dist(lo, hi) / 2, 1) };
@@ -295,3 +295,70 @@ export function closeLoop(model, l) {
   model.lines = model.lines.filter(e => !ids.includes(e.id));
   return f;
 }
+
+/* ---------- podobne bryły (do „ukryj podobne”) ---------- */
+// ta sama wysokość, rodzaj i kolor oraz ten sam obrys z dokładnością do przesunięcia, obrotu i punktu startowego
+function signature(s) {
+  const n = s.pts.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const p = s.pts[i], q = s.pts[(i + 1) % n], r = s.pts[(i + 2) % n];
+    const L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    const t = (q[0] - p[0]) * (r[1] - q[1]) - (q[1] - p[1]) * (r[0] - q[0]);
+    out.push(Math.round(L * 1000) + ':' + Math.sign(Math.round(t * 1e6)));
+  }
+  return out;
+}
+export function similar(a, b) {
+  if (a.pts.length !== b.pts.length || Math.abs(a.h - b.h) > 1e-4 || (a.op || '') !== (b.op || '') || (a.color || '') !== (b.color || '')) return false;
+  const A = signature(a), B = signature(b), n = A.length;
+  for (let k = 0; k < n; k++) { let ok = true; for (let i = 0; i < n && ok; i++) ok = A[i] === B[(i + k) % n]; if (ok) return true; }
+  return false;
+}
+
+/* ---------- skalowanie ---------- */
+// k — współczynnik; axis — null (jednolicie) albo jednostkowy wektor osi. Zwraca false, gdy bryły nie da się tak przeskalować
+// (oś ani prostopadła, ani równoległa do jej podstawy — wtedy bryła przestałaby być prostym wyciągnięciem).
+export function scaleShape(s, c, k, axis) {
+  if (!axis) {
+    s.o = V.add(c, V.mul(V.sub(s.o, c), k)); s.pts = s.pts.map(p => [p[0] * k, p[1] * k]); s.h *= k;
+    if (k < 0) { s.u = V.mul(s.u, -1); s.v = V.mul(s.v, -1); s.pts = s.pts.map(p => [-p[0], -p[1]]); }
+    normalizeShape(s); return true;
+  }
+  const along = p => V.add(p, V.mul(axis, V.dot(V.sub(p, c), axis) * (k - 1)));
+  const dn = V.dot(axis, s.n);
+  if (Math.abs(Math.abs(dn) - 1) < 1e-3) { s.o = along(s.o); s.h *= k; normalizeShape(s); return true; }
+  if (Math.abs(dn) < 1e-3) {
+    const w = s.pts.map(p => along(at(s, p[0], p[1], 0)));
+    s.o = w[0];
+    s.pts = w.map(p => { const d = V.sub(p, s.o); return [V.dot(d, s.u), V.dot(d, s.v)]; });
+    normalizeShape(s); return true;
+  }
+  return false;
+}
+export function scalePoint(p, c, k, axis) { return axis ? V.add(p, V.mul(axis, V.dot(V.sub(p, c), axis) * (k - 1))) : V.add(c, V.mul(V.sub(p, c), k)); }
+
+/* ---------- wycięcia ---------- */
+// bryła, na której ścianie leży płaska ścianka s (np. prostokąt narysowany na elewacji)
+export function hostFace(model, s) {
+  if (s.h !== 0) return null;
+  let cx = 0, cy = 0; for (const p of s.pts) { cx += p[0]; cy += p[1]; }
+  const c = at(s, cx / s.pts.length, cy / s.pts.length, 0);
+  for (const t of model.shapes) {
+    if (t === s || t.h === 0 || t.op === 'cut' || t.hidden) continue;
+    for (const f of faces(t)) {
+      if (Math.abs(Math.abs(V.dot(f.normal, s.n)) - 1) > 1e-4 || Math.abs(V.dot(V.sub(c, f.verts[0]), f.normal)) > 1e-4) continue;
+      const fp = facePlane(f);
+      let a = 0; for (let i = 0; i < fp.pts.length; i++) { const p = fp.pts[i], q = fp.pts[(i + 1) % fp.pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+      if (a < 0) fp.pts.reverse();
+      const d = V.sub(c, fp.o);
+      if (insideDistance(fp.pts, [V.dot(d, fp.u), V.dot(d, fp.v)]) > 1e-6) return { shape: t, normal: f.normal };
+    }
+  }
+  return null;
+}
+export function boxOf(s) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of vertices(s)) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
+  return { lo, hi };
+}
+export const boxesTouch = (a, b, e = 1e-4) => a.lo[0] <= b.hi[0] + e && b.lo[0] <= a.hi[0] + e && a.lo[1] <= b.hi[1] + e && b.lo[1] <= a.hi[1] + e && a.lo[2] <= b.hi[2] + e && b.lo[2] <= a.hi[2] + e;
