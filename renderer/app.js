@@ -2,7 +2,7 @@
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
-import { newModel, cloneModel, fixModel, similar } from './model.js';
+import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
 import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -43,7 +43,7 @@ const app = {
   undo: [], redo: [],
   selection: new Set(),
   lockAxis: null, lockByShift: false,
-  paint: '#d9d4c7',
+  paint: '#d9d4c7', paintAlpha: 1,
   lastPush: null,
   file: { path: null, name: 'Bez nazwy', dirty: false },
   underlay: null,
@@ -59,12 +59,63 @@ app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.leng
 // cofnięcie ostatniej operacji bez zapisywania jej do „ponów” (przed powtórzeniem jej z nowym wymiarem)
 app.revertLast = () => { if (!app.undo.length) return false; app.model = app.undo.pop(); viewer.setModel(app.model); app.opSeq++; return true; };
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); };
-app.changed = () => { viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
+app.changed = () => { postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
+// po każdej zmianie: nowe elementy w edytowanej grupie należą do niej, a inne wystąpienia komponentu dostają tę samą zmianę
+function postEdit(prev = app.undo[app.undo.length - 1]) {
+  const m = app.model;
+  if (app.editing && prev) {
+    const had = new Set([...prev.shapes.map(s => s.id), ...prev.lines.map(l => 'l' + l.id)]);
+    for (const s of m.shapes) if (!s.g && !had.has(s.id)) s.g = app.editing;
+    for (const l of m.lines) if (!l.g && !had.has('l' + l.id)) l.g = app.editing;
+    if (m.groups.find(g => g.id === app.editing)?.kind === 'comp') syncComponent(m, app.editing);
+  }
+  pruneGroups(m);
+  if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();
+}
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
-app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; app.markDirty(); viewer.setModel(app.model); app.refresh(); };
+app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
-app.selectionChanged = () => { viewer.rebuild(); app.refresh(); };
-app.setPaint = c => { app.paint = c; renderSwatches(); };
+app.selectionChanged = () => { viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
+app.setPaint = (c, a) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; renderSwatches(); };
+
+/* ---------- grupy i komponenty ---------- */
+app.editing = null;
+app.groupAt = id => groupOf(app.model, id);
+// klik w element grupy zaznacza całą grupę — chyba że ją właśnie edytujesz
+app.expand = id => { const g = groupOf(app.model, id); return g && g.id !== app.editing ? membersOf(app.model, g.id) : [id]; };
+app.inEditing = id => groupOf(app.model, id)?.id === app.editing;
+app.enterGroup = gid => { app.editing = gid; viewer.editGroup = gid; app.selection.clear(); viewer.rebuild(); app.refresh(); renderViewChip(); };
+app.exitGroup = () => { if (!app.editing) return; const gid = app.editing; app.editing = null; viewer.editGroup = null; app.selection.clear(); membersOf(app.model, gid).forEach(i => app.selection.add(i)); viewer.rebuild(); app.refresh(); renderViewChip(); };
+function makeGroup(kind) {
+  const ids = [...app.selection].filter(i => !String(i).startsWith('g'));
+  if (!ids.length) return toast('Zaznacz bryły albo linie, z których ma powstać ' + (kind === 'comp' ? 'komponent.' : 'grupa.'));
+  if (app.editing) return toast('Grupy w grupach będą w kolejnej wersji — zakończ najpierw edycję grupy (Esc).');
+  app.checkpoint();
+  const m = app.model, gid = m.next++;
+  let lo = [Infinity, Infinity, Infinity];
+  for (const id of ids) {
+    const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : m.lines.find(l => 'l' + l.id === id);
+    if (!e) continue;
+    e.g = gid;
+    for (const p of typeof id === 'number' ? vertices(e) : [e.a, e.b]) for (let k = 0; k < 3; k++) lo[k] = Math.min(lo[k], p[k]);
+  }
+  m.groups.push(kind === 'comp' ? { id: gid, kind, def: 'd' + gid, frame: IDENT(lo) } : { id: gid, kind });
+  app.changed(); app.selectionChanged();
+  toast(kind === 'comp' ? 'Komponent — kopie zmieniają się razem. Dwuklik, żeby edytować.' : 'Grupa. Dwuklik, żeby edytować.');
+}
+function selectedGroups() { const out = new Set(); for (const id of app.selection) { const g = groupOf(app.model, id); if (g) out.add(g); } return [...out]; }
+function explode() {
+  const gs = selectedGroups(); if (!gs.length) return toast('Zaznacz grupę albo komponent.');
+  app.checkpoint();
+  for (const g of gs) { for (const s of app.model.shapes) if (s.g === g.id) delete s.g; for (const l of app.model.lines) if (l.g === g.id) delete l.g; }
+  app.changed(); app.selectionChanged();
+}
+function makeUnique() {
+  const gs = selectedGroups().filter(g => g.kind === 'comp'); if (!gs.length) return toast('Zaznacz komponent.');
+  app.checkpoint();
+  for (const g of gs) g.def = 'd' + app.model.next++;
+  app.changed(); toast(gs.length > 1 ? 'Komponenty są teraz niezależne' : 'Ten komponent jest teraz niezależny');
+}
 
 /* ---------- narzędzia ---------- */
 const tools = {
@@ -212,6 +263,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (closePops()) return;
     if (vcbBuf) { vcbBuf = ''; app.refresh(); return; }
+    const busy = tool.active || tool.anchor || tool.p0 || tool.c || tool.b || tool.face || tool.p1;
+    if (!busy && app.editing) { app.exitGroup(); return; }
     tool.cancel(); app.lockAxis = null; app.refresh(); return;
   }
   // blokada osi strzałkami (jak w SketchUpie): → czerwona, ← zielona, ↑ niebieska, ↓ zwolnienie
@@ -255,6 +308,11 @@ function run(act) {
     case 'unhideAll': unhideAll(); break;
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); break;
     case 'cut': toggleCut(); break;
+    case 'group': makeGroup('group'); break;
+    case 'comp': makeGroup('comp'); break;
+    case 'explode': explode(); break;
+    case 'unique': makeUnique(); break;
+    case 'editGroup': { const g = selectedGroups()[0]; if (g) app.enterGroup(g.id); else app.exitGroup(); break; }
     case 'clearGuides': if (app.model.guides.length) { app.checkpoint(); app.model.guides = []; app.changed(); } break;
     case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
@@ -312,6 +370,12 @@ function renderViewChip() {
   const n = hiddenCount(), b = $('#hiddenChip');
   b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
   $('#orthoChip').hidden = !viewer.ortho;
+  const ed = app.editing && app.model.groups.find(g => g.id === app.editing), eb = $('#editChip');
+  eb.hidden = !ed;
+  if (ed) eb.textContent = ed.kind === 'comp' ? `Edytujesz komponent (${instancesOf(app.model, ed.def).length} wyst.) · zakończ` : 'Edytujesz grupę · zakończ';
+  const sg = !app.editing && selectedGroups(), sc = $('#selChip');
+  sc.hidden = !(sg && sg.length === 1);
+  if (sg && sg.length === 1) sc.textContent = sg[0].kind === 'comp' ? 'Komponent · ' + instancesOf(app.model, sg[0].def).length + ' wyst.' : 'Grupa';
 }
 app.renderViewChip = renderViewChip;
 
@@ -328,13 +392,15 @@ function undo() {
   if (!app.undo.length) return;
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
-  app.selection.clear(); app.changed();
+  app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 function redo() {
   if (!app.redo.length) return;
   app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
-  app.selection.clear(); app.changed();
+  app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 
 /* ---------- styl ---------- */
@@ -515,19 +581,21 @@ $('#underOp').addEventListener('input', e => { if (!app.underlay) return; app.un
 $('#underSnap').addEventListener('change', e => { if (!app.underlay) return; app.underlay.snap = e.target.checked; snapper.setUnderlay(app.underlay); });
 
 /* ---------- kolor bryły ---------- */
-const PALETTE = [[null, 'biały'], ['#e4dfd3', 'jasny beton'], ['#c9c3b5', 'beton'], ['#8d8980', 'grafit'], ['#c99a7c', 'cegła'], ['#bfa17c', 'drewno'], ['#a9b49a', 'zieleń'], ['#a7b6c2', 'szkło']];
+const PALETTE = [[null, 'biały'], ['#e4dfd3', 'jasny beton'], ['#c9c3b5', 'beton'], ['#8d8980', 'grafit'], ['#c99a7c', 'cegła'], ['#bfa17c', 'drewno'], ['#a9b49a', 'zieleń'], ['#a7b6c2', 'szkło', 0.3]];
 function renderSwatches() {
   const box = $('#swatches'); box.innerHTML = '';
-  for (const [c, n] of PALETTE) {
-    const b = document.createElement('button'); b.className = 'sw' + ((app.paint || null) === c ? ' on' : '');
-    b.style.background = c || DEFAULT_COLOR; b.textContent = n;
-    b.addEventListener('click', () => { app.setPaint(c); setTool('paint'); });
+  for (const [c, n, a = 1] of PALETTE) {
+    const b = document.createElement('button'); b.className = 'sw' + ((app.paint || null) === c && Math.abs(app.paintAlpha - a) < 0.01 ? ' on' : '') + (a < 1 ? ' glass' : '');
+    b.style.setProperty('--c', c || DEFAULT_COLOR); b.style.setProperty('--a', a); b.textContent = n;
+    b.addEventListener('click', () => { app.setPaint(c, a); setTool('paint'); });
     box.append(b);
   }
   const dot = toolsEl.querySelector('[data-tool=paint] .dot'); if (dot) dot.style.background = app.paint || DEFAULT_COLOR;
   $('#paintCustom').value = app.paint || '#f6f4ee';
+  const pa = $('#paintAlpha'); pa.value = app.paintAlpha; setRangeFill(pa); $('#paintAlphaLbl').textContent = Math.round(app.paintAlpha * 100) + '%';
 }
 $('#paintCustom').addEventListener('input', e => app.setPaint(e.target.value));
+$('#paintAlpha').addEventListener('input', e => app.setPaint(app.paint, +e.target.value));
 renderSwatches();
 
 /* ---------- skróty ---------- */
@@ -597,6 +665,7 @@ function serialize() {
 function load(text, name, path) {
   const d = JSON.parse(text);
   if (d.app !== 'Modo') throw new Error('To nie jest plik Modo');
+  app.editing = null; viewer.editGroup = null;
   app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
@@ -612,6 +681,7 @@ function setFile(path, name) { app.file.path = path; app.file.name = name || 'Be
 async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma niezapisane zmiany. Porzucić je?'); }
 async function newSketch() {
   if (!(await confirmDiscard())) return;
+  app.editing = null; viewer.editGroup = null;
   app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay();
   app.opSeq++; viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
 }
@@ -650,6 +720,7 @@ function toast(text, action) {
 
 app.toast = (t, a) => toast(t, a);
 $('#hiddenChip').addEventListener('click', () => unhideAll());
+$('#editChip').addEventListener('click', () => app.exitGroup());
 $('#orthoChip').addEventListener('click', () => run('persp'));
 
 /* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */

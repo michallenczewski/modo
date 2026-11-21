@@ -271,17 +271,14 @@ export class Viewer {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
       const sel = this.selected.has(s.id);
-      const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
-      if (s.color) base.lerp(paper, st.tint);
-      if (sel) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
       const flat = s.h === 0;
-      const mat = new THREE.MeshLambertMaterial({ color: base, side: flat ? THREE.DoubleSide : THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = !flat; mesh.receiveShadow = true;
+      const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, flat));
+      mesh.castShadow = !flat && (s.alpha ?? 1) > 0.6; mesh.receiveShadow = true;
+      if ((s.alpha ?? 1) < 0.999) mesh.renderOrder = 1;
       mesh.userData = { shapeId: s.id, keys };
       this.modelGroup.add(mesh); this.meshes.push(mesh);
       if (st.lines) {
-        const col = sel ? hex3('#3f5f99') : null;
+        const col = sel ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
         for (const e of shapeEdges(s)) {
           // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
           if (s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
@@ -312,7 +309,19 @@ export class Viewer {
     const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
     if (s.color) base.lerp(paper, st.tint);
     if (this.selected.has(s.id)) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
+    if (this.dimmed(s)) base.lerp(paper, 0.6);
     return base;
+  }
+  // przy edycji grupy reszta modelu jest przygaszona
+  dimmed(s) { return this.editGroup != null && s.g !== this.editGroup; }
+  // materiał ściany: kolor, przezroczystość (szkło)
+  matFor(s, st, paper, flat) {
+    const a = s.alpha ?? 1, glass = a < 0.999;
+    return new THREE.MeshLambertMaterial({
+      color: this.colorFor(s, st, paper), side: flat || glass ? THREE.DoubleSide : THREE.FrontSide,
+      transparent: glass, opacity: a, depthWrite: !glass,
+      polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2
+    });
   }
   // bryła z odjętymi wycięciami: siatka z wielokątów wyniku, krawędzie bez szwów
   addCsgMesh(s, polys, edgeList, st, paper) {
@@ -326,12 +335,11 @@ export class Viewer {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    const mat = new THREE.MeshLambertMaterial({ color: this.colorFor(s, st, paper), polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true; mesh.receiveShadow = true;
+    const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, false));
+    mesh.castShadow = (s.alpha ?? 1) > 0.6; mesh.receiveShadow = true;
     mesh.userData = { shapeId: s.id, keys, ids };
     this.modelGroup.add(mesh); this.meshes.push(mesh);
-    if (st.lines) { const col = this.selected.has(s.id) ? hex3('#3f5f99') : null; for (const e of resultEdges(polys)) edgeList.push({ ...e, col }); }
+    if (st.lines) { const col = this.selected.has(s.id) ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null; for (const e of resultEdges(polys)) edgeList.push({ ...e, col }); }
   }
   // wycięcia widać jako cienkie przerywane obrysy (nie trafiają do eksportu)
   rebuildGhosts(list) {
@@ -440,7 +448,10 @@ export class Viewer {
 
   // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
   async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false } = {}) {
-    const keepDark = this.dark; if (dark !== keepDark) { this.dark = dark; this.rebuild(); }
+    // w eksporcie bez zaznaczenia i bez przygaszenia przy edycji grupy
+    const keepSel = [...this.selected], keepEdit = this.editGroup;
+    this.selected.clear(); this.editGroup = null;
+    const keepDark = this.dark; this.dark = dark; this.rebuild();
     const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides; this.ghostGroup.visible = false;
     const r = this.renderer, st = this.st();
     const keepAxes = this.showAxes, keepUnder = this.underlayGroup.visible, keepMap = this.sun.shadow.mapSize.x;
@@ -460,7 +471,7 @@ export class Viewer {
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
     this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
-    if (this.dark !== keepDark) { this.dark = keepDark; this.rebuild(); }
+    keepSel.forEach(i => this.selected.add(i)); this.editGroup = keepEdit; this.dark = keepDark; this.rebuild();
     this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
     this.needs = true;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;

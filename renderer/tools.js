@@ -2,7 +2,7 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
+import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
@@ -69,7 +69,7 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Kliknij bryłę albo linię, żeby ją zaznaczyć. <kbd>⇧</kbd> dodaje do zaznaczenia, <kbd>Delete</kbd> usuwa.'; }
+  hint() { return 'Kliknij bryłę albo linię, żeby ją zaznaczyć; <kbd>⇧</kbd> dodaje. Dwuklik w grupę albo komponent — edycja w środku. <kbd>Spacja</kbd> grupuje zaznaczenie.'; }
   pickAny(x, y) { return pickEntity(this.app, x, y); }
   move(e, x, y) {
     const id = this.pickAny(x, y);
@@ -80,10 +80,19 @@ export class SelectTool extends Tool {
   }
   down(e, x, y) {
     const id = this.pickAny(x, y), sel = this.app.selection;
+    // klik poza edytowaną grupą kończy jej edycję
+    if (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
+    const ids = id == null ? [] : this.app.expand(id);
     if (id == null) { if (!e.shiftKey) sel.clear(); }
-    else if (e.shiftKey) { sel.has(id) ? sel.delete(id) : sel.add(id); }
-    else { sel.clear(); sel.add(id); }
+    else if (e.shiftKey) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
+    else { sel.clear(); ids.forEach(i => sel.add(i)); }
     this.app.selectionChanged();
+  }
+  // dwuklik w grupę albo komponent: edycja w środku
+  dbl(e, x, y) {
+    const id = this.pickAny(x, y); if (id == null) return;
+    const g = this.app.groupAt(id);
+    if (g && this.app.editing !== g.id) this.app.enterGroup(g.id);
   }
 }
 
@@ -321,7 +330,7 @@ export class PushTool extends Tool {
 
 /* ---------- wiaderko: kolor bryły ---------- */
 export class PaintTool extends Tool {
-  hint() { return `Kliknij bryłę, żeby nadać jej kolor. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor z bryły.`; }
+  hint() { return `Kliknij bryłę, żeby nadać jej kolor i krycie (szkło). <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor z bryły.`; }
   move(e, x, y) {
     const hit = this.v.pick(x, y);
     const s = hit && this.model.shapes.find(q => q.id === hit.shapeId);
@@ -330,9 +339,13 @@ export class PaintTool extends Tool {
   down(e, x, y) {
     const hit = this.v.pick(x, y); if (!hit) return;
     const s = this.model.shapes.find(q => q.id === (hit.solidId ?? hit.shapeId)); if (!s) return;
-    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint(s.color || null); return; }
-    if ((s.color || null) === this.app.paint) return;
-    this.app.checkpoint(); s.color = this.app.paint; this.app.changed();
+    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint(s.color || null, s.alpha ?? 1); return; }
+    // grupa albo komponent (poza edycją) dostaje kolor w całości
+    const ids = this.app.expand(s.id).filter(i => typeof i === 'number');
+    const a = this.app.paintAlpha >= 0.999 ? undefined : this.app.paintAlpha;
+    this.app.checkpoint();
+    for (const id of ids) { const q = this.model.shapes.find(x => x.id === id); if (q) { q.color = this.app.paint; if (a === undefined) delete q.alpha; else q.alpha = a; } }
+    this.app.changed();
   }
 }
 
@@ -524,22 +537,17 @@ function rotVec3(v, k, t) { const c = Math.cos(t), s = Math.sin(t); return V.add
 function targetsAt(app, x, y) {
   if (app.selection.size) return new Set(app.selection);
   const id = pickEntity(app, x, y);
-  return id == null ? null : new Set([id]);
+  return id == null ? null : new Set(app.expand(id));
 }
 function eachTarget(m, targets, fs, fl, fg) {
   for (const s of m.shapes) if (targets.has(s.id)) fs(s);
   for (const l of m.lines) if (targets.has('l' + l.id)) fl(l);
   for (const g of m.guides) if (targets.has('g' + g.id)) fg(g);
 }
-// kopie elementów (nowe id); zwraca zbiór id kopii
-function duplicate(m, targets) {
-  const out = new Set(), S = [], L = [], G = [];
-  eachTarget(m, targets, s => S.push(s), l => L.push(l), g => G.push(g));
-  for (const s of S) { const c = JSON.parse(JSON.stringify(s)); c.id = m.next++; m.shapes.push(c); out.add(c.id); }
-  for (const l of L) { const c = JSON.parse(JSON.stringify(l)); c.id = m.next++; m.lines.push(c); out.add('l' + c.id); }
-  for (const g of G) { const c = JSON.parse(JSON.stringify(g)); c.id = m.next++; m.guides.push(c); out.add('g' + c.id); }
-  return out;
-}
+// kopie elementów (nowe id, grupy i komponenty kopiowane w całości); zwraca zbiór id kopii
+const duplicate = (m, targets) => duplicateIds(m, targets);
+// ramy grup przesuwanych w całości idą razem z nimi
+function moveFrames(m, ids, f) { for (const g of groupsWhollyIn(m, ids)) if (g.frame) g.frame = transformFrame(g.frame, f); }
 
 export class MoveTool extends Tool {
   reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; }
@@ -565,9 +573,10 @@ export class MoveTool extends Tool {
       for (let k = 1; k <= count; k++) {
         const ids = duplicate(m, this.targets), dk = V.mul(d, k);
         eachTarget(m, ids, s => translateShape(s, dk), l => translateLine(l, dk), g => translateGuide(g, dk));
+        moveFrames(m, ids, p => V.add(p, dk));
         ids.forEach(i => sel.add(i));
       }
-    } else eachTarget(m, this.targets, s => translateShape(s, d), l => translateLine(l, d), g => translateGuide(g, d));
+    } else { eachTarget(m, this.targets, s => translateShape(s, d), l => translateLine(l, d), g => translateGuide(g, d)); moveFrames(m, this.targets, p => V.add(p, d)); }
     this.d = d; this.count = count; this.result = sel;
     this.app.setModelLive(m);
   }
@@ -645,9 +654,10 @@ export class RotateTool extends Tool {
       for (let k = 1; k <= count; k++) {
         const ids = duplicate(m, this.targets), ak = a * k;
         eachTarget(m, ids, s => rotateShape(s, this.c, this.n, ak), l => rotateLine(l, this.c, this.n, ak), g => rotateGuide(g, this.c, this.n, ak));
+        moveFrames(m, ids, p => V.add(this.c, rotVec(V.sub(p, this.c), this.n, ak)));
         ids.forEach(i => sel.add(i));
       }
-    } else eachTarget(m, this.targets, s => rotateShape(s, this.c, this.n, a), l => rotateLine(l, this.c, this.n, a), g => rotateGuide(g, this.c, this.n, a));
+    } else { eachTarget(m, this.targets, s => rotateShape(s, this.c, this.n, a), l => rotateLine(l, this.c, this.n, a), g => rotateGuide(g, this.c, this.n, a)); moveFrames(m, this.targets, p => V.add(this.c, rotVec(V.sub(p, this.c), this.n, a))); }
     this.ang = a; this.count = count; this.result = sel;
     this.app.setModelLive(m);
   }
@@ -813,13 +823,15 @@ export class EraserTool extends Tool {
   down(e, x, y) { this.erasing = true; this.started = false; this.erase(x, y); }
   up() { this.erasing = false; }
   erase(x, y) {
-    const id = pickEntity(this.app, x, y); if (id == null) return;
+    const id0 = pickEntity(this.app, x, y); if (id0 == null) return;
     if (!this.started) { this.app.checkpoint(); this.started = true; }
     const m = this.model;
-    if (typeof id === 'number') m.shapes = m.shapes.filter(s => s.id !== id);
-    else if (id[0] === 'l') m.lines = m.lines.filter(l => 'l' + l.id !== id);
-    else m.guides = m.guides.filter(g => 'g' + g.id !== id);
-    this.app.selection.delete(id);
+    for (const id of this.app.expand(id0)) {
+      if (typeof id === 'number') m.shapes = m.shapes.filter(s => s.id !== id);
+      else if (id[0] === 'l') m.lines = m.lines.filter(l => 'l' + l.id !== id);
+      else m.guides = m.guides.filter(g => 'g' + g.id !== id);
+      this.app.selection.delete(id);
+    }
     this.app.changed();
   }
 }
@@ -856,6 +868,7 @@ export class ScaleTool extends Tool {
     const m = cloneModel(this.start), c = this.copy ? this.center() : this.b;
     let ok = true;
     eachTarget(m, this.targets, s => { ok = scaleShape(s, c, k, this.axis) && ok; }, l => { l.a = scalePoint(l.a, c, k, this.axis); l.b = scalePoint(l.b, c, k, this.axis); }, g => { g.o = scalePoint(g.o, c, k, this.axis); });
+    moveFrames(m, this.targets, p => scalePoint(p, c, k, this.axis));
     this.k = k; this.ok = ok;
     this.app.setModelLive(m);
   }

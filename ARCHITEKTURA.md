@@ -32,6 +32,10 @@ Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę,
 
 **Wycięcia.** Bryła z `op: 'cut'` nie ma własnych ścian: przy budowaniu sceny (`Viewer.rebuild`) odejmuje się od każdej bryły, której prostopadłościan otaczający dotyka. Wynik CSG zachowuje w każdym wielokącie źródło (`shared`: bryła i ściana), więc ściany otworu należą do wycięcia — kliknięcie w nie wybiera wycięcie, a push/pull wydłuża je. Płaska ścianka leżąca na ścianie bryły (`hostFace`) wciśnięta w nią sama staje się wycięciem. Wycięcia rysuje się jako przerywany obrys (`ghostGroup`), którego nie ma w eksporcie.
 
+**Grupy i komponenty.** `model.groups` to rekordy `{ id, kind: 'group' | 'comp', def, frame }`, a bryły i linie należą do grupy przez pole `g`. Geometria każdego wystąpienia komponentu leży w świecie jak każda inna bryła (narzędzia działają bez zmian), a `frame` (o, x, y, z) mówi, jak wystąpienie jest ustawione względem definicji. Przesuwanie, obracanie i skalowanie całej grupy przekształca też jej ramę. Po każdej zmianie w czasie edycji grupy (`postEdit` w `app.js`) nowe elementy dołączają do edytowanej grupy, a dla komponentu pozostałe wystąpienia są odtwarzane z edytowanego (`syncComponent`: geometria → układ definicji → rama każdego wystąpienia). „Zrób unikalny” nadaje wystąpieniu nową definicję. Grupy nie zagnieżdżają się (na razie).
+
+**Krycie** bryły to pole `alpha` (brak = 1). Przezroczyste bryły mają materiał z `transparent`, nie zapisują głębi i nie rzucają cienia poniżej krycia 0,6.
+
 **Ukrywanie** to flaga `hidden` w bryle albo linii; ukryte nie są rysowane, nie przyklejają i nie liczą się do „pokaż cały model”. „Podobne” bryły (`similar`) mają ten sam obrys z dokładnością do przesunięcia i obrotu, tę samą wysokość, rodzaj i kolor — czyli przede wszystkim kopie.
 
 **Rzut równoległy**: kamera ortograficzna (`ocam`) jest ustawiana przy każdej klatce z kamery perspektywicznej (`vc()`), 3 km za nią, z wysokością kadru `orthoH`. Nawigacja zawsze porusza kamerą perspektywiczną, a w rzucie równoległym przybliżanie zmienia `orthoH`.

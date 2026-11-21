@@ -25,9 +25,9 @@ export const V = {
 export const EPS = 1e-6;
 const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
 
-export function newModel() { return { shapes: [], lines: [], guides: [], next: 1 }; }
+export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], next: 1 }; }
 // starsze pliki nie miały prowadnic
-export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.next ||= 1; return m; }
+export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.groups ||= []; m.next ||= 1; return m; }
 export const cloneModel = m => JSON.parse(JSON.stringify(m));
 
 // punkt (a, b, c) w układzie bryły → świat
@@ -362,3 +362,70 @@ export function boxOf(s) {
   return { lo, hi };
 }
 export const boxesTouch = (a, b, e = 1e-4) => a.lo[0] <= b.hi[0] + e && b.lo[0] <= a.hi[0] + e && a.lo[1] <= b.hi[1] + e && b.lo[1] <= a.hi[1] + e && a.lo[2] <= b.hi[2] + e && b.lo[2] <= a.hi[2] + e;
+
+/* ---------- grupy i komponenty ---------- */
+// Grupa: { id, kind: 'group' | 'comp', def, frame } — członkowie to bryły i linie z polem g = id grupy.
+// Komponent to grupa z definicją `def`: wszystkie grupy o tym samym `def` są jego wystąpieniami.
+// Geometria każdego wystąpienia leży w modelu we współrzędnych świata (narzędzia działają bez zmian),
+// a `frame` (o, x, y, z — przekształcenie afiniczne) mówi, jak wystąpienie jest ustawione względem definicji.
+// Po edycji jednego wystąpienia pozostałe są przeliczane z niego (syncComponent).
+export const membersOf = (m, gid) => [...m.shapes.filter(s => s.g === gid).map(s => s.id), ...m.lines.filter(l => l.g === gid).map(l => 'l' + l.id)];
+export const groupOf = (m, id) => { const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : m.lines.find(l => 'l' + l.id === id); return e && e.g ? m.groups.find(g => g.id === e.g) || null : null; };
+export const IDENT = o => ({ o: o.slice(), x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] });
+export const mapPoint = (F, l) => V.add(V.add(V.add(F.o, V.mul(F.x, l[0])), V.mul(F.y, l[1])), V.mul(F.z, l[2]));
+export const mapVec = (F, l) => V.add(V.add(V.mul(F.x, l[0]), V.mul(F.y, l[1])), V.mul(F.z, l[2]));
+export function unmapPoint(F, p) {
+  // odwrotność macierzy o kolumnach x, y, z
+  const [a, b, c] = [F.x, F.y, F.z], d = V.sub(p, F.o);
+  const det = V.dot(a, V.cross(b, c));
+  return [V.dot(d, V.cross(b, c)) / det, V.dot(a, V.cross(d, c)) / det, V.dot(a, V.cross(b, d)) / det];
+}
+// bryła przekształcona dowolną funkcją punktów (przesunięcie, obrót, skala, przejście między ramami)
+export function transformShape(s, f) {
+  const base = s.pts.map(p => at(s, p[0], p[1], 0)), o = f(s.o);
+  const top = f(at(s, s.pts[0][0], s.pts[0][1], s.h)), b0 = f(base[0]);
+  let u = V.norm(V.sub(f(V.add(s.o, s.u)), o)), v = V.sub(f(V.add(s.o, s.v)), o);
+  v = V.norm(V.sub(v, V.mul(u, V.dot(v, u))));
+  const n = V.cross(u, v);
+  s.o = o; s.u = u; s.v = v; s.n = n;
+  s.pts = base.map(p => { const d = V.sub(f(p), o); return [V.dot(d, u), V.dot(d, v)]; });
+  s.h = V.dot(V.sub(top, b0), n);
+  normalizeShape(s);
+  return s;
+}
+export function transformFrame(F, f) {
+  const o = f(F.o);
+  return { o, x: V.sub(f(V.add(F.o, F.x)), o), y: V.sub(f(V.add(F.o, F.y)), o), z: V.sub(f(V.add(F.o, F.z)), o) };
+}
+// grupy, których wszyscy członkowie są w zbiorze ids (ich ramy przesuwają się razem z nimi)
+export function groupsWhollyIn(m, ids) {
+  return m.groups.filter(g => { const mem = membersOf(m, g.id); return mem.length && mem.every(i => ids.has(i)); });
+}
+// kopie elementów; grupy kopiowane w całości dostają nowe grupy (wystąpienia tego samego komponentu)
+export function duplicateIds(m, ids) {
+  const out = new Set(), gmap = new Map();
+  for (const g of groupsWhollyIn(m, ids)) { const c = JSON.parse(JSON.stringify(g)); c.id = m.next++; m.groups.push(c); gmap.set(g.id, c.id); }
+  const S = m.shapes.filter(s => ids.has(s.id)), L = m.lines.filter(l => ids.has('l' + l.id)), G = m.guides.filter(g => ids.has('g' + g.id));
+  const fix = c => { if (c.g) { if (gmap.has(c.g)) c.g = gmap.get(c.g); } };
+  for (const s of S) { const c = JSON.parse(JSON.stringify(s)); c.id = m.next++; fix(c); m.shapes.push(c); out.add(c.id); }
+  for (const l of L) { const c = JSON.parse(JSON.stringify(l)); c.id = m.next++; fix(c); m.lines.push(c); out.add('l' + c.id); }
+  for (const g of G) { const c = JSON.parse(JSON.stringify(g)); c.id = m.next++; m.guides.push(c); out.add('g' + c.id); }
+  return out;
+}
+// przelicz wszystkie wystąpienia komponentu z wystąpienia `gid`
+export function syncComponent(m, gid) {
+  const src = m.groups.find(g => g.id === gid); if (!src || src.kind !== 'comp') return;
+  const local = s => transformShape(JSON.parse(JSON.stringify(s)), p => unmapPoint(src.frame, p));
+  const defShapes = m.shapes.filter(s => s.g === gid).map(local);
+  const defLines = m.lines.filter(l => l.g === gid).map(l => ({ ...l, a: unmapPoint(src.frame, l.a), b: unmapPoint(src.frame, l.b) }));
+  for (const g of m.groups) {
+    if (g.id === gid || g.kind !== 'comp' || g.def !== src.def) continue;
+    const hidden = m.shapes.some(s => s.g === g.id && s.hidden);
+    m.shapes = m.shapes.filter(s => s.g !== g.id); m.lines = m.lines.filter(l => l.g !== g.id);
+    for (const d of defShapes) { const c = transformShape(JSON.parse(JSON.stringify(d)), p => mapPoint(g.frame, p)); c.id = m.next++; c.g = g.id; if (hidden) c.hidden = true; else delete c.hidden; m.shapes.push(c); }
+    for (const d of defLines) m.lines.push({ ...d, id: m.next++, g: g.id, a: mapPoint(g.frame, d.a), b: mapPoint(g.frame, d.b) });
+  }
+}
+export function instancesOf(m, def) { return m.groups.filter(g => g.kind === 'comp' && g.def === def); }
+// grupy bez członków są usuwane
+export function pruneGroups(m) { const used = new Set([...m.shapes.map(s => s.g), ...m.lines.map(l => l.g)]); m.groups = m.groups.filter(g => used.has(g.id)); }
