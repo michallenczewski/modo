@@ -62,26 +62,40 @@ export class Snapper {
 
     // 1. punkty: końce i środki
     let best = null;
-    const tryPt = (p, type) => {
-      const d = d2(p), r = type === 'end' ? R_END : R_MID;
+    const tryPt = (p, type, dir) => {
+      const d = d2(p), r = type === 'mid' ? R_MID : R_END;
       if (d > r) return;
-      const score = d + (type === 'end' ? 0 : 3);
-      if (!best || score < best.score) best = { p, type, score };
+      const score = d + (type === 'mid' ? 3 : type === 'cross' ? 1 : 0);
+      if (!best || score < best.score) best = { p, type, score, dir };
     };
+    const ex = opts.excludeSet;
     const segs = [];
     if (model) {
       for (const s of model.shapes) {
-        if (s.id === opts.exclude) continue;
+        if (s.id === opts.exclude || (ex && ex.has(s.id))) continue;
         for (const p of vertices(s)) tryPt(p, 'end');
-        for (const e of edges(s)) { tryPt(V.lerp(e.a, e.b, 0.5), 'mid'); segs.push([e.a, e.b]); }
+        for (const e of edges(s)) { tryPt(V.lerp(e.a, e.b, 0.5), 'mid', V.norm(V.sub(e.b, e.a))); segs.push([e.a, e.b]); }
       }
-      for (const l of model.lines) { tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid'); segs.push([l.a, l.b]); }
+      for (const l of model.lines) { if (ex && ex.has('l' + l.id)) continue; tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid', V.norm(V.sub(l.b, l.a))); segs.push([l.a, l.b]); }
+      // prowadnice: przyklejanie do nich i do ich przecięć z innymi prowadnicami i krawędziami
+      const gs = (model.guides || []).filter(g => !(ex && ex.has('g' + g.id))).map(g => [V.sub(g.o, V.mul(g.d, 400)), V.add(g.o, V.mul(g.d, 400)), g]);
+      const nModel = segs.length;
+      for (let i = 0; i < gs.length; i++) {
+        const [a, b, g] = gs[i];
+        for (let j = i + 1; j < gs.length; j++) { const q = closestLines(g.o, g.d, gs[j][2].o, gs[j][2].d); if (q && q.gap < 1e-4) tryPt(q.p, 'cross'); }
+        for (let j = 0; j < nModel && j < 4000; j++) {
+          const [c, d] = segs[j], L = V.dist(c, d); if (L < 1e-9) continue;
+          const dir = V.mul(V.sub(d, c), 1 / L), q = closestLines(g.o, g.d, c, dir);
+          if (q && q.gap < 1e-4 && q.t > -1e-6 && q.t < L + 1e-6) tryPt(q.p, 'cross');
+        }
+        segs.push([a, b]);
+      }
     }
     for (const [a, b] of this.underNear(x, y)) { tryPt(a, 'end'); tryPt(b, 'end'); tryPt(V.lerp(a, b, 0.5), 'mid'); segs.push([a, b]); }
     tryPt([0, 0, 0], 'end');
     if (opts.extraPoints) for (const p of opts.extraPoints) tryPt(p, 'end');
 
-    const label = { end: 'Punkt końcowy', mid: 'Środek' };
+    const label = { end: 'Punkt końcowy', mid: 'Środek', cross: 'Przecięcie' };
 
     // ograniczenie do prostej (push/pull): punkt rzutujemy na prostą
     if (opts.line) {
@@ -123,7 +137,7 @@ export class Snapper {
       if (r) return { p: r.p, type: 'axis', axis: opts.lockAxis, label: AXIS_NAME[opts.lockAxis], locked: true };
     }
 
-    if (best) { this.remember(best.p); return { p: best.p, type: best.type, label: label[best.type] }; }
+    if (best) { this.remember(best.p); return { p: best.p, type: best.type, label: label[best.type], dir: best.dir }; }
 
     // 2. osie od punktu początkowego i wyrównania „od punktu”
     if (opts.anchor) {
@@ -155,11 +169,11 @@ export class Snapper {
       const t = Math.max(0, Math.min(L, r.t));
       const p = V.add(a, V.mul(V.norm(V.sub(b, a)), t));
       const d = d2(p);
-      if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d };
+      if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)) };
     }
     // ściana pod kursorem
     const hit = v.pick(x, y);
-    if (eb && (!hit || d2(hit.point) > 0)) return { p: eb.p, type: 'edge', label: 'Na krawędzi', face: hit };
+    if (eb) return { p: eb.p, type: 'edge', label: 'Na krawędzi', face: hit, dir: eb.dir };
     if (hit) return { p: hit.point, type: 'face', label: 'Na ścianie', face: hit };
 
     // 4. ziemia

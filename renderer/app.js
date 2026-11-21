@@ -2,8 +2,8 @@
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
-import { newModel, cloneModel } from './model.js';
-import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool } from './tools.js';
+import { newModel, cloneModel, fixModel } from './model.js';
+import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -21,6 +21,7 @@ const IC = {
   line: '<path d="M4 12 12 4"/><circle cx="3.2" cy="12.8" r="1.2"/><circle cx="12.8" cy="3.2" r="1.2"/>',
   rect: '<rect x="2.5" y="4" width="11" height="8" rx=".5"/>',
   circle: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r=".6"/>',
+  arc: '<path d="M2.5 12.5a6.5 6.5 0 0 1 11 0"/><circle cx="2.5" cy="12.5" r="1"/><circle cx="13.5" cy="12.5" r="1"/>',
   push: '<path d="M2.5 10.5h11v3h-11z"/><path d="M8 8.5V2.5M5.5 5 8 2.5 10.5 5"/>',
   move: '<path d="M8 2v12M2 8h12M6.2 3.8 8 2l1.8 1.8M6.2 12.2 8 14l1.8-1.8M3.8 6.2 2 8l1.8 1.8M12.2 6.2 14 8l-1.8 1.8"/>',
   rotate: '<path d="M13.2 8.5A5.3 5.3 0 1 1 11.6 4"/><path d="M12.2 1.8v2.7H9.5"/>',
@@ -66,11 +67,12 @@ app.setPaint = c => { app.paint = c; renderSwatches(); };
 
 /* ---------- narzędzia ---------- */
 const tools = {
-  select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), push: new PushTool(app), paint: new PaintTool(app),
+  select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), circle: new CircleTool(app), arc: new ArcTool(app),
+  push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
 };
 let tool = tools.select;
-const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg', 1], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń', 1], ['rotate', 'Obróć', 1], ['offset', 'Odsunięcie', 1], null, ['tape', 'Taśma', 1], ['eraser', 'Gumka', 1], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
+const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -95,7 +97,7 @@ function setTool(id) {
   tool.deactivate(); tool = tools[id]; tool.activate();
   app.lockAxis = null; vcbBuf = '';
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id);
-  $('#view').className = ['line', 'rect', 'push', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['line', 'rect', 'circle', 'arc', 'push', 'move', 'rotate', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
   app.refresh();
 }
@@ -116,6 +118,7 @@ app.updateHint = () => { $('#hint').innerHTML = tool.hint() || ''; };
 app.updateVcb = () => {
   const v = tool.vcb();
   $('#vcbWrap').style.visibility = v ? '' : 'hidden';
+  $('#unitBtn').style.visibility = v ? '' : 'hidden';
   if (!v) return;
   $('#vcbLabel').textContent = v.label;
   if (document.activeElement !== vcbEl) { vcbEl.value = vcbBuf || v.value; vcbEl.classList.toggle('typing', !!vcbBuf); }
@@ -223,7 +226,8 @@ window.addEventListener('keydown', e => {
   const canValue = tool.vcb && tool.vcb();
   // ⇧ + cyfra to skrót (np. styl), a nie początek wymiaru
   if (canValue && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.shiftKey && !vcbBuf)) {
-    if (/^[0-9.,;×xX\-+]$/.test(e.key) && (vcbBuf || /[0-9.,\-+]/.test(e.key)) || (vcbBuf && /^[a-zA-Z"' ]$/.test(e.key))) {
+    // szyk po kopii zaczyna się od „x”, „*” albo „/” (np. x5, /4)
+    if (/^[0-9.,;×xX*/\-+]$/.test(e.key) && (vcbBuf || /[0-9.,\-+x*×/]/.test(e.key)) || (vcbBuf && /^[a-zA-Z"'° ]$/.test(e.key))) {
       e.preventDefault(); vcbBuf += e.key; app.updateVcb(); return;
     }
     if (vcbBuf && e.key === 'Backspace') { e.preventDefault(); vcbBuf = vcbBuf.slice(0, -1); app.updateVcb(); return; }
@@ -241,10 +245,12 @@ function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'push': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'push': case 'move': case 'rotate': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'clearGuides': if (app.model.guides.length) { app.checkpoint(); app.model.guides = []; app.changed(); } break;
+    case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
     case 'delete': deleteSelection(); break;
-    case 'selectAll': app.selection.clear(); app.model.shapes.forEach(s => app.selection.add(s.id)); app.model.lines.forEach(l => app.selection.add('l' + l.id)); app.selectionChanged(); break;
+    case 'selectAll': app.selection.clear(); app.model.shapes.forEach(s => app.selection.add(s.id)); app.model.lines.forEach(l => app.selection.add('l' + l.id)); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
     case 'style1': setStyle('szkic'); break;
@@ -265,6 +271,7 @@ function deleteSelection() {
   app.checkpoint();
   app.model.shapes = app.model.shapes.filter(s => !app.selection.has(s.id));
   app.model.lines = app.model.lines.filter(l => !app.selection.has('l' + l.id));
+  app.model.guides = app.model.guides.filter(g => !app.selection.has('g' + g.id));
   app.selection.clear(); app.changed();
 }
 function undo() {
@@ -343,7 +350,7 @@ function renderSun() {
   const sx = t => 10 + 268 * (t - h0) / (h1 - h0), sy = a => 70 - Math.max(a, -6) * (58 / maxA);
   const d = pts.map(([t, a], i) => (i ? 'L' : 'M') + sx(t).toFixed(1) + ' ' + sy(a).toFixed(1)).join(' ');
   const cx = sx(Math.max(h0, Math.min(h1, c.hour))), cy = sy(p.alt);
-  $('#sunArc').innerHTML = `<path d="M4 70h280" stroke="#e6e5e1"/><path d="${d}" fill="none" stroke="#a3a29d" stroke-width="1.2" stroke-dasharray="2 3"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="#fff" stroke="#1a1a19" stroke-width="1.4"/><line x1="${cx.toFixed(1)}" y1="${(cy + 6).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" stroke="#1a1a19" stroke-dasharray="1.5 2.5"/>`;
+  $('#sunArc').innerHTML = `<path d="M4 70h280" style="stroke:var(--line)"/><path d="${d}" fill="none" style="stroke:var(--muted2)" stroke-width="1.2" stroke-dasharray="2 3"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" style="fill:var(--card);stroke:var(--text)" stroke-width="1.4"/><line x1="${cx.toFixed(1)}" y1="${(cy + 6).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" style="stroke:var(--text)" stroke-dasharray="1.5 2.5"/>`;
 }
 const placeName = c => (Math.abs(c.lat - 52.23) < 0.05 && Math.abs(c.lon - 21.01) < 0.05) ? 'Warszawa' : 'własne miejsce';
 $('#sunBtn').addEventListener('click', () => openPop('#sunPop', $('#sunBtn')));
@@ -382,7 +389,7 @@ $('#pngGo').addEventListener('click', async () => {
   if (W > max || H > max) { const k = max / Math.max(W, H); W = Math.floor(W * k); H = Math.floor(H * k); toast(`Największy obraz na tym komputerze: ${W} × ${H} px`); }
   $('#pngGo').disabled = true; $('#pngGo').textContent = 'Liczę…';
   try {
-    const blob = await viewer.exportPng(W, H, { transparent: $('#pngTransparent').checked, axes: $('#pngAxes').checked, underlay: $('#pngUnder').checked });
+    const blob = await viewer.exportPng(W, H, { transparent: $('#pngTransparent').checked, axes: $('#pngAxes').checked, underlay: $('#pngUnder').checked, dark: viewer.dark && $('#pngDark').checked, guides: $('#pngGuides').checked });
     const p = await api.savePng(new Uint8Array(await blob.arrayBuffer()), pngName());
     if (p) { closePops(); toast('Zapisano obraz ' + W + ' × ' + H + ' px', api.web ? null : ['Pokaż', () => api.showInFolder(p)]); }
   } catch (err) { toast('Nie udało się zapisać obrazu: ' + err.message); }
@@ -478,6 +485,7 @@ renderSwatches();
 function openKeys() { $('#keysModal').hidden = false; renderKeys(); $('#keysQ').focus(); }
 function closeKeys() { $('#keysModal').hidden = true; capture = null; }
 $('#keysBtn').addEventListener('click', openKeys);
+$('#themeBtn').addEventListener('click', () => cycleTheme());
 $('#keysClose').addEventListener('click', closeKeys);
 $('#keysModal .scrim').addEventListener('click', closeKeys);
 $('#keysQ').addEventListener('input', renderKeys);
@@ -521,8 +529,8 @@ function renderKeys() {
 $('#fileBtn').addEventListener('click', () => {
   const m = $('#menu'); const was = !m.hidden; closePops(); if (was) return;
   const k = id => prettyCombo(keysFor(id, app.keys.over)[0] || '', isMac);
-  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], null, ['newWindow', 'Nowe okno']];
-  m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${i[0] === 'newWindow' ? '' : '<kbd>' + k(i[0]) + '</kbd>'}</button>` : '<div class="msep"></div>').join('');
+  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
+  m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('');
   m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); b.dataset.a === 'newWindow' ? api.newWindow() : run(b.dataset.a); }));
   m.hidden = false;
   const r = $('#fileBtn').getBoundingClientRect();
@@ -540,7 +548,7 @@ function serialize() {
 function load(text, name, path) {
   const d = JSON.parse(text);
   if (d.app !== 'Modo') throw new Error('To nie jest plik Modo');
-  app.model = d.model || newModel(); app.undo = []; app.redo = []; app.selection.clear();
+  app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
   if (d.style && STYLES[d.style]) setStyle(d.style);
@@ -590,6 +598,28 @@ function toast(text, action) {
   if (action) { const b = document.createElement('button'); b.textContent = action[0]; b.addEventListener('click', () => { action[1](); t.hidden = true; }); t.append(b); }
   t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, action ? 7000 : 3200);
 }
+
+app.toast = (t, a) => toast(t, a);
+
+/* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */
+const THEME_NAME = { auto: 'automatyczny', light: 'jasny', dark: 'ciemny' };
+let theme = 'auto';
+try { theme = localStorage.getItem('modo.theme') || 'auto'; } catch (e) {}
+const mq = window.matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const dark = theme === 'dark' || (theme === 'auto' && mq.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  viewer.setDark(dark);
+  api.setTheme?.(dark);
+  $('#pngDarkRow').hidden = !dark;
+}
+function cycleTheme() {
+  theme = { auto: 'light', light: 'dark', dark: 'auto' }[theme] || 'auto';
+  try { localStorage.setItem('modo.theme', theme); } catch (e) {}
+  applyTheme(); toast('Wygląd: ' + THEME_NAME[theme]);
+}
+mq.addEventListener('change', () => { if (theme === 'auto') applyTheme(); });
+applyTheme();
 
 /* ---------- start ---------- */
 setStyle('szkic');

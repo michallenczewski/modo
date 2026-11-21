@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   setDirty: v => ipcRenderer.send('dirty', v),
   closeNow: () => ipcRenderer.send('close-now'),
   newWindow: () => ipcRenderer.send('new-window'),
+  setTheme: dark => ipcRenderer.send('theme', dark),
   onSaveThenClose: on('save-then-close'),
   onFullscreen: on('fullscreen'),
   updateGet: () => ipcRenderer.invoke('update-get'),

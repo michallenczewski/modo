@@ -17,6 +17,7 @@
   </div>
   <div class="sep"></div>
   <button id="underBtn" class="ib" aria-label="Podkład DXF / DWG" title="Podkład DXF / DWG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.3 8 11.3l6-3"/><path d="M2 11 8 14l6-3"/></svg></button>
+  <button id="themeBtn" class="ib" aria-label="Wygląd: jasny albo ciemny" title="Wygląd: automatyczny / jasny / ciemny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/></svg></button>
   <button id="keysBtn" class="ib" aria-label="Skróty klawiszowe" title="Skróty klawiszowe (?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.5"/><path d="M4.5 6.7h.01M7 6.7h.01M9.5 6.7h.01M12 6.7h.01M5 9.4h6"/></svg></button>
   <button id="fileBtn" class="ib" aria-label="Plik" aria-haspopup="menu" title="Plik"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.8h5.2L12 4.6v9.6H4z"/><path d="M9 1.8v3h3"/></svg></button>
   <button id="pngBtn" class="tb" aria-haspopup="dialog" aria-label="Eksport PNG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M5 7.5l3 3 3-3"/><path d="M2.5 11v2.5h11V11"/></svg><span>PNG</span></button>
@@ -60,6 +61,8 @@
   <label class="row"><span class="grow">Przezroczyste tło <span class="lbl">zamiast papieru</span></span><input type="checkbox" class="tg" id="pngTransparent"></label>
   <label class="row"><span class="grow">Podkład CAD</span><input type="checkbox" class="tg" id="pngUnder"></label>
   <label class="row"><span class="grow">Osie</span><input type="checkbox" class="tg" id="pngAxes"></label>
+  <label class="row"><span class="grow">Prowadnice</span><input type="checkbox" class="tg" id="pngGuides"></label>
+  <label class="row" id="pngDarkRow"><span class="grow">Ciemne tło <span class="lbl">jak w oknie</span></span><input type="checkbox" class="tg" id="pngDark"></label>
   <div class="hr"></div>
   <div class="row"><span class="lbl grow ell" id="pngName"></span><button class="primary" id="pngGo">Zapisz…</button></div>
 </section>

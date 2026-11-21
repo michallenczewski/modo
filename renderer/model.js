@@ -25,7 +25,9 @@ export const V = {
 export const EPS = 1e-6;
 const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
 
-export function newModel() { return { shapes: [], lines: [], next: 1 }; }
+export function newModel() { return { shapes: [], lines: [], guides: [], next: 1 }; }
+// starsze pliki nie miały prowadnic
+export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.next ||= 1; return m; }
 export const cloneModel = m => JSON.parse(JSON.stringify(m));
 
 // punkt (a, b, c) w układzie bryły → świat
@@ -85,8 +87,9 @@ export function edges(s) {
     const j = (i + 1) % n, k = (i - 1 + n) % n;
     out.push({ a: top[i], b: top[j], n1: up, n2: sn[i] });
     out.push({ a: bot[i], b: bot[j], n1: down, n2: sn[i] });
-    // krawędź pionowa między bokami w jednej płaszczyźnie nie jest rysowana
-    if (V.dot(sn[k], sn[i]) < 0.9999) out.push({ a: bot[i], b: top[i], n1: sn[k], n2: sn[i] });
+    // krawędź pionowa między bokami w jednej płaszczyźnie nie jest rysowana; na walcu (s.soft) tylko jako kontur
+    const c = V.dot(sn[k], sn[i]);
+    if (c < 0.9999) out.push({ a: bot[i], b: top[i], n1: sn[k], n2: sn[i], soft: !!s.soft && c > 0.94 });
   }
   return out;
 }
@@ -152,7 +155,9 @@ export function extrudeFace(model, s, key, d) {
     const top = key === 'top' || key === 'face';
     const plane = top ? { o: at(s, 0, 0, s.h), u: s.u, v: s.v } : { o: s.o, u: s.v, v: s.u };
     const pts = top ? s.pts : s.pts.map(p => [p[1], p[0]]);
-    return makeShape(model, plane, pts, d, s.color);
+    const ns = makeShape(model, plane, pts, d, s.color);
+    if (s.soft) ns.soft = true;
+    return ns;
   }
   const [a, b, , dTop] = f.verts;
   const u = V.norm(V.sub(b, a)), up = V.sub(dTop, a), hgt = V.len(up), v = V.norm(up);
@@ -189,4 +194,104 @@ export function bounds(model, extra) {
   if (extra) extra.forEach(add);
   if (lo[0] === Infinity) return null;
   return { lo, hi, center: V.lerp(lo, hi, 0.5), radius: Math.max(V.dist(lo, hi) / 2, 1) };
+}
+
+/* ---------- okrąg, przesunięcie, obrót, odsunięcie ---------- */
+export const CIRCLE_SEGMENTS = 24;
+export function circlePts(r, n = CIRCLE_SEGMENTS, a0 = 0) {
+  const pts = []; for (let i = 0; i < n; i++) { const a = a0 + i / n * Math.PI * 2; pts.push([r * Math.cos(a), r * Math.sin(a)]); }
+  return pts;
+}
+
+export function translateShape(s, d) { s.o = V.add(s.o, d); return s; }
+export function translateLine(l, d) { l.a = V.add(l.a, d); l.b = V.add(l.b, d); return l; }
+export function translateGuide(g, d) { g.o = V.add(g.o, d); return g; }
+
+// obrót wektora v wokół osi k (jednostkowej) o kąt t (wzór Rodriguesa)
+export function rotVec(v, k, t) {
+  const c = Math.cos(t), s = Math.sin(t);
+  return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c)));
+}
+const rotPt = (p, c, k, t) => V.add(c, rotVec(V.sub(p, c), k, t));
+export function rotateShape(s, c, k, t) { s.o = rotPt(s.o, c, k, t); s.u = rotVec(s.u, k, t); s.v = rotVec(s.v, k, t); s.n = rotVec(s.n, k, t); return s; }
+export function rotateLine(l, c, k, t) { l.a = rotPt(l.a, c, k, t); l.b = rotPt(l.b, c, k, t); return l; }
+export function rotateGuide(g, c, k, t) { g.o = rotPt(g.o, c, k, t); g.d = rotVec(g.d, k, t); return g; }
+
+// wielokąt (przeciwnie do wskazówek zegara) odsunięty o d: d > 0 do środka; null, gdy się wywija albo znika
+export function offsetPolygon(pts, d) {
+  const n = pts.length, out = [];
+  const nrm = (p, q) => { const e = [q[0] - p[0], q[1] - p[1]], l = Math.hypot(e[0], e[1]) || 1; return [-e[1] / l, e[0] / l]; };   // w lewo = do środka
+  for (let i = 0; i < n; i++) {
+    const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
+    const n1 = nrm(a, b), n2 = nrm(b, c);
+    const p1 = [a[0] + n1[0] * d, a[1] + n1[1] * d], p2 = [b[0] + n1[0] * d, b[1] + n1[1] * d];
+    const q1 = [b[0] + n2[0] * d, b[1] + n2[1] * d], q2 = [c[0] + n2[0] * d, c[1] + n2[1] * d];
+    const x = isect2(p1, [p2[0] - p1[0], p2[1] - p1[1]], q1, [q2[0] - q1[0], q2[1] - q1[1]]);
+    out.push(x || q1);
+  }
+  const A0 = area2(pts), A1 = area2(out);
+  if (A1 <= 1e-9 || Math.sign(A1) !== Math.sign(A0)) return null;
+  // każda krawędź musi zachować kierunek (inaczej wielokąt się wywinął)
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], q = pts[(i + 1) % n], P = out[i], Q = out[(i + 1) % n];
+    if ((q[0] - p[0]) * (Q[0] - P[0]) + (q[1] - p[1]) * (Q[1] - P[1]) <= 0) return null;
+  }
+  return out;
+}
+
+// płaszczyzna i wielokąt 2D dowolnej ściany (do odsunięcia)
+export function facePlane(f) {
+  const n = f.normal, o = f.verts[0];
+  let u = V.norm(V.sub(f.verts[1], f.verts[0]));
+  u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+  const v = V.cross(n, u);
+  let pts = f.verts.map(p => { const d = V.sub(p, o); return [V.dot(d, u), V.dot(d, v)]; });
+  return { o, u, v, n, pts };
+}
+// odległość punktu (2D) od brzegu wielokąta, dodatnia w środku
+export function insideDistance(pts, p) {
+  let dmin = Infinity, inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[j], b = pts[i];
+    if ((b[1] > p[1]) !== (a[1] > p[1]) && p[0] < (a[0] - b[0]) * (p[1] - b[1]) / (a[1] - b[1]) + b[0]) inside = !inside;
+    const ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey || 1;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / L2));
+    dmin = Math.min(dmin, Math.hypot(a[0] + ex * t - p[0], a[1] + ey * t - p[1]));
+  }
+  return inside ? dmin : -dmin;
+}
+
+/* ---------- zamknięte obrysy z luźnych linii ---------- */
+// szuka najkrótszego cyklu przez linię `l` (po końcach innych luźnych linii); gdy leży w jednej płaszczyźnie — tworzy ścianę
+export function closeLoop(model, l) {
+  const key = p => p.map(v => Math.round(v * 1e5)).join(',');
+  const adj = new Map();
+  const add = (k, e) => { let a = adj.get(k); if (!a) adj.set(k, a = []); a.push(e); };
+  for (const e of model.lines) { if (e.id === l.id) continue; add(key(e.a), { line: e, to: e.b }); add(key(e.b), { line: e, to: e.a }); }
+  const start = key(l.b), goal = key(l.a);
+  // szukanie wszerz od końca nowej linii do jej początku
+  const prev = new Map([[start, null]]), q = [l.b];
+  let found = false;
+  while (q.length && !found) {
+    const p = q.shift(), k = key(p);
+    for (const e of adj.get(k) || []) {
+      const k2 = key(e.to); if (prev.has(k2)) continue;
+      prev.set(k2, { from: k, line: e.line, p: e.to }); q.push(e.to);
+      if (k2 === goal) { found = true; break; }
+    }
+    if (prev.size > 5000) break;
+  }
+  if (!found) return null;
+  const loop = [l.b], ids = [l.id];
+  let k = goal; const path = [];
+  while (k !== start) { const s = prev.get(k); path.push(s); k = s.from; }
+  for (let i = path.length - 1; i >= 0; i--) { loop.push(path[i].p); ids.push(path[i].line.id); }
+  loop.pop();   // ostatni punkt to początek nowej linii, ten sam co pierwszy w pętli po obróceniu
+  loop.unshift(l.a);
+  const pts = loop.filter((p, i) => i === 0 || !V.eq(p, loop[i - 1], 1e-6));
+  if (V.eq(pts[0], pts[pts.length - 1], 1e-6)) pts.pop();
+  const f = faceFromLoop(model, pts);
+  if (!f) return null;
+  model.lines = model.lines.filter(e => !ids.includes(e.id));
+  return f;
 }

@@ -68,6 +68,12 @@ function createWindow(openPath) {
 ipcMain.on('dirty', (e, v) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { dirty.set(w, !!v); if (isMac) w.setDocumentEdited(!!v); } });
 ipcMain.on('close-now', e => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { dirty.set(w, false); w.close(); } });
 ipcMain.on('new-window', () => createWindow(null));
+// tryb ciemny: kolor tła okna i przycisków okna na Windows
+ipcMain.on('theme', (e, dark) => {
+  const w = BrowserWindow.fromWebContents(e.sender); if (!w) return;
+  w.setBackgroundColor(dark ? '#161616' : '#f7f7f5');
+  if (isWin) try { w.setTitleBarOverlay({ color: dark ? '#161616' : '#f7f7f5', symbolColor: dark ? '#c4c4c1' : '#4a4945' }); } catch (err) {}
+});
 ipcMain.handle('platform', () => process.platform);
 
 /* ---------- pliki .modo ---------- */

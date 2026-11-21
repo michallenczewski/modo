@@ -13,7 +13,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/viewer.js` | Scena three.js: kamera z osią Z w górę, nawigacja, słońce i cienie, szkicowe krawędzie (shader), eksport PNG, podkład. |
 | `renderer/model.js` | Dane modelu i geometria: bryły, ściany, krawędzie, push/pull, ściana z zamkniętego obrysu. |
 | `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |
-| `renderer/tools.js` | Narzędzia: zaznacz, linia, prostokąt, wypchnij/wciśnij, wiaderko, orbita/przesuw/zoom lewym przyciskiem. |
+| `renderer/tools.js` | Narzędzia: zaznacz, linia, prostokąt, okrąg, łuk, wypchnij/wciśnij, przesuń, obróć, odsunięcie, taśma, gumka, wiaderko, orbita/przesuw/zoom lewym przyciskiem. Każde narzędzie pamięta swoją ostatnią operację (`last` z numerem `app.opSeq`), żeby wymiar wpisany po zakończeniu ją poprawił. |
 | `renderer/keys.js` | Lista poleceń ze skrótami (domyślnie SketchUp), zapis własnych skrótów w `localStorage`. |
 | `renderer/dxf.js` | Czytnik DXF do podkładu (linie, polilinie z łukami, okręgi, łuki, elipsy, splajny, bloki). |
 | `renderer/sun.js` | Położenie słońca (algorytm NOAA) dla daty, godziny i miejsca, z czasem letnim. |
@@ -21,11 +21,13 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 
 ## Model
 
-Szkic to lista **brył** i luźnych **linii**. Bryła to wielokąt w płaszczyźnie (`o`, `u`, `v`) wyciągnięty o `h` wzdłuż `n = u × v`. Płaska ściana (świeży prostokąt albo zamknięty obrys z linii) to bryła o `h = 0`. Bryły są osobne jak grupy w SketchUpie — świadomie nie ma „lepkiej” geometrii, w której ściany się łączą i dzielą. Dzięki temu model jest prosty, a push/pull przewidywalny:
+Szkic to lista **brył**, luźnych **linii** i **prowadnic** (nieskończone linie z taśmy: punkt `o` i kierunek `d`). Bryła to wielokąt w płaszczyźnie (`o`, `u`, `v`) wyciągnięty o `h` wzdłuż `n = u × v`. Płaska ściana (świeży prostokąt albo zamknięty obrys z linii) to bryła o `h = 0`. Bryły są osobne jak grupy w SketchUpie — świadomie nie ma „lepkiej” geometrii, w której ściany się łączą i dzielą. Dzięki temu model jest prosty, a push/pull przewidywalny:
 
 - górna albo dolna ściana zmienia `h` (dolna przesuwa też `o`),
 - boczna ściana przesuwa jedną krawędź wielokąta, a sąsiednie krawędzie się wydłużają,
 - z `Ctrl` (Windows) albo `⌥` (Mac) push/pull robi nową bryłę na wierzchu ściany.
+
+Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę, gdy domkną obrys w jednej płaszczyźnie (`closeLoop` szuka najkrótszego cyklu przez nową linię). Okrąg to wielokąt o 24 bokach z flagą `soft`: krawędzie między jego bokami rysują się tylko jako kontur sylwetki. Przesuwanie i obracanie zmienia `o`, `u`, `v`, `n` bryły (bryła się nie deformuje); kopia dostaje nowe `id`.
 
 Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model, kamera, styl, słońce, podkład (już przeliczony na metry, więc działa na obu komputerach bez oryginalnego DXF).
 
@@ -40,7 +42,7 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 - kolor jaśnieje w głębi,
 - krawędzie przecinające płaszczyznę bliską kamery są przycinane w shaderze.
 
-Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
+Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
 ## Sygnały, że trzeba wrócić do tematu
 

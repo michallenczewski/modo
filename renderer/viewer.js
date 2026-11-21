@@ -11,12 +11,19 @@ export const STYLES = {
   kreska: { name: 'Kreska', paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
   model: { name: 'Model', paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
+// tryb ciemny: ciemny papier, jasna kreska, przygaszone ściany (kolory jak w ciemnej Gapie)
+const DARK = {
+  szkic: { paper: '#1b1b1a', ink: '#e6e2d8', inkFar: '#77736b', shadow: 0.55, wall: '#4d4b47' },
+  kreska: { paper: '#161616', ink: '#e9e9e7', inkFar: '#77776f', shadow: 0.5, wall: '#4a4a48' },
+  model: { paper: '#1d1d1c', ink: '#000000', inkFar: '#000000', shadow: 0.6, wall: '#6a6863' }
+};
 export const DEFAULT_COLOR = '#f6f4ee';
+export const styleOf = (name, dark) => dark ? { ...STYLES[name], ...DARK[name] } : STYLES[name];
 
 /* ---------- shader krawędzi ---------- */
 const EDGE_VS = `
 uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar;
-attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul;
+attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul, soft;
 varying float vHalf, vD, vFade; varying vec3 vCol;
 void main(){
   vec4 va = modelViewMatrix * vec4(ea, 1.0), vb = modelViewMatrix * vec4(eb, 1.0);
@@ -41,7 +48,8 @@ void main(){
   vec3 vd = normalize(cameraPosition - wp);
   float f1 = dot(n1, vd), f2 = hasN2 > 0.5 ? dot(n2, vd) : -1.0;
   bool sil = (f1 > 0.0) != (f2 > 0.0);
-  float w = (sil ? wSil : wIn) * px * wmul;
+  float w = (sil ? wSil : (soft > 0.5 ? 0.0 : wIn)) * px * wmul;
+  if (w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vHalf = w * 0.5;
   vD = side * (vHalf + px);
   s += nrm * vD;
@@ -65,7 +73,7 @@ function buildEdgeGeometry(list) {
   // list: [{ a, b, n1, n2, col:[r,g,b]|null, w }]
   const nQ = list.length * SEG, nV = nQ * 4;
   const A = k => new Float32Array(nV * k);
-  const ea = A(3), eb = A(3), n1 = A(3), n2 = A(3), col = A(3), pos = A(3), t = A(1), side = A(1), seed = A(1), hasN2 = A(1), wmul = A(1);
+  const ea = A(3), eb = A(3), n1 = A(3), n2 = A(3), col = A(3), pos = A(3), t = A(1), side = A(1), seed = A(1), hasN2 = A(1), wmul = A(1), soft = A(1);
   const idx = new Uint32Array(nQ * 6);
   let v = 0, q = 0;
   for (let k = 0; k < list.length; k++) {
@@ -77,7 +85,7 @@ function buildEdgeGeometry(list) {
         ea.set(E.a, v * 3); eb.set(E.b, v * 3); n1.set(E.n1, v * 3); if (E.n2) n2.set(E.n2, v * 3);
         col.set(E.col || [-1, -1, -1], v * 3);
         pos.set(V.lerp(E.a, E.b, tv), v * 3);
-        t[v] = tv; side[v] = sv; seed[v] = sd; hasN2[v] = E.n2 ? 1 : 0; wmul[v] = E.w || 1;
+        t[v] = tv; side[v] = sv; seed[v] = sd; hasN2[v] = E.n2 ? 1 : 0; wmul[v] = E.w || 1; soft[v] = E.soft ? 1 : 0;
         v++;
       }
       const b = v - 4;
@@ -87,7 +95,7 @@ function buildEdgeGeometry(list) {
   const g = new THREE.BufferGeometry();
   const at = (n, arr, k) => g.setAttribute(n, new THREE.BufferAttribute(arr, k));
   at('position', pos, 3); at('ea', ea, 3); at('eb', eb, 3); at('n1', n1, 3); at('n2', n2, 3); at('col', col, 3);
-  at('t', t, 1); at('side', side, 1); at('seed', seed, 1); at('hasN2', hasN2, 1); at('wmul', wmul, 1);
+  at('t', t, 1); at('side', side, 1); at('seed', seed, 1); at('hasN2', hasN2, 1); at('wmul', wmul, 1); at('soft', soft, 1);
   g.setIndex(new THREE.BufferAttribute(idx, 1));
   return g;
 }
@@ -138,6 +146,7 @@ export class Viewer {
     this.modelGroup = new THREE.Group(); this.scene.add(this.modelGroup);
     this.underlayGroup = new THREE.Group(); this.scene.add(this.underlayGroup);
     this.previewGroup = new THREE.Group(); this.scene.add(this.previewGroup);
+    this.guideGroup = new THREE.Group(); this.scene.add(this.guideGroup);
 
     this.edgeMat = new THREE.ShaderMaterial({
       vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false,
@@ -162,6 +171,9 @@ export class Viewer {
     const loop = () => { if (this.needs) { this.needs = false; this.render(); } requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
+
+  st() { return styleOf(this.style, this.dark); }
+  setDark(v) { this.dark = !!v; if (this.model) this.rebuild(); else this.needs = true; }
 
   makeAxes() {
     // osie dzielone na krótkie odcinki: linia, która w całości przechodzi za kamerę, bywa przez niektóre karty gubiona
@@ -196,7 +208,7 @@ export class Viewer {
   rebuild({ highlight } = {}) {
     for (const c of [...this.modelGroup.children]) { c.geometry.dispose(); if (c.material.dispose && c.material !== this.edgeMat) c.material.dispose(); this.modelGroup.remove(c); }
     this.meshes = [];
-    const st = STYLES[this.style];
+    const st = this.st();
     const paper = new THREE.Color(st.paper);
     const edgeList = [];
     for (const s of this.model.shapes) {
@@ -215,7 +227,7 @@ export class Viewer {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
       const sel = this.selected.has(s.id);
-      const base = new THREE.Color(s.color || DEFAULT_COLOR);
+      const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
       if (s.color) base.lerp(paper, st.tint);
       if (sel) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
       const flat = s.h === 0;
@@ -246,8 +258,24 @@ export class Viewer {
       this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
       this.scene.add(this.edgeMesh);
     }
+    this.rebuildGuides();
     this.updateSun();
     this.needs = true;
+  }
+
+  // prowadnice (taśma): długie linie przerywane, jak w SketchUpie
+  rebuildGuides() {
+    for (const c of [...this.guideGroup.children]) { c.geometry.dispose(); c.material.dispose(); this.guideGroup.remove(c); }
+    for (const g of this.model.guides || []) {
+      // krótkie odcinki, jak przy osiach: linia przechodząca za kamerę bywa gubiona
+      const L = 400, N = 80, pts = [];
+      for (let i = 0; i < N; i++) pts.push(new THREE.Vector3(...V.add(g.o, V.mul(g.d, -L + 2 * L * i / N))), new THREE.Vector3(...V.add(g.o, V.mul(g.d, -L + 2 * L * (i + 1) / N))));
+      const sel = this.selected.has('g' + g.id);
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const m = new THREE.LineDashedMaterial({ color: sel ? 0x3f5f99 : (this.dark ? 0x9aa3b5 : 0x6f7c96), dashSize: 0.3, gapSize: 0.3, transparent: true, opacity: sel ? 0.95 : 0.6, depthWrite: false });
+      const l = new THREE.LineSegments(geo, m); l.computeLineDistances(); l.frustumCulled = false;
+      this.guideGroup.add(l);
+    }
   }
 
   // podświetlenie ściany pod kursorem (push/pull) albo bryły (zaznaczanie)
@@ -272,7 +300,7 @@ export class Viewer {
   setSun(cfg) { Object.assign(this.sunCfg, cfg); this.updateSun(); }
   sunInfo() { const c = this.sunCfg; return sunPosition(c.date, c.hour, c.lat, c.lon, c.tz); }
   updateSun() {
-    const st = STYLES[this.style], c = this.sunCfg;
+    const st = this.st(), c = this.sunCfg;
     const { alt, az } = this.sunInfo();
     const up = alt > 0;
     const dir = sunVector(Math.max(alt, 0.5), az);
@@ -291,6 +319,7 @@ export class Viewer {
     this.sun.intensity = 1.7 * k;
     this.hemi.intensity = 1.3 + c.light * 1.5 + (up ? 0 : 0.4);
     this.groundMat.opacity = st.shadow * (0.6 + 0.4 * k);
+    this.groundMat.color.set(this.dark ? 0x000000 : 0x3b362c);
     this.ground.visible = c.shadows && up;
     const gs = Math.max(400, b.radius * 40);
     this.ground.scale.set(gs, gs, 1); this.ground.position.x = ctr.x; this.ground.position.y = ctr.y;
@@ -299,7 +328,7 @@ export class Viewer {
 
   /* ---------- rysowanie klatki ---------- */
   applyStyleUniforms(scale = 1, w = this.w, h = this.h) {
-    const st = STYLES[this.style], u = this.edgeMat.uniforms;
+    const st = this.st(), u = this.edgeMat.uniforms;
     const dpr = this.renderer.getPixelRatio();
     u.res.value.set(w * dpr * scale, h * dpr * scale);
     u.px.value = dpr * scale;
@@ -313,7 +342,7 @@ export class Viewer {
     }
   }
   render() {
-    const st = STYLES[this.style];
+    const st = this.st();
     this.scene.background = new THREE.Color(st.paper);
     this.axes.visible = this.showAxes;
     this.applyStyleUniforms();
@@ -327,8 +356,10 @@ export class Viewer {
   redraw() { this.needs = true; }
 
   // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
-  async exportPng(W, H, { transparent = false, axes = false, underlay = false } = {}) {
-    const r = this.renderer, st = STYLES[this.style];
+  async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false } = {}) {
+    const keepDark = this.dark; if (dark !== keepDark) { this.dark = dark; this.rebuild(); }
+    const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides;
+    const r = this.renderer, st = this.st();
     const keepAxes = this.showAxes, keepUnder = this.underlayGroup.visible, keepMap = this.sun.shadow.mapSize.x;
     this.showAxes = axes; this.axes.visible = axes; this.underlayGroup.visible = underlay && keepUnder;
     this.sun.shadow.mapSize.set(8192, 8192); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
@@ -345,7 +376,8 @@ export class Viewer {
     r.readRenderTargetPixels(rt, 0, 0, W, H, px);
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
-    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder;
+    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides;
+    if (this.dark !== keepDark) { this.dark = keepDark; this.rebuild(); }
     this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
     this.needs = true;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -370,6 +402,14 @@ export class Viewer {
     const rc = new THREE.Raycaster();
     rc.setFromCamera(new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1), this.cam);
     const hits = rc.intersectObjects(this.meshes || [], false);
+    // ściany w tej samej płaszczyźnie (np. ściana z odsunięcia na dachu bryły): wygrywa płaska, potem nowsza
+    if (hits.length > 1) {
+      const d0 = hits[0].distance, eps = Math.max(1e-4, d0 * 1e-5);
+      const near = hits.filter(h => h.distance - d0 < eps);
+      const flat = id => (this.model.shapes.find(s => s.id === id) || {}).h === 0 ? 1 : 0;
+      near.sort((a, b) => flat(b.object.userData.shapeId) - flat(a.object.userData.shapeId) || b.object.userData.shapeId - a.object.userData.shapeId);
+      hits.splice(0, near.length, ...near);
+    }
     for (const h of hits) {
       const key = h.object.userData.keys[h.faceIndex];
       if (!key) continue;

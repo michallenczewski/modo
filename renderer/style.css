@@ -5,6 +5,18 @@
   --menush:0 0 0 1px rgba(0,0,0,.06),0 10px 30px rgba(0,0,0,.10); --kbd:#f3f2ef; --ring:#1a1a19; --tip:#1a1a19; --tiptext:#f7f7f5;
   color-scheme:light;
 }
+/* tryb ciemny — kolory jak w ciemnej Gapie */
+[data-theme=dark]{
+  --bg:#161616; --text:#e9e9e7; --text2:#c4c4c1; --muted:#8d8d89; --muted2:#6f6f6c;
+  --soft:#222221; --hover:#242423; --line:#2a2a29; --card:#1d1d1c; --pill:#363635; --pillsh:0 1px 2px rgba(0,0,0,.4);
+  --menush:0 0 0 1px rgba(255,255,255,.07),0 12px 36px rgba(0,0,0,.5); --kbd:#2e2e2d; --ring:#e9e9e7; --tip:#e9e9e7; --tiptext:#161616;
+  color-scheme:dark;
+}
+[data-theme=dark] .tip kbd{background:#d6d6d3;color:#161616}
+[data-theme=dark] #keysModal .scrim{background:rgba(22,22,22,.6)}
+[data-theme=dark] input[type=range]::-webkit-slider-thumb{background:#e9e9e7}
+[data-theme=dark] input.tg:checked::after{background:#161616}
+[data-theme=dark] .sw{box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;height:100%}
