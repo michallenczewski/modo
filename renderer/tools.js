@@ -4,7 +4,7 @@
 
 import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, edges as shapeEdges } from './model.js';
 import { AXIS_COLOR } from './snap.js';
-import { parseLength, parseLengths, fmtLength } from './units.js';
+import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
 const INK = '#1a1a19', BLUE = '#3f5f99';
 
@@ -156,7 +156,11 @@ export class RectTool extends Tool {
     const d = V.sub(this.cur.p, this.p0);
     return [V.dot(d, this.plane.u), V.dot(d, this.plane.v)];
   }
-  vcb() { const d = this.dims(); return { label: 'Wymiary', value: d ? fmtLength(Math.abs(d[0])).replace(' m', '') + '; ' + fmtLength(Math.abs(d[1])) : '' }; }
+  vcb() {
+    const d = this.dims() || (this.lastValid() ? [this.last.a, this.last.b] : null);
+    return { label: 'Wymiary', value: d ? fmtNum(Math.abs(d[0])) + '; ' + fmtLength(Math.abs(d[1])) : '' };
+  }
+  lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   move(e, x, y) {
     this.cur = this.p0 ? this.app.snapper.find(x, y, { model: this.model, plane: this.plane }) : this.app.snapper.find(x, y, { model: this.model });
   }
@@ -182,10 +186,16 @@ export class RectTool extends Tool {
     if (Math.abs(a) < 1e-6 || Math.abs(b) < 1e-6) return;
     this.app.checkpoint();
     makeShape(this.model, { o: this.p0, u: this.plane.u, v: this.plane.v }, [[0, 0], [a, 0], [a, b], [0, b]], 0);
-    this.app.changed(); this.reset();
+    this.app.changed();
+    // zapamiętujemy, żeby po narysowaniu dało się jeszcze wpisać wymiary (jak w SketchUpie)
+    this.last = { p0: this.p0, plane: this.plane, a, b, seq: this.app.opSeq };
+    this.reset();
   }
   value(str) {
-    const L = parseLengths(str); if (!L || !this.p0) return false;
+    const L = parseLengths(str); if (!L) return false;
+    // po narysowaniu: wpisane wymiary poprawiają ostatni prostokąt
+    if (!this.p0 && this.lastValid() && this.app.revertLast()) { const l = this.last; this.p0 = l.p0; this.plane = l.plane; this.cur = { p: V.add(V.add(l.p0, V.mul(l.plane.u, l.a)), V.mul(l.plane.v, l.b)) }; }
+    if (!this.p0) return false;
     const d = this.dims() || [1, 1];
     const a = L[0] * (Math.sign(d[0]) || 1), b = (L[1] ?? L[0]) * (Math.sign(d[1]) || 1);
     this.create(a, b); return true;
@@ -200,7 +210,7 @@ export class RectTool extends Tool {
     }
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, d ? fmtLength(Math.abs(d[0])).replace(' m', '') + ' × ' + fmtLength(Math.abs(d[1])) : s.label);
+    drawChip(c, P.x, P.y, d ? fmtNum(Math.abs(d[0])) + ' × ' + fmtLength(Math.abs(d[1])) : s.label);
   }
 }
 
@@ -210,12 +220,14 @@ export class PushTool extends Tool {
   hint() {
     const mod = this.app.isMac ? '⌥' : 'Ctrl';
     return this.active
-      ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>nowa bryła</b>' : 'nowa bryła na wierzchu'}.`
-      : `Kliknij ścianę i przesuń, żeby wypchnąć. Dwuklik powtarza ostatnią odległość. <kbd>${mod}</kbd> — nowa bryła.`;
+      ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
+      : `Kliknij ścianę i przesuń, żeby wypchnąć. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
   }
-  vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : '' }; }
+  vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
+  lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   shapeOf(id, m = this.model) { return m.shapes.find(s => s.id === id); }
   move(e, x, y) {
+    this.mx = x; this.my = y;
     if (!this.active) {
       const hit = this.v.pick(x, y);
       this.hit = hit;
@@ -266,13 +278,20 @@ export class PushTool extends Tool {
     if (dist !== this.dist) this.apply(dist);
     this.app.commitLive(A.start);
     this.app.lastPush = dist;
+    // zapamiętujemy, żeby po zakończeniu dało się jeszcze wpisać odległość (jak w SketchUpie)
+    this.last = { ...A, dist, copy: this.copy, seq: this.app.opSeq };
     this.reset();
     this.v.setHoverFace(null);
   }
   value(str) {
     const L = parseLength(str); if (L == null) return false;
     if (this.active) { this.dist = L; this.apply(L); this.finish(L); return true; }
-    // po zakończeniu: zmiana ostatniej odległości (jak w SketchUpie)
+    // po zakończeniu: wpisana odległość poprawia ostatnie wypchnięcie
+    if (this.lastValid() && this.app.revertLast()) {
+      const keep = this.copy; this.copy = this.last.copy;
+      this.active = { ...this.last }; this.dist = L; this.apply(L); this.finish(L);
+      this.copy = keep; return true;
+    }
     return false;
   }
   dbl(e, x, y) {
@@ -296,10 +315,17 @@ export class PushTool extends Tool {
     super.cancel();
   }
   draw(c, v) {
+    // tryb „nowa bryła” (Ctrl / ⌥): plus przy kursorze, jak w SketchUpie
+    if (this.copy && this.mx != null) {
+      c.save(); c.strokeStyle = INK; c.lineWidth = 1.6; c.lineCap = 'round';
+      const x = this.mx + 14, y = this.my - 12;
+      c.beginPath(); c.moveTo(x - 4, y); c.lineTo(x + 4, y); c.moveTo(x, y - 4); c.lineTo(x, y + 4); c.stroke(); c.restore();
+    }
     if (!this.active || !this.cur) return;
     drawMarker(c, v, this.cur.label ? this.cur : null);
     const P = v.toScreen(this.cur.p);
-    drawChip(c, P.x, P.y, (this.cur.label ? this.cur.label + ' · ' : '') + fmtLength(this.dist), this.cur.label ? BLUE : '#4a4945');
+    const txt = (this.copy ? 'Nowa bryła · ' : '') + (this.cur.label ? this.cur.label + ' · ' : '') + fmtLength(this.dist);
+    drawChip(c, P.x, P.y, txt, this.cur.label ? BLUE : '#4a4945');
   }
 }
 

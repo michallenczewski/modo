@@ -7,6 +7,7 @@ import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool } from './
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
+import { UNITS, getUnit, setUnit } from './units.js';
 
 const api = window.api;
 const $ = s => document.querySelector(s);
@@ -51,11 +52,14 @@ const snapper = app.snapper = new Snapper(viewer);
 viewer.selected = app.selection;
 viewer.setModel(app.model);
 
-app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.length > 200) app.undo.shift(); app.redo = []; };
+app.opSeq = 0;   // licznik zmian: narzędzie może poprawić wpisanym wymiarem tylko swoją ostatnią operację
+app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.length > 200) app.undo.shift(); app.redo = []; app.opSeq++; };
+// cofnięcie ostatniej operacji bez zapisywania jej do „ponów” (przed powtórzeniem jej z nowym wymiarem)
+app.revertLast = () => { if (!app.undo.length) return false; app.model = app.undo.pop(); viewer.setModel(app.model); app.opSeq++; return true; };
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); };
 app.changed = () => { viewer.setModel(app.model); app.markDirty(); app.refresh(); };
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
-app.commitLive = start => { app.undo.push(start); app.redo = []; app.markDirty(); viewer.setModel(app.model); app.refresh(); };
+app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; app.markDirty(); viewer.setModel(app.model); app.refresh(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
 app.selectionChanged = () => { viewer.rebuild(); app.refresh(); };
 app.setPaint = c => { app.paint = c; renderSwatches(); };
@@ -123,6 +127,11 @@ function applyVcb(text) {
   if (!ok) toast('Nie rozumiem wymiaru „' + text + '”. Przykłady: 3,5 · 350cm · 6;4');
   app.refresh();
 }
+// jednostka szkicu: liczba wpisana bez jednostki jest w tej jednostce; klik przełącza m → cm → mm
+const unitBtn = $('#unitBtn');
+function renderUnit() { unitBtn.textContent = getUnit(); unitBtn.title = 'Jednostka wymiarów: ' + { m: 'metry', cm: 'centymetry', mm: 'milimetry' }[getUnit()] + ' — kliknij, żeby zmienić'; }
+unitBtn.addEventListener('click', () => { setUnit(UNITS[(UNITS.indexOf(getUnit()) + 1) % UNITS.length]); renderUnit(); app.refresh(); app.markDirtySoft(); });
+renderUnit();
 vcbEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); const t = vcbEl.value; vcbEl.blur(); applyVcb(t); }
   else if (e.key === 'Escape') { vcbEl.blur(); vcbBuf = ''; app.refresh(); }
@@ -261,11 +270,13 @@ function deleteSelection() {
 function undo() {
   if (tool.active || tool.anchor || tool.p0) tool.cancel();
   if (!app.undo.length) return;
+  app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
   app.selection.clear(); app.changed();
 }
 function redo() {
   if (!app.redo.length) return;
+  app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
   app.selection.clear(); app.changed();
 }
@@ -523,7 +534,7 @@ $('#fileBtn').addEventListener('click', () => {
 function serialize() {
   return JSON.stringify({
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
-    sun: viewer.sunCfg, axes: viewer.showAxes, underlay: app.underlay
+    sun: viewer.sunCfg, axes: viewer.showAxes, units: getUnit(), underlay: app.underlay
   });
 }
 function load(text, name, path) {
@@ -533,6 +544,8 @@ function load(text, name, path) {
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
   if (d.style && STYLES[d.style]) setStyle(d.style);
+  if (d.units) { setUnit(d.units); renderUnit(); }
+  app.opSeq++;
   viewer.showAxes = d.axes !== false;
   app.underlay = d.underlay || null; applyUnderlay();
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
@@ -543,7 +556,7 @@ async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma ni
 async function newSketch() {
   if (!(await confirmDiscard())) return;
   app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay();
-  viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
+  app.opSeq++; viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
 }
 async function openSketch(p) {
   if (!p && !(await confirmDiscard())) return;

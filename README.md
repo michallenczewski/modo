@@ -5,7 +5,8 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 ## Co jest w wersji 0.1
 
 - Okno 3D z nawigacją: środkowy przycisk obraca (z ⇧ przesuwa), kółko przybliża do kursora; na gładziku dwa palce obracają, z ⇧ przesuwają, szczypanie przybliża. Prawy przycisk przesuwa widok.
-- Linia, prostokąt, wypchnij/wciśnij z przyklejaniem i liniami pomocniczymi, blokada osi strzałkami (→ czerwona, ← zielona, ↑ niebieska), wymiary z klawiatury (np. `3,5`, `350cm`, `6;4`).
+- Linia, prostokąt, wypchnij/wciśnij z przyklejaniem i liniami pomocniczymi, blokada osi strzałkami (→ czerwona, ← zielona, ↑ niebieska), wymiary z klawiatury (np. `3,5`, `350cm`, `6;4`) — także już po zakończeniu operacji, żeby poprawić ostatni prostokąt albo wypchnięcie. Liczba bez jednostki jest w jednostce szkicu (m, cm albo mm — przełącznik obok pola wymiarów).
+- Push/pull z `Ctrl` (Windows) albo `⌥` (Mac) zostawia istniejące krawędzie i robi nową bryłę, jak w SketchUpie; przy kursorze pojawia się wtedy plus.
 - Kolor bryły (wiaderko, `B`).
 - Słońce według daty i godziny (domyślnie Warszawa), miękkie cienie; trzy style: Szkic, Kreska, Model (`⇧1`, `⇧2`, `⇧3`).
 - Podkład z DXF (warstwy, wysokość, krycie, przyklejanie); DWG przez ODA File Converter, jeśli jest zainstalowany.
