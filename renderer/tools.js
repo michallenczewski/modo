@@ -5,7 +5,7 @@
 import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
 import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
-import { moveMeshPoints, booleanMesh } from './mesh.js';
+import { moveMeshPoints, booleanMesh, isMesh, transformMesh } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
@@ -1128,10 +1128,10 @@ export class MoveTool extends Tool {
 
 /* ---------- obróć ---------- */
 export class RotateTool extends Tool {
-  reset() { this.c = null; this.n = null; this.ref = null; this.targets = null; this.start = null; this.cur = null; this.ang = 0; }
+  reset() { this.c = null; this.n = null; this.ref = null; this.targets = null; this.start = null; this.cur = null; this.ang = 0; this.lockN = null; this.freeN = null; }
   hint() {
     const k = copyKey(this.app);
-    if (!this.c) return `Kliknij środek obrotu (na ziemi albo na ścianie). Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    if (!this.c) return `Kliknij środek obrotu (na ziemi albo na ścianie). Kątomierz układa się na ścianie pod kursorem — przytrzymaj <kbd>⇧</kbd>, żeby zablokować jego płaszczyznę${this.lockN ? ' (<b>zablokowana</b>)' : ''}. Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
     if (!this.ref) return 'Kliknij punkt, od którego liczysz kąt.';
     return `Obróć i kliknij albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}; po kopii <kbd>x6</kbd> robi szyk.`;
   }
@@ -1139,7 +1139,17 @@ export class RotateTool extends Tool {
   vcb() { return { label: 'Kąt', value: this.ref ? fmtDeg(this.ang) : this.lastValid() ? fmtDeg(this.last.ang) : '' }; }
   move(e, x, y) {
     this.mx = x; this.my = y;
-    if (!this.c) { if (!this.app.selection.size) hoverShape(this.app, x, y); this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
+    if (!this.c) {
+      if (!this.app.selection.size) hoverShape(this.app, x, y);
+      this.cur = this.app.snapper.find(x, y, { model: this.model });
+      // przytrzymany Shift zatrzymuje płaszczyznę kątomierza taką, jaka była tuż przed jego naciśnięciem (jak w SketchUpie)
+      if (this.cur) {
+        const n = planeAt(this.app, this.cur).n, had = !!this.lockN;
+        if (e.shiftKey) this.lockN = this.lockN || this.freeN || n; else { this.lockN = null; this.freeN = n; }
+        if (had !== !!this.lockN) this.app.updateHint();
+      }
+      return;
+    }
     this.cur = this.app.snapper.find(x, y, { model: this.start || this.model, plane: { o: this.c, n: this.n }, excludeSet: this.ref && !this.copy ? this.targets : null });
     if (!this.cur || !this.ref) return;
     const d = V.sub(this.cur.p, this.c); if (V.len(d) < 1e-9) return;
@@ -1169,7 +1179,7 @@ export class RotateTool extends Tool {
       const t = targetsAt(this.app, x, y); if (!t) return;
       this.targets = t;
       const pl = planeAt(this.app, this.cur);
-      this.c = this.cur.p.slice(); this.n = pl.n; this.v.setHoverFace(null);
+      this.c = this.cur.p.slice(); this.n = this.lockN || pl.n; this.v.setHoverFace(null);
       return;
     }
     if (!this.ref) {
@@ -1206,13 +1216,14 @@ export class RotateTool extends Tool {
     if (this.copy) drawPlus(c, this.mx, this.my);
     const s = this.cur;
     const ctr = this.c || (s && s.p); if (!ctr) return;
-    const n = this.n || (s ? planeAt(this.app, s).n : [0, 0, 1]);
+    const n = this.n || this.lockN || (s ? planeAt(this.app, s).n : [0, 0, 1]);
     // kątomierz: okrąg z podziałką co 15°
     const R = this.v.pixelSize(ctr) * 70;
     let u = this.ref || (Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)));
     u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
     const w = V.cross(n, u), at = (a, r) => V.add(ctr, V.add(V.mul(u, Math.cos(a) * r), V.mul(w, Math.sin(a) * r)));
-    const col = this.n && Math.abs(this.n[2]) > 0.9 ? AXIS_COLOR.z : this.n && Math.abs(this.n[0]) > 0.9 ? AXIS_COLOR.x : this.n && Math.abs(this.n[1]) > 0.9 ? AXIS_COLOR.y : BLUE;
+    // kolor kątomierza mówi, wokół której osi obracasz (także w podglądzie przed kliknięciem)
+    const col = Math.abs(n[2]) > 0.999 ? AXIS_COLOR.z : Math.abs(n[0]) > 0.999 ? AXIS_COLOR.x : Math.abs(n[1]) > 0.999 ? AXIS_COLOR.y : BLUE;
     const ring = []; for (let i = 0; i < 48; i++) ring.push(at(i / 48 * Math.PI * 2, R));
     drawPoly(c, v, ring, col, true, { width: 1.2 });
     for (let i = 0; i < 24; i++) drawSeg(c, v, at(i / 24 * Math.PI * 2, R * (i % 6 ? 0.9 : 0.8)), at(i / 24 * Math.PI * 2, R), col, { width: 1 });
@@ -1410,82 +1421,168 @@ export class EraserTool extends Tool {
 }
 
 /* ---------- skaluj ---------- */
+// Skalowanie niejednolite: kv[i] to współczynnik wzdłuż osi E[i] (osie prostopadłe), c — punkt, który zostaje w miejscu.
+// Bryła wyciągnięta zostaje bryłą wyciągniętą, jeśli osie skalowania pasują do jej kierunków; w przeciwnym razie staje się siatką.
+export function scaleTargets(m, targets, c, E, kv) {
+  const f = p => { const d = V.sub(p, c); let q = c; for (let i = 0; i < 3; i++) q = V.add(q, V.mul(E[i], V.dot(d, E[i]) * kv[i])); return q; };
+  const uni = Math.abs(kv[0] - kv[1]) < 1e-12 && Math.abs(kv[1] - kv[2]) < 1e-12;
+  eachTarget(m, targets, s => {
+    if (isMesh(s)) return transformMesh(s, f);
+    if (uni) return scaleShape(s, c, kv[0], null);
+    const t = JSON.parse(JSON.stringify(s)); let ok = true;
+    for (let i = 0; i < 3; i++) if (Math.abs(kv[i] - 1) > 1e-12) ok = scaleShape(t, c, kv[i], E[i]) && ok;
+    if (ok) { for (const k of Object.keys(s)) delete s[k]; Object.assign(s, t); }
+    else { toMesh(s, facesOf); transformMesh(s, f); }
+  }, l => { l.a = f(l.a); l.b = f(l.b); }, g => { const o = f(g.o), d = V.sub(f(V.add(g.o, g.d)), o); g.o = o; if (V.len(d) > 1e-12) g.d = V.norm(d); });
+  moveFrames(m, targets, f);
+}
+// Ramka wokół elementów: osie E, połowy wymiarów i środek. Jedna bryła wyciągnięta dostaje ramkę we własnych
+// kierunkach (żeby obrócona bryła skalowała się wzdłuż swoich boków); reszta — w osiach świata.
+export function targetBox(m, targets, world = false) {
+  const pts = []; let single = null, n = 0;
+  eachTarget(m, targets, s => { n++; single = s; for (const p of vertices(s)) pts.push(p); }, l => { n += 2; pts.push(l.a, l.b); }, g => { n += 2; pts.push(g.o); });
+  if (!pts.length) return null;
+  const E = !world && n === 1 && single && !isMesh(single) ? [single.u, single.v, single.n] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of pts) for (let i = 0; i < 3; i++) { const t = V.dot(p, E[i]); lo[i] = Math.min(lo[i], t); hi[i] = Math.max(hi[i], t); }
+  const half = [0, 1, 2].map(i => (hi[i] - lo[i]) / 2);
+  let c = [0, 0, 0]; for (let i = 0; i < 3; i++) c = V.add(c, V.mul(E[i], (lo[i] + hi[i]) / 2));
+  return { E, half, c };
+}
+const boxPoint = (b, sg) => { let p = b.c; for (let i = 0; i < 3; i++) p = V.add(p, V.mul(b.E[i], sg[i] * b.half[i])); return p; };
+
+/* ---------- skaluj: ramka z uchwytami jak w SketchUpie ---------- */
+// Narożnik skaluje całość, środek krawędzi — dwa kierunki, środek ściany — jeden kierunek. Punkt naprzeciwko
+// uchwytu zostaje w miejscu (z ⌥ / Ctrl — środek ramki). Shift przełącza skalowanie na jednolite.
 export class ScaleTool extends Tool {
-  reset() { this.b = null; this.r = null; this.targets = null; this.start = null; this.cur = null; this.k = 1; this.axis = null; }
+  reset() { this.active = null; this.hover = null; this.cur = null; this.k = 1; this.downAt = null; }
+  targets() { return new Set(this.app.selection); }
+  box() { return this.app.selection.size ? targetBox(this.model, this.targets()) : null; }
+  grips(b) {
+    const out = [];
+    for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+      const sg = [x, y, z];
+      if (!x && !y && !z) continue;
+      if (sg.some((q, i) => q && b.half[i] < 1e-7)) continue;   // płaski kierunek nie ma uchwytów
+      out.push({ sg, pos: boxPoint(b, sg), act: sg.map(q => q !== 0) });
+    }
+    return out;
+  }
   hint() {
     const k = copyKey(this.app);
-    if (!this.b) return `Kliknij punkt bazowy skalowania (zaznaczenia albo bryły pod kursorem). Strzałka ustawia oś, wzdłuż której skalujesz. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: od środka</b>' : 'od środka'}.`;
-    if (!this.r) return 'Kliknij punkt odniesienia — jego odległość od bazy to 100%.';
-    return 'Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>, <kbd>-1</kbd> odbija) albo docelową długość z jednostką (np. <kbd>6m</kbd>).';
+    if (this.active) return `Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>; <kbd>-1</kbd> odbija) albo wymiar z jednostką (np. <kbd>6m</kbd>). <kbd>${k}</kbd> — ${this.copy ? '<b>od środka</b>' : 'od środka'}, <kbd>⇧</kbd> — jednolicie.`;
+    if (!this.app.selection.size) return 'Kliknij bryłę, linię albo grupę, którą chcesz skalować.';
+    return `Chwyć uchwyt ramki: narożnik skaluje całość, środek krawędzi — dwa kierunki, środek ściany — jeden kierunek. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: od środka</b>' : 'od środka'}, <kbd>⇧</kbd> — jednolicie.`;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Skala', value: this.r ? fmtK(this.k) : this.lastValid() ? fmtK(this.last.k) : '' }; }
-  center() {
-    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    const add = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
-    eachTarget(this.start || this.model, this.targets, s => vertices(s).forEach(add), l => { add(l.a); add(l.b); }, g => add(g.o));
-    return V.lerp(lo, hi, 0.5);
-  }
+  vcb() { return { label: 'Skala', value: this.active ? fmtK(this.k) : this.lastValid() ? fmtK(this.last.k) : '' }; }
   move(e, x, y) {
-    this.mx = x; this.my = y;
-    if (!this.b) { if (!this.app.selection.size) hoverShape(this.app, x, y); this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
-    const anchor = this.b;
-    this.cur = this.app.snapper.find(x, y, { model: this.start || this.model, anchor, lockAxis: this.app.lockAxis, excludeSet: this.r ? this.targets : null });
-    if (!this.cur || !this.r) return;
-    this.axis = this.app.lockAxis ? AXES[this.app.lockAxis] : null;
-    const dir = this.axis || this.refDir, d0 = this.axis ? V.dot(V.sub(this.r, this.b), this.axis) : V.dist(this.r, this.b);
-    if (Math.abs(d0) < 1e-9) return;
-    this.apply(V.dot(V.sub(this.cur.p, this.b), dir) / d0);
+    this.mx = x; this.my = y; this.shift = e.shiftKey;
+    const A = this.active;
+    if (A) {
+      this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.anchor, d: A.dir }, excludeSet: A.targets });
+      if (this.cur) this.apply(V.dot(V.sub(this.cur.p, A.anchor), A.dir) / A.d0);
+      return;
+    }
+    const b = this.box();
+    if (!b) { hoverShape(this.app, x, y); this.hover = null; return; }
+    this.v.setHoverFace(null);
+    // uchwyt najbliżej kursora; przy remisie na ekranie wygrywa bliższy kamerze
+    const cam = this.v.cam.position.toArray();
+    let best = null, bd = 11;
+    for (const g of this.grips(b)) {
+      const P = this.v.toScreen(g.pos); if (P.behind) continue;
+      const d = Math.hypot(P.x - x, P.y - y) + V.dist(cam, g.pos) * 1e-4;
+      if (d < bd) { bd = d; best = g; }
+    }
+    this.hover = best;
+  }
+  // punkt stały i kierunek ciągnięcia dla uchwytu
+  aim(A) {
+    A.anchor = this.copy ? A.box.c : boxPoint(A.box, A.sg.map(q => -q));
+    A.d0 = V.dist(A.pos, A.anchor); A.dir = V.mul(V.sub(A.pos, A.anchor), 1 / A.d0);
+  }
+  begin(g, b) {
+    this.active = { start: cloneModel(this.model), targets: this.targets(), box: b, sg: g.sg, pos: g.pos, act: g.act };
+    this.aim(this.active); this.k = 1; this.kv = [1, 1, 1];
   }
   apply(k) {
-    const m = cloneModel(this.start), c = this.copy ? this.center() : this.b;
-    let ok = true;
-    eachTarget(m, this.targets, s => { ok = scaleShape(s, c, k, this.axis) && ok; }, l => { l.a = scalePoint(l.a, c, k, this.axis); l.b = scalePoint(l.b, c, k, this.axis); }, g => { g.o = scalePoint(g.o, c, k, this.axis); });
-    moveFrames(m, this.targets, p => scalePoint(p, c, k, this.axis));
-    this.k = k; this.ok = ok;
+    const A = this.active; if (!A) return;
+    if (Math.abs(k) < 1e-3) k = k < 0 ? -1e-3 : 1e-3;
+    const kv = A.act.map(on => on || this.shift ? k : 1), m = cloneModel(A.start);
+    scaleTargets(m, A.targets, A.anchor, A.box.E, kv);
+    this.k = k; this.kv = kv;
     this.app.setModelLive(m);
   }
   down(e, x, y) {
-    if (!this.cur) return;
-    if (!this.b) { const t = targetsAt(this.app, x, y); if (!t) return; this.targets = t; this.b = this.cur.p.slice(); this.v.setHoverFace(null); return; }
-    if (!this.r) {
-      if (V.dist(this.cur.p, this.b) < 1e-6) return;
-      this.r = this.cur.p.slice(); this.refDir = V.norm(V.sub(this.r, this.b));
-      this.axis = this.app.lockAxis ? AXES[this.app.lockAxis] : null;
-      this.start = cloneModel(this.model); this.k = 1; return;
-    }
-    this.finish();
+    if (this.active) return this.finish();
+    const b = this.box();
+    if (b && this.hover) { this.begin(this.hover, b); this.downAt = { x, y }; return; }
+    // klik poza uchwytami wybiera inny element (albo odznacza)
+    const id = pickEntity(this.app, x, y), sel = this.app.selection;
+    sel.clear(); if (id != null) this.app.expand(id).forEach(i => sel.add(i));
+    this.hover = null; this.app.selectionChanged();
+  }
+  up(e, x, y) {
+    // przeciągnięcie uchwytu zamiast dwóch kliknięć
+    if (this.active && this.downAt && Math.hypot(x - this.downAt.x, y - this.downAt.y) > 6) this.finish();
+    this.downAt = null;
   }
   finish() {
-    if (!this.start) return;
-    if (Math.abs(this.k - 1) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
-    if (!this.ok) this.app.toast?.('Część brył da się skalować tylko jednolicie albo wzdłuż ich wysokości.');
-    this.app.commitLive(this.start);
-    this.last = { start: this.start, targets: this.targets, b: this.b, r: this.r, refDir: this.refDir, axis: this.axis, k: this.k, center: this.copy, seq: this.app.opSeq };
-    this.reset();
+    const A = this.active; if (!A) return;
+    this.active = null; this.hover = null;
+    if (Math.abs(this.k - 1) < 1e-9) { this.app.setModelLive(A.start); this.app.refresh(); return; }
+    this.app.commitLive(A.start);
+    this.last = { ...A, k: this.k, shift: this.shift, center: this.copy, seq: this.app.opSeq };
   }
   value(str) {
     const t = String(str).trim();
     let k = null, len = null;
     if (/^[-+]?\d*[.,]?\d+$/.test(t)) k = parseFloat(t.replace(',', '.')); else len = parseLength(t);
     if (k == null && len == null) return false;
-    const go = () => {
-      const d0 = this.axis ? Math.abs(V.dot(V.sub(this.r, this.b), this.axis)) : V.dist(this.r, this.b);
-      this.apply(k != null ? k : len / d0); this.finish(); return true;
-    };
-    if (this.r) return go();
-    if (this.lastValid() && this.app.revertLast()) { const l = this.last; Object.assign(this, { start: l.start, targets: l.targets, b: l.b, r: l.r, refDir: l.refDir, axis: l.axis }); const keep = this.copy; this.copy = l.center; const r = go(); this.copy = keep; return r; }
+    // wymiar z jednostką: tyle ma mieć ramka wzdłuż kierunku uchwytu
+    const go = () => { const A = this.active; this.apply(k != null ? k : len / (A.d0 * (this.copy ? 2 : 1))); this.finish(); return true; };
+    if (this.active) return go();
+    if (this.lastValid() && this.app.revertLast()) {
+      const l = this.last, keep = [this.copy, this.shift];
+      this.copy = l.center; this.shift = l.shift; this.active = { ...l };
+      const r = go(); [this.copy, this.shift] = keep; return r;
+    }
     return false;
   }
-  key(e) { if (isCopyKey(this.app, e)) { this.copy = !this.copy; if (this.r) this.apply(this.k); this.app.updateHint(); return true; } return false; }
-  cancel() { if (this.start) this.app.setModelLive(this.start); super.cancel(); }
+  key(e) {
+    if (isCopyKey(this.app, e)) { this.copy = !this.copy; if (this.active) { this.aim(this.active); this.apply(this.k); } this.app.updateHint(); return true; }
+    if (e.key === 'Shift' && this.active && !this.shift) { this.shift = true; this.apply(this.k); }
+    return false;
+  }
+  cancel() { if (this.active) this.app.setModelLive(this.active.start); this.reset(); this.app.refresh(); }
   draw(c, v) {
-    if (this.copy) drawPlus(c, this.mx, this.my);
-    const s = this.cur; if (!s) return;
-    if (this.b) drawSeg(c, v, this.b, this.r || s.p, INK, { width: 1, dash: [3, 3] });
-    if (this.r) drawSeg(c, v, this.b, s.p, this.axis ? AXIS_COLOR[this.app.lockAxis] || INK : INK, { width: 1.5 });
-    drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.r ? 'Skala ' + fmtK(this.k) : s.label);
+    const A = this.active, b = A ? A.box : this.box(); if (!b) return;
+    // podczas skalowania ramka rośnie razem z elementami
+    const f = A ? p => { const d = V.sub(p, A.anchor); let q = A.anchor; for (let i = 0; i < 3; i++) q = V.add(q, V.mul(b.E[i], V.dot(d, b.E[i]) * this.kv[i])); return q; } : p => p;
+    const corner = (x, y, z) => f(boxPoint(b, [x, y, z]));
+    const frame = v.dark ? '#c9b86a' : '#a08a2e';
+    for (const [a, d] of [[0, 1], [1, 2], [2, 0]]) for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) {
+      const p = [0, 0, 0], q = [0, 0, 0], o = 3 - a - d;
+      p[a] = s1; p[d] = s2; p[o] = -1; q[a] = s1; q[d] = s2; q[o] = 1;
+      drawSeg(c, v, corner(...p), corner(...q), frame, { width: 1 });
+    }
+    const dot = (p, col, r = 3.5) => { const P = v.toScreen(p); if (P.behind) return; c.save(); c.fillStyle = col; c.strokeStyle = v.dark ? '#111' : '#fff'; c.lineWidth = 1; c.beginPath(); c.rect(P.x - r, P.y - r, 2 * r, 2 * r); c.fill(); c.stroke(); c.restore(); };
+    const GREEN = '#4f8a46', RED = '#c0533f';
+    if (A) {
+      drawSeg(c, v, A.anchor, f(A.pos), INK, { width: 1, dash: [3, 3] });
+      dot(A.anchor, RED, 4); dot(f(A.pos), RED, 4.5);
+      const P = v.toScreen(f(A.pos));
+      drawChip(c, P.x, P.y, 'Skala ' + fmtK(this.k) + (this.shift && !A.act.every(Boolean) ? ' · jednolicie' : '') + (this.copy ? ' · od środka' : ''));
+      return;
+    }
+    for (const g of this.grips(b)) dot(g.pos, GREEN);
+    if (this.hover) {
+      const anchor = this.copy ? b.c : boxPoint(b, this.hover.sg.map(q => -q));
+      dot(anchor, RED, 4); dot(this.hover.pos, RED, 4.5);
+      const n = this.hover.act.filter(Boolean).length, P = v.toScreen(this.hover.pos);
+      drawChip(c, P.x, P.y, n === 3 ? 'Cała bryła' : n === 2 ? 'Dwa kierunki' : 'Jeden kierunek');
+    }
   }
 }
 const fmtK = k => (Math.round(k * 1000) / 1000).toString().replace('.', ',') + '×';

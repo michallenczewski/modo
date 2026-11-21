@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { scaleTargets, targetBox, pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -68,6 +68,10 @@ const IC = {
   viewNext: '<path d="M3 8h9.5M9 4.5 12.5 8 9 11.5"/>',
   zoomWin: '<circle cx="7" cy="7" r="4.7"/><path d="M10.5 10.5 14 14"/><rect x="5" y="5.3" width="4" height="3.4" rx=".4"/>',
   xray: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2" stroke-dasharray="1.5 1.6"/>',
+  // odbicie: strzałka w obie strony w kolorze osi i przerywana płaszczyzna lustra
+  flipX: '<path d="M8 2.5v11" stroke-dasharray="1.6 1.8"/><path d="M2.5 8h11M4.5 6 2.5 8l2 2M11.5 6l2 2-2 2" stroke="#c0533f"/>',
+  flipY: '<path d="M3 3l10 10" stroke-dasharray="1.6 1.8"/><path d="M3.5 12.5l9-9M3.5 9.7v2.8h2.8M9.7 3.5h2.8v2.8" stroke="#4f8a46"/>',
+  flipZ: '<path d="M2.5 8h11" stroke-dasharray="1.6 1.8"/><path d="M8 2.5v11M6 4.5 8 2.5l2 2M6 11.5l2 2 2-2" stroke="#3f63a8"/>',
   edit: '<path d="M2.5 13.5 3.3 10.4 10.9 2.8a1.2 1.2 0 0 1 1.7 0l.6.6a1.2 1.2 0 0 1 0 1.7L5.6 12.7z"/><path d="M9.6 4.1l2.3 2.3"/>'
 };
 const ic = n => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -428,6 +432,9 @@ function run(act) {
     case 'paste': pasteClip(false); break;
     case 'pasteInPlace': pasteClip(true); break;
     case 'lock': lockSel(); break;
+    case 'flipX': flipSel(0); break;
+    case 'flipY': flipSel(1); break;
+    case 'flipZ': flipSel(2); break;
     case 'unlockAll': unlockAll(); break;
     case 'viewPrev': viewStep(-1); break;
     case 'viewNext': viewStep(1); break;
@@ -619,6 +626,18 @@ function unlockAll() {
   app.checkpoint();
   for (const e of [...app.model.shapes, ...app.model.lines]) delete e.locked;
   app.changed(); app.selectionChanged();
+}
+
+/* ---------- odbicie lustrzane ---------- */
+// Zaznaczenie odbija się wzdłuż osi świata względem środka swojej ramki (jak „Odbij wzdłuż” w SketchUpie).
+function flipSel(axis) {
+  const t = new Set(app.selection), b = targetBox(app.model, t, true);
+  if (!b) return toast('Zaznacz bryły, linie albo grupę, które mają zostać odbite (dwuklik zaznacza całą bryłę).');
+  app.checkpoint();
+  const kv = [1, 1, 1]; kv[axis] = -1;
+  scaleTargets(app.model, t, b.c, b.E, kv);
+  app.changed(); app.selectionChanged();
+  toast('Odbito wzdłuż osi ' + ['czerwonej', 'zielonej', 'niebieskiej'][axis]);
 }
 
 /* ---------- schowek: kopiuj, wytnij, wklej ---------- */
@@ -996,7 +1015,7 @@ const VIEW_ICONS = [['viewPrev', 'Poprzedni widok'], ['viewNext', 'Następny wid
 const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
 const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
 // okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
-const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']]];
+const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej']]];
 function renderEditPop() {
   const p = $('#editPop');
   p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
@@ -1334,6 +1353,7 @@ function openContext(x, y, cx, cy) {
     items.push(null);
     if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? 'Bryła zwykła (nie wycina)' : 'Bryła wycinająca']);
     if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', 'Suma brył'], ['solidIntersect', 'Część wspólna'], ['solidSubtract', 'Odejmij od pierwszej'], ['solidTrim', 'Przytnij pierwszą']);
+    items.push(null, ['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej']);
     items.push(null, ['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej']);
     items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['lock', 'Zablokuj'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
   } else {
