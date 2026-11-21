@@ -12,6 +12,13 @@
     platform: /Mac/.test(navigator.platform) ? 'darwin' : /Win/.test(navigator.platform) ? 'win32' : 'linux',
     async openFile() { const f = await pick('.modo'); return f ? { path: null, name: f.name.replace(/\.modo$/i, ''), text: await f.text() } : null; },
     async saveFile(p, text, suggested) { download(new Blob([text], { type: 'application/json' }), (suggested || 'Szkic') + '.modo'); return { path: null, name: suggested || 'Szkic' }; },
+    async saveCopy(text, suggested) { download(new Blob([text], { type: 'application/json' }), (suggested || 'Szkic — kopia') + '.modo'); return true; },
+    async recentList() { return []; },
+    // autozapis w przeglądarce: jedna kopia w pamięci przeglądarki
+    async autosave(key, rec) { try { localStorage.setItem('modo.autozapis', JSON.stringify({ key, ...rec })); return true; } catch (e) { return false; } },
+    async autosaveClear(key) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); if (r && r.key === key) localStorage.removeItem('modo.autozapis'); } catch (e) {} return true; },
+    async autosaveRead(key) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); return r && r.key === key ? r : null; } catch (e) { return null; } },
+    async autosaveList(mine) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); return r && r.key !== mine ? [{ key: r.key, name: r.name, path: null, time: r.time }] : []; } catch (e) { return []; } },
     async savePng(buf, suggested) { download(new Blob([buf], { type: 'image/png' }), (suggested || 'Modo') + '.png'); return (suggested || 'Modo') + '.png'; },
     async saveObj(obj, mtl, suggested) { const n = suggested || 'Modo'; download(new Blob([obj.replace(/^mtllib .*$/m, 'mtllib ' + n + '.mtl')], { type: 'text/plain' }), n + '.obj'); setTimeout(() => download(new Blob([mtl], { type: 'text/plain' }), n + '.mtl'), 300); return n + '.obj'; },
     // w przeglądarce klucz leży w pamięci przeglądarki, a zapytanie idzie wprost do Gemini

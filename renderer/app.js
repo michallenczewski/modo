@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -49,7 +49,26 @@ const IC = {
   text: '<path d="M3.5 4h9M8 4v8.5"/>',
   protractor: '<path d="M2.5 12.5h11"/><path d="M2.5 12.5A5.5 5.5 0 0 1 13.5 12.5"/><path d="M8 12.5 11.5 5" stroke-dasharray="1.4 1.6"/>',
   pie: '<path d="M8 8V2.5A5.5 5.5 0 1 1 2.5 8z"/>',
-  extents: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>'
+  extents: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>',
+  // polecenia bez przycisku na pasku narzędzi: okienko Edycja i okienko Widok
+  undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H6"/>',
+  redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H10"/>',
+  cutClip: '<circle cx="4" cy="11.5" r="1.8"/><circle cx="12" cy="11.5" r="1.8"/><path d="M5.2 10.2 12.5 2.5M10.8 10.2 3.5 2.5"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.7a1.2 1.2 0 0 0-1.2-1.2H3.7a1.2 1.2 0 0 0-1.2 1.2v5.6a1.2 1.2 0 0 0 1.2 1.2h1.8"/>',
+  paste: '<rect x="3" y="3.5" width="10" height="10.5" rx="1.2"/><path d="M6 3.5V2.3h4v1.2"/><path d="M6 7.5h4M6 10.5h4"/>',
+  pasteInPlace: '<rect x="3" y="3.5" width="10" height="10.5" rx="1.2"/><path d="M6 3.5V2.3h4v1.2"/><circle cx="8" cy="9" r="1.5"/><path d="M8 6.3v1.2M8 10.5v1.2M5.3 9h1.2M9.5 9h1.2"/>',
+  selectAll: '<rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 2"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5" fill="currentColor"/>',
+  selectNone: '<rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 2"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>',
+  selectInvert: '<rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 2"/><path d="M5.5 10.5v-5h5z" fill="currentColor"/><path d="M5.5 10.5h5v-5"/>',
+  hideSel: '<path d="M2.5 2.5l11 11M6.6 4A6.3 6.3 0 0 1 8 3.8c4 0 6.2 4.2 6.2 4.2a11 11 0 0 1-1.8 2.3M10.6 11.6A5.8 5.8 0 0 1 8 12.2C4 12.2 1.8 8 1.8 8a11 11 0 0 1 2.4-2.8"/>',
+  unhideAll: '<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  unlockAll: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.8-1"/>',
+  viewPrev: '<path d="M13 8H3.5M7 4.5 3.5 8 7 11.5"/>',
+  viewNext: '<path d="M3 8h9.5M9 4.5 12.5 8 9 11.5"/>',
+  zoomWin: '<circle cx="7" cy="7" r="4.7"/><path d="M10.5 10.5 14 14"/><rect x="5" y="5.3" width="4" height="3.4" rx=".4"/>',
+  xray: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2" stroke-dasharray="1.5 1.6"/>',
+  edit: '<path d="M2.5 13.5 3.3 10.4 10.9 2.8a1.2 1.2 0 0 1 1.7 0l.6.6a1.2 1.2 0 0 1 0 1.7L5.6 12.7z"/><path d="M9.6 4.1l2.3 2.3"/>'
 };
 const ic = n => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
@@ -75,7 +94,10 @@ app.opSeq = 0;   // licznik zmian: narzędzie może poprawić wpisanym wymiarem 
 app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.length > 200) app.undo.shift(); app.redo = []; app.opSeq++; };
 // cofnięcie ostatniej operacji bez zapisywania jej do „ponów” (przed powtórzeniem jej z nowym wymiarem)
 app.revertLast = () => { if (!app.undo.length) return false; app.model = app.undo.pop(); viewer.setModel(app.model); app.opSeq++; return true; };
-app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); };
+// autozapis: `seq` rośnie przy każdej zmianie, `saved` to stan ostatnio zapisany w kopii; `key` wyróżnia to okno
+const auto = { key: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), seq: 0, saved: 0, written: false };
+function autoClear() { auto.saved = auto.seq; if (auto.written) { auto.written = false; api.autosaveClear(auto.key); } }
+app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); if (v) auto.seq++; else autoClear(); };
 app.changed = () => { postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
 // po każdej zmianie: nowe elementy w edytowanej grupie należą do niej, a inne wystąpienia komponentu dostają tę samą zmianę
 function postEdit(prev = app.undo[app.undo.length - 1]) {
@@ -94,7 +116,12 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
 app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
-app.selectionChanged = () => { viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
+// zablokowane elementy nie mogą trafić do zaznaczenia żadną drogą (ramka, panel, „zaznacz wszystko”)
+function dropLocked() {
+  const m = app.model; if (!m.shapes.some(s => s.locked) && !m.lines.some(l => l.locked)) return;
+  for (const id of [...app.selection]) { const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : String(id)[0] === 'l' ? m.lines.find(l => 'l' + l.id === id) : null; if (e && e.locked) app.selection.delete(id); }
+}
+app.selectionChanged = () => { dropLocked(); viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
 app.setPaint = (c, a) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; renderSwatches(); };
 
 /* ---------- grupy i komponenty ---------- */
@@ -164,9 +191,11 @@ const tools = {
   place: new PlaceTool(app), section: new SectionTool(app), dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
-  orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
+  orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom'), zoomWin: new ZoomWinTool(app)
 };
-let tool = tools.select;
+let tool = tools.select, toolId = 'select', toolBefore = 'select';
+// po powiększeniu ramką wraca narzędzie, którym pracowałeś wcześniej
+app.zoomWinDone = () => setTool(toolBefore);
 const TOOL_NAME = { tape: 'Taśma i prowadnice', protractor: 'Kątomierz', dim: 'Wymiar', text: 'Opis', rect: 'Prostokąt', rrect: 'Prostokąt obrócony', circle: 'Okrąg', polygon: 'Wielokąt', arc: 'Łuk przez dwa punkty', carc: 'Łuk ze środka', pie: 'Wycinek koła' };
 // rodziny narzędzi: jeden przycisk na pasku, warianty w wysuwanym menu po najechaniu
 const FAMILIES = { rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'] };
@@ -212,12 +241,13 @@ function showFlyout(b, fam) {
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
-  tool.deactivate(); tool = tools[id]; tool.activate();
+  if (id === 'zoomWin' && toolId !== 'zoomWin') toolBefore = toolId;
+  tool.deactivate(); tool = tools[id]; toolId = id; tool.activate();
   app.lockAxis = null; vcbBuf = '';
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
@@ -376,7 +406,22 @@ function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': setTool(act); break;
+    case 'selectNone': app.selection.clear(); app.selectionChanged(); break;
+    case 'selectInvert': selectInvert(); break;
+    case 'copy': copySel(); break;
+    case 'cutClip': if (copySel()) deleteSelection(); break;
+    case 'paste': pasteClip(false); break;
+    case 'pasteInPlace': pasteClip(true); break;
+    case 'lock': lockSel(); break;
+    case 'unlockAll': unlockAll(); break;
+    case 'viewPrev': viewStep(-1); break;
+    case 'viewNext': viewStep(1); break;
+    case 'xray': viewer.xray = !viewer.xray; viewer.rebuild(); viewer.redraw(); renderViewPop(); toast(viewer.xray ? 'Prześwit włączony' : 'Prześwit wyłączony'); break;
+    case 'saveCopy': saveCopy(); break;
+    case 'revert': revertSketch(); break;
+    case 'updateCheck': checkUpdate(); break;
+    case 'edit': openPop('#editPop', $('#editBtn')); break;
     case 'hideRest': hideRest(); break;
     case 'hideSimilar': hideSimilar(); break;
     case 'hideSel': hideSel(); break;
@@ -391,7 +436,7 @@ function run(act) {
     case 'sectionToggle': sectionToggle(); break;
     case 'sectionPlanes': viewer.showSectPlanes = !viewer.showSectPlanes; viewer.redraw(); renderViewPop(); toast(viewer.showSectPlanes ? 'Płaszczyzny przekroju widoczne' : 'Płaszczyzny przekroju ukryte'); break;
     case 'sectionFlip': { const q = selectedSections()[0]; if (q) { app.checkpoint(); q.n = q.n.map(x => -x); app.changed(); } break; }
-    case 'viewIso': case 'viewTop': case 'viewFront': case 'viewRight': case 'viewBack': case 'viewLeft': viewer.setView(act.slice(4).toLowerCase()); renderViewChip(); renderViewPop(); break;
+    case 'viewIso': case 'viewTop': case 'viewFront': case 'viewRight': case 'viewBack': case 'viewLeft': case 'viewBottom': viewer.setView(act.slice(4).toLowerCase()); renderViewChip(); renderViewPop(); break;
     case 'twoPoint': viewer.setTwoPoint(!viewer.twoPoint); toast(viewer.twoPoint ? 'Perspektywa dwupunktowa' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'views': openPop('#viewPop', $('#viewBtn')); break;
     case 'sceneAdd': addScene(); break;
@@ -410,7 +455,7 @@ function run(act) {
     case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
     case 'delete': deleteSelection(); break;
-    case 'selectAll': app.selection.clear(); app.model.shapes.forEach(s => app.selection.add(s.id)); app.model.lines.forEach(l => app.selection.add('l' + l.id)); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
+    case 'selectAll': app.selection.clear(); app.model.shapes.forEach(s => { if (!s.locked) app.selection.add(s.id); }); app.model.lines.forEach(l => { if (!l.locked) app.selection.add('l' + l.id); }); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
     case 'style1': setStyle('szkic'); break;
@@ -465,6 +510,8 @@ function renderViewChip() {
   renderPanel();
   const n = hiddenCount(), b = $('#hiddenChip');
   b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
+  const nl = lockedCount(), lb = $('#lockChip');
+  lb.hidden = !nl; lb.textContent = 'Zablokowane: ' + nl + ' · odblokuj';
   $('#orthoChip').hidden = !viewer.ortho && !viewer.twoPoint; $('#orthoChip').textContent = viewer.ortho ? 'Rzut równoległy' : 'Perspektywa dwupunktowa';
   const ed = app.editing && app.model.groups.find(g => g.id === app.editing), eb = $('#editChip');
   eb.hidden = !ed && app.editSolid == null;
@@ -520,6 +567,115 @@ function redo() {
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 
+/* ---------- zaznaczenie: odwrócenie, blokada ---------- */
+// to, co da się teraz zaznaczyć: widoczne, niezablokowane, w edytowanej grupie (albo w całym modelu)
+function selectable() {
+  const m = app.model, out = [], ok = (e, id) => !e.locked && !isHidden(m, e) && (app.editing == null || app.inEditing(id));
+  for (const s of m.shapes) if (ok(s, s.id)) out.push(s.id);
+  for (const l of m.lines) if (ok(l, 'l' + l.id)) out.push('l' + l.id);
+  return out;
+}
+function selectInvert() {
+  const was = new Set(app.selection); app.selection.clear();
+  for (const id of selectable()) if (!was.has(id)) app.selection.add(id);
+  app.selectionChanged();
+}
+const lockedCount = () => app.model.shapes.filter(s => s.locked).length + app.model.lines.filter(l => l.locked).length;
+function lockSel() {
+  const m = app.model, es = [...m.shapes.filter(s => app.selection.has(s.id)), ...m.lines.filter(l => app.selection.has('l' + l.id))];
+  if (!es.length) return toast('Zaznacz bryły albo linie, które mają zostać zablokowane.');
+  app.checkpoint();
+  for (const e of es) e.locked = true;
+  app.selection.clear(); app.changed(); app.selectionChanged();
+  toast('Zablokowano: ' + es.length + '. Zablokowanych elementów nie da się zaznaczyć ani zmienić.', ['Odblokuj', unlockAll]);
+}
+function unlockAll() {
+  if (!lockedCount()) return toast('Nic nie jest zablokowane.');
+  app.checkpoint();
+  for (const e of [...app.model.shapes, ...app.model.lines]) delete e.locked;
+  app.changed(); app.selectionChanged();
+}
+
+/* ---------- schowek: kopiuj, wytnij, wklej ---------- */
+// Schowek leży w pamięci przeglądarki, więc działa też między oknami programu. Współrzędne są zapisane
+// względem środka podstawy zaznaczenia (`o`), żeby wklejanie mogło postawić całość pod kursorem.
+const CLIP = 'modo.schowek';
+let clipMem = null;
+app.docId = Math.random().toString(36).slice(2);   // schowek z tego samego szkicu zachowuje warstwy i powiązania komponentów
+function packSelection(ids) {
+  const m = app.model;
+  const shapes = m.shapes.filter(s => ids.has(s.id)), lines = m.lines.filter(l => ids.has('l' + l.id));
+  if (!shapes.length && !lines.length) return null;
+  const b = bounds(m, null, [...ids]), o = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, b.lo[2]], neg = o.map(x => -x);
+  const groups = groupsWhollyIn(m, ids).map(g => JSON.parse(JSON.stringify(g))), gset = new Set(groups.map(g => g.id));
+  for (const g of groups) { if (g.p == null || !gset.has(g.p)) delete g.p; if (g.frame) g.frame.o = g.frame.o.map((x, k) => x + neg[k]); }
+  const clean = c => { if (c.g == null || !gset.has(c.g)) delete c.g; delete c.hidden; delete c.locked; return c; };
+  const S = shapes.map(s => { const c = JSON.parse(JSON.stringify(s)); translateShape(c, neg); return clean(c); });
+  const L = lines.map(l => { const c = JSON.parse(JSON.stringify(l)); c.a = c.a.map((x, k) => x + neg[k]); c.b = c.b.map((x, k) => x + neg[k]); return clean(c); });
+  return { paste: true, name: 'Schowek', doc: app.docId, o, shapes: S, lines: L, groups };
+}
+function copySel() {
+  const item = packSelection(new Set(app.selection));
+  if (!item) { toast('Zaznacz bryły albo linie do skopiowania.'); return false; }
+  clipMem = item;
+  try { localStorage.setItem(CLIP, JSON.stringify(item)); } catch (e) {}
+  toast('Skopiowano: ' + (item.shapes.length + item.lines.length));
+  return true;
+}
+function readClip() {
+  try { const t = localStorage.getItem(CLIP); if (t) return JSON.parse(t); } catch (e) {}
+  return clipMem;
+}
+function pasteClip(inPlace) {
+  const item = readClip();
+  if (!item || !(item.shapes.length + (item.lines || []).length)) return toast('Schowek jest pusty — najpierw skopiuj zaznaczenie.');
+  if (inPlace) return insertItems(item, item.o);
+  startPlace(item);
+}
+// wstawia elementy schowka w punkcie p: nowe numery, grupy zachowane; komponenty z tego samego szkicu zostają wystąpieniami
+function insertItems(item, p) {
+  const m = app.model, data = JSON.parse(JSON.stringify(item)), same = item.doc === app.docId, E = app.editing;
+  app.checkpoint();
+  const gmap = new Map(), defs = new Map(), out = [];
+  for (const g of data.groups || []) gmap.set(g.id, m.next++);
+  for (const g of data.groups || []) {
+    g.id = gmap.get(g.id);
+    if (g.p != null && gmap.has(g.p)) g.p = gmap.get(g.p); else if (E != null) g.p = E; else delete g.p;
+    if (g.frame) g.frame.o = g.frame.o.map((x, k) => x + p[k]);
+    if (g.kind === 'comp' && !same) { if (!defs.has(g.def)) defs.set(g.def, 'd' + m.next++); g.def = defs.get(g.def); }
+    if (!same) delete g.tag;
+    m.groups.push(g);
+  }
+  const place = e => { if (e.g != null && gmap.has(e.g)) e.g = gmap.get(e.g); else if (E != null) e.g = E; else delete e.g; if (!same) delete e.tag; };
+  for (const s of data.shapes) { s.id = m.next++; place(s); translateShape(s, p); m.shapes.push(s); out.push(s.id); }
+  for (const l of data.lines || []) { l.id = m.next++; place(l); l.a = l.a.map((x, k) => x + p[k]); l.b = l.b.map((x, k) => x + p[k]); m.lines.push(l); out.push('l' + l.id); }
+  app.changed();
+  app.selection.clear(); out.forEach(i => app.selection.add(i));
+  setTool('select'); app.selectionChanged();
+}
+
+/* ---------- historia widoków: poprzedni i następny ---------- */
+// Kamera jest próbkowana co chwilę; gdy przestaje się zmieniać, poprzednie ustawienie trafia do historii.
+const camHist = { back: [], fwd: [], last: null, cur: null, moving: false };
+const camNow = () => JSON.stringify(viewer.getCamera());
+function camReset() { camHist.back = []; camHist.fwd = []; camHist.last = camHist.cur = camNow(); camHist.moving = false; }
+setInterval(() => {
+  const c = camNow();
+  if (camHist.last == null) { camHist.last = camHist.cur = c; return; }
+  if (c !== camHist.cur) { camHist.cur = c; camHist.moving = true; return; }
+  if (!camHist.moving) return;
+  camHist.moving = false;
+  if (c !== camHist.last) { camHist.back.push(camHist.last); if (camHist.back.length > 40) camHist.back.shift(); camHist.fwd = []; camHist.last = c; }
+}, 300);
+function viewStep(d) {
+  const from = d < 0 ? camHist.back : camHist.fwd, to = d < 0 ? camHist.fwd : camHist.back;
+  if (!from.length) return toast(d < 0 ? 'Nie ma wcześniejszego widoku.' : 'Nie ma następnego widoku.');
+  to.push(camNow());
+  viewer.setCamera(JSON.parse(from.pop()));
+  camHist.last = camHist.cur = camNow(); camHist.moving = false;
+  renderViewChip(); renderViewPop();
+}
+
 /* ---------- styl ---------- */
 function setStyle(s) {
   viewer.setStyle(s);
@@ -543,6 +699,7 @@ function openPop(sel, anchor, side) {
   if (sel === '#viewPop') renderViewPop();
   if (sel === '#libPop') renderLib();
   if (sel === '#aiPop') renderAi();
+  if (sel === '#editPop') renderEditPop();
 }
 function closePops() {
   let any = false;
@@ -751,6 +908,7 @@ function startPlace(item) {
 }
 // wstawienie: kopie elementów z nowymi numerami, przesunięte do punktu, opakowane w komponent
 app.placeItem = (item, p) => {
+  if (item.paste) return insertItems(item, p);
   const m = app.model, data = JSON.parse(JSON.stringify(item));
   app.checkpoint();
   const gid = m.next++, gmap = new Map(), smap = new Map();
@@ -800,7 +958,19 @@ function sectionToggle() {
 }
 
 /* ---------- widok, kamera, sceny ---------- */
-const VIEWS = [['viewIso', 'Izometria'], ['viewTop', 'Góra'], ['viewFront', 'Przód'], ['viewRight', 'Prawy'], ['viewBack', 'Tył'], ['viewLeft', 'Lewy']];
+const VIEWS = [['viewIso', 'Izometria'], ['viewTop', 'Góra'], ['viewFront', 'Przód'], ['viewRight', 'Prawy'], ['viewBack', 'Tył'], ['viewLeft', 'Lewy'], ['viewBottom', 'Dół']];
+// polecenia widoku pokazane samymi ikonami (nazwa i skrót w podpowiedzi)
+const VIEW_ICONS = [['viewPrev', 'Poprzedni widok'], ['viewNext', 'Następny widok'], ['zoomWin', 'Powiększ okno (ramką)'], ['extents', 'Pokaż cały model'], ['xray', 'Prześwit']];
+const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
+const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
+// okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
+const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']]];
+function renderEditPop() {
+  const p = $('#editPop');
+  p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
+  p.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const a = b.dataset.a; if (a === 'paste') closePops(); run(a); }));
+}
+$('#editBtn').addEventListener('click', () => openPop('#editPop', $('#editBtn')));
 app.scenes = []; app.scene = -1;
 const mmOf = fov => Math.round(12 / Math.tan(fov * Math.PI / 360));
 $('#viewBtn').addEventListener('click', () => openPop('#viewPop', $('#viewBtn')));
@@ -809,6 +979,8 @@ function renderViewPop() {
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
   $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"><span>${n}</span>${k(id)}</button>`).join('');
   $('#viewGrid').querySelectorAll('button').forEach(b => b.addEventListener('click', () => run(b.dataset.a)));
+  $('#viewIcons').innerHTML = VIEW_ICONS.map(i => iconBtn(i, i[0] === 'xray' && viewer.xray)).join('');
+  $('#viewIcons').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (b.dataset.a === 'zoomWin') closePops(); run(b.dataset.a); }));
   const proj = viewer.ortho ? 'ortho' : viewer.twoPoint ? 'two' : 'persp';
   document.querySelectorAll('#projSeg button').forEach(b => b.classList.toggle('on', b.dataset.proj === proj));
   const f = $('#fovRange'); f.value = Math.round(viewer.cam.fov); f.disabled = viewer.ortho; setRangeFill(f);
@@ -1129,10 +1301,14 @@ function openContext(x, y, cx, cy) {
     items.push(null);
     if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? 'Bryła zwykła (nie wycina)' : 'Bryła wycinająca']);
     if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', 'Suma brył'], ['solidIntersect', 'Część wspólna'], ['solidSubtract', 'Odejmij od pierwszej'], ['solidTrim', 'Przytnij pierwszą']);
-    items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
+    items.push(null, ['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej']);
+    items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['lock', 'Zablokuj'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
   } else {
     if (app.editing || app.editSolid != null) items.push(['exitEdit', 'Zakończ edycję'], null);
-    items.push(['selectAll', 'Zaznacz wszystko'], ['unhideAll', 'Pokaż ukryte'], ['extents', 'Pokaż cały model'], null, ['clearGuides', 'Usuń wszystkie prowadnice']);
+    items.push(['paste', 'Wklej'], ['pasteInPlace', 'Wklej w tym samym miejscu'], null);
+    items.push(['selectAll', 'Zaznacz wszystko'], ['unhideAll', 'Pokaż ukryte']);
+    if (lockedCount()) items.push(['unlockAll', 'Odblokuj wszystko']);
+    items.push(['extents', 'Pokaż cały model'], null, ['clearGuides', 'Usuń wszystkie prowadnice']);
   }
   while (items.length && !items[items.length - 1]) items.pop();
   const m = $('#ctxMenu');
@@ -1145,12 +1321,25 @@ function openContext(x, y, cx, cy) {
 }
 
 /* ---------- menu pliku ---------- */
-$('#fileBtn').addEventListener('click', () => {
+$('#fileBtn').addEventListener('click', async () => {
   const m = $('#menu'); const was = !m.hidden; closePops(); if (was) return;
   const k = id => prettyCombo(keysFor(id, app.keys.over)[0] || '', isMac);
-  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['importSkp', 'Importuj SketchUp (.skp)…'], ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], ['obj', 'Eksport OBJ (3ds Max)…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
-  m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('');
-  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); b.dataset.a === 'newWindow' ? api.newWindow() : run(b.dataset.a); }));
+  // ostatnio otwierane pliki i szkice z autozapisu (po awarii) — tylko w programie
+  let recent = [], lost = [];
+  try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
+  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], ['saveCopy', 'Zapisz kopię jako…']];
+  if (app.file.path) items.push(['revert', 'Przywróć zapisaną wersję']);
+  items.push(null, ['importSkp', 'Importuj SketchUp (.skp)…'], ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], ['obj', 'Eksport OBJ (3ds Max)…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno'], ['updateCheck', 'Sprawdź aktualizacje']);
+  const hhmm = t => new Date(t).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('')
+    + (lost.length ? '<div class="msep"></div><div class="mlbl">Niezapisane po awarii</div>' + lost.map((r, i) => `<button role="menuitem" data-lost="${i}"><span>${esc(r.name || 'Bez nazwy')}</span><kbd>${hhmm(r.time)}</kbd></button>`).join('') : '')
+    + (recent.length ? '<div class="msep"></div><div class="mlbl">Ostatnie</div>' + recent.map((r, i) => `<button role="menuitem" data-recent="${i}" title="${esc(r.path)}"><span>${esc(r.name)}</span><kbd>${esc(r.dir)}</kbd></button>`).join('') : '');
+  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    closePops();
+    if (b.dataset.recent) return openRecent(recent[+b.dataset.recent].path);
+    if (b.dataset.lost) return restoreAuto(lost[+b.dataset.lost]);
+    b.dataset.a === 'newWindow' ? api.newWindow() : run(b.dataset.a);
+  }));
   m.hidden = false;
   const r = $('#fileBtn').getBoundingClientRect();
   m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = (r.bottom + 6) + 'px';
@@ -1179,6 +1368,7 @@ function load(text, name, path) {
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
+  app.docId = Math.random().toString(36).slice(2); camReset();
 }
 function setFile(path, name) { app.file.path = path; app.file.name = name || 'Bez nazwy'; $('#fileName').textContent = app.file.name; document.title = app.file.name + ' — Modo'; }
 async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma niezapisane zmiany. Porzucić je?'); }
@@ -1187,6 +1377,7 @@ async function newSketch() {
   app.editing = null; viewer.editGroup = null;
   app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
+  app.docId = Math.random().toString(36).slice(2); camReset(); renderViewChip();
 }
 async function openSketch(p) {
   if (!p && !(await confirmDiscard())) return;
@@ -1201,6 +1392,59 @@ async function saveSketch(as) {
     return true;
   } catch (err) { toast('Nie udało się zapisać: ' + err.message); return false; }
 }
+// kopia szkicu w innym miejscu: bieżący plik i jego nazwa zostają bez zmian
+async function saveCopy() {
+  try {
+    const p = await api.saveCopy(serialize(), (app.file.name === 'Bez nazwy' ? 'Szkic' : app.file.name) + ' — kopia');
+    if (p) toast('Zapisano kopię', api.web || p === true ? null : ['Pokaż', () => api.showInFolder(p)]);
+  } catch (err) { toast('Nie udało się zapisać kopii: ' + err.message); }
+}
+async function revertSketch() {
+  if (!app.file.path) return toast('Ten szkic nie był jeszcze zapisany.');
+  if (app.file.dirty && !confirm('Wrócić do ostatnio zapisanej wersji? Niezapisane zmiany przepadną.')) return;
+  await openSketch(app.file.path);
+}
+async function openRecent(p) { if (await confirmDiscard()) await openSketch(p); }
+async function checkUpdate() {
+  if (api.web) return toast('Aktualizacje sprawdza program zainstalowany na komputerze.');
+  toast('Sprawdzam aktualizacje…');
+  const s = await api.updateCheck();
+  if (s.state === 'available') toast('Jest nowa wersja ' + s.version + ' (masz ' + s.current + ').', ['Zainstaluj', () => api.updateInstall()]);
+  else if (s.state === 'downloading') toast('Nowa wersja właśnie się pobiera.');
+  else if (s.state === 'error') toast('Nie udało się sprawdzić aktualizacji: ' + s.error);
+  else toast('Masz najnowszą wersję (' + s.current + ').');
+}
+
+/* ---------- autozapis ---------- */
+// Co 30 sekund, jeśli szkic się zmienił od ostatniej kopii, jego pełna treść trafia do osobnego pliku
+// (w programie: folder ustawień; w przeglądarce: pamięć przeglądarki). Zapis, nowy szkic albo zwykłe
+// zamknięcie okna kasują kopię — zostaje tylko wtedy, gdy program padł.
+const AUTO_EVERY = 30000;
+setInterval(async () => {
+  if (!app.file.dirty || auto.seq === auto.saved) return;
+  if (tool.active || tool.anchor) return;   // w połowie przeciągania model jest w stanie przejściowym
+  const seq = auto.seq;
+  try { if (await api.autosave(auto.key, { path: app.file.path, name: app.file.name, time: Date.now(), text: serialize() })) { auto.saved = seq; auto.written = true; } } catch (e) {}
+}, AUTO_EVERY);
+async function restoreAuto(r) {
+  if (!(await confirmDiscard())) return;
+  try {
+    const rec = await api.autosaveRead(r.key);
+    if (!rec || !rec.text) return toast('Nie udało się odczytać autozapisu.');
+    load(rec.text, rec.name, rec.path || null);
+    app.markDirty(true);
+    await api.autosaveClear(r.key);
+    toast('Przywrócono szkic z autozapisu. Zapisz go, żeby zachować.');
+  } catch (err) { toast('Nie udało się przywrócić szkicu: ' + err.message); }
+}
+async function offerRestore() {
+  let lost = [];
+  try { lost = await api.autosaveList(auto.key); } catch (e) {}
+  if (!lost.length) return;
+  const r = lost[0];
+  toast('Program został ostatnio zamknięty z niezapisanym szkicem „' + (r.name || 'Bez nazwy') + '”.' + (lost.length > 1 ? ' Pozostałe znajdziesz w menu Plik.' : ''), ['Przywróć', () => restoreAuto(r)], 45000);
+}
+
 async function saveObj() {
   const name = app.file.name === 'Bez nazwy' ? 'Modo' : app.file.name;
   const r = exportObj(app.model, name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^A-Za-z0-9_ -]+/g, '_'));
@@ -1338,14 +1582,15 @@ $('#updBtn').addEventListener('click', () => api.updateInstall());
 
 /* ---------- komunikaty ---------- */
 let toastT = 0;
-function toast(text, action) {
+function toast(text, action, ms) {
   const t = $('#toast'); t.textContent = text;
   if (action) { const b = document.createElement('button'); b.textContent = action[0]; b.addEventListener('click', () => { action[1](); t.hidden = true; }); t.append(b); }
-  t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, action ? 7000 : 3200);
+  t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || (action ? 7000 : 3200));
 }
 
 app.toast = (t, a) => toast(t, a);
 $('#hiddenChip').addEventListener('click', () => unhideAll());
+$('#lockChip').addEventListener('click', () => unlockAll());
 $('#editChip').addEventListener('click', () => app.editSolid != null ? app.exitSolid() : app.exitGroup());
 $('#orthoChip').addEventListener('click', () => run(viewer.ortho ? 'persp' : 'twoPoint'));
 
@@ -1376,6 +1621,8 @@ renderSun();
 setFile(null, 'Bez nazwy'); app.markDirty(false);
 const startPath = new URLSearchParams(location.search).get('p');
 if (startPath) openSketch(startPath);
+camReset();
+setTimeout(offerRestore, 1200);
 window.modo = app;   // do testów w konsoli
 app.solidReady = solidReady;
 // Manifold ładuje się w tle; po załadowaniu scena przelicza wycięcia już nim

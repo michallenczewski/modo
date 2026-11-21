@@ -39,6 +39,14 @@ export const ACTIONS = [
   { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor bryły)', keys: ['M'] },
   { group: 'Edycja', id: 'delete', name: 'Usuń zaznaczone', keys: ['Delete', 'Backspace'] },
   { group: 'Edycja', id: 'selectAll', name: 'Zaznacz wszystko', keys: ['Mod+A'] },
+  { group: 'Edycja', id: 'selectNone', name: 'Odznacz wszystko', keys: ['Mod+Shift+A'] },
+  { group: 'Edycja', id: 'selectInvert', name: 'Odwróć zaznaczenie', keys: ['Mod+I'] },
+  { group: 'Edycja', id: 'copy', name: 'Kopiuj', keys: ['Mod+C'] },
+  { group: 'Edycja', id: 'cutClip', name: 'Wytnij', keys: ['Mod+X'] },
+  { group: 'Edycja', id: 'paste', name: 'Wklej (wskaż miejsce)', keys: ['Mod+V'] },
+  { group: 'Edycja', id: 'pasteInPlace', name: 'Wklej w tym samym miejscu', keys: ['Mod+Shift+V'] },
+  { group: 'Edycja', id: 'lock', name: 'Zablokuj zaznaczone', keys: ['Mod+L'] },
+  { group: 'Edycja', id: 'unlockAll', name: 'Odblokuj wszystko', keys: ['Mod+Shift+L'] },
   { group: 'Edycja', id: 'undo', name: 'Cofnij', keys: ['Mod+Z'] },
   { group: 'Edycja', id: 'redo', name: 'Ponów', keys: ['Mod+Shift+Z', 'Mod+Y'] },
   { group: 'Widok', id: 'hideRest', name: 'Ukryj resztę modelu (drugi raz: pokaż)', keys: ['F'] },
@@ -53,6 +61,9 @@ export const ACTIONS = [
   { group: 'Widok', id: 'viewRight', name: 'Widok: z prawej', keys: ['Mod+4'] },
   { group: 'Widok', id: 'viewBack', name: 'Widok: z tyłu', keys: ['Mod+5'] },
   { group: 'Widok', id: 'viewLeft', name: 'Widok: z lewej', keys: ['Mod+6'] },
+  { group: 'Widok', id: 'viewBottom', name: 'Widok: z dołu', keys: ['Mod+7'] },
+  { group: 'Widok', id: 'viewPrev', name: 'Poprzedni widok', keys: ['BracketLeft'] },
+  { group: 'Widok', id: 'viewNext', name: 'Następny widok', keys: ['BracketRight'] },
   { group: 'Widok', id: 'twoPoint', name: 'Perspektywa dwupunktowa', keys: ['Shift+C'] },
   { group: 'Widok', id: 'views', name: 'Widok, kamera i sceny', keys: ['K'] },
   { group: 'Widok', id: 'sceneAdd', name: 'Dodaj scenę', keys: [] },
@@ -63,6 +74,8 @@ export const ACTIONS = [
   { group: 'Widok', id: 'orbit', name: 'Orbita', keys: ['O'] },
   { group: 'Widok', id: 'pan', name: 'Przesuń widok', keys: ['P'] },
   { group: 'Widok', id: 'zoom', name: 'Powiększ (przeciąganiem)', keys: [] },
+  { group: 'Widok', id: 'zoomWin', name: 'Powiększ okno (ramką)', keys: ['Shift+Z'] },
+  { group: 'Widok', id: 'xray', name: 'Prześwit', keys: ['J'] },
   { group: 'Widok', id: 'style1', name: 'Styl: Szkic', keys: ['Shift+1'] },
   { group: 'Widok', id: 'style2', name: 'Styl: Kreska', keys: ['Shift+2'] },
   { group: 'Widok', id: 'style3', name: 'Styl: Model', keys: ['Shift+3'] },
@@ -72,6 +85,9 @@ export const ACTIONS = [
   { group: 'Plik', id: 'open', name: 'Otwórz', keys: ['Mod+O'] },
   { group: 'Plik', id: 'save', name: 'Zapisz', keys: ['Mod+S'] },
   { group: 'Plik', id: 'saveAs', name: 'Zapisz jako', keys: ['Mod+Shift+S'] },
+  { group: 'Plik', id: 'saveCopy', name: 'Zapisz kopię jako', keys: [] },
+  { group: 'Plik', id: 'revert', name: 'Przywróć zapisaną wersję', keys: [] },
+  { group: 'Plik', id: 'updateCheck', name: 'Sprawdź aktualizacje', keys: [] },
   { group: 'Plik', id: 'png', name: 'Eksport PNG', keys: ['Mod+Shift+E'] },
   { group: 'Plik', id: 'render', name: 'Render widoku przez Gemini', keys: ['Mod+G'] },
   { group: 'Plik', id: 'obj', name: 'Eksport OBJ (3ds Max)', keys: ['Mod+Shift+O'] },
@@ -109,6 +125,6 @@ export function comboOf(e, isMac) {
 // do wyświetlenia: „⌘ ⇧ S” albo „Ctrl Shift S”
 export function prettyCombo(c, isMac) {
   if (c === 'Shift+Slash') return '?';
-  const name = { Mod: isMac ? '⌘' : 'Ctrl', Shift: isMac ? '⇧' : 'Shift', Alt: isMac ? '⌥' : 'Alt', Ctrl: '⌃', Space: 'Spacja', Delete: 'Delete', Backspace: isMac ? '⌫' : 'Backspace', Slash: '/', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+  const name = { Mod: isMac ? '⌘' : 'Ctrl', Shift: isMac ? '⇧' : 'Shift', Alt: isMac ? '⌥' : 'Alt', Ctrl: '⌃', Space: 'Spacja', Delete: 'Delete', Backspace: isMac ? '⌫' : 'Backspace', Slash: '/', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', BracketLeft: '[', BracketRight: ']' };
   return c.split('+').map(p => name[p] || p).join(isMac ? '' : '+');
 }

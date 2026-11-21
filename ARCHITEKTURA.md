@@ -45,6 +45,14 @@ Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę,
 
 **Ukrywanie** to flaga `hidden` w bryle albo linii; ukryte nie są rysowane, nie przyklejają i nie liczą się do „pokaż cały model”. „Podobne” bryły (`similar`) mają ten sam obrys z dokładnością do przesunięcia i obrotu, tę samą wysokość, rodzaj i kolor — czyli przede wszystkim kopie.
 
+**Blokada** to flaga `locked` w bryle albo linii. Zablokowany element jest widoczny i przykleja kursor, ale żadne narzędzie go nie chwyta: pomijają go `Viewer.pick`, `pickEntity`, `boxSelect` i `edgeAt`, a `dropLocked` w `app.js` usuwa go z zaznaczenia, gdyby trafił tam inną drogą (panel, „zaznacz wszystko”). Odblokowanie działa tylko dla wszystkich naraz, bo zablokowanego nie da się wskazać.
+
+**Schowek** (`packSelection`, `insertItems` w `app.js`) leży w `localStorage` pod kluczem `modo.schowek`, więc działa między oknami programu. Elementy są zapisane względem środka podstawy zaznaczenia (`o`); „wklej” stawia je pod kursorem narzędziem wstawiania, „wklej w miejscu” w `o`. W obrębie tego samego szkicu (`app.docId`) wklejony komponent zostaje wystąpieniem oryginału i zachowuje warstwy; z innego szkicu dostaje własną definicję i traci warstwy.
+
+**Autozapis.** Co 30 sekund okno z niezapisanymi zmianami zapisuje pełną treść szkicu do własnego pliku w `userData/autozapis/` (klucz okna w `auto.key`; w przeglądarce jedna kopia w `localStorage`). Zapis, nowy szkic i zwykłe zamknięcie okna kasują ten plik, więc to, co zostaje po starcie, pochodzi z awarii — program proponuje wtedy przywrócenie (komunikat i menu Plik). Kopie starsze niż dwa tygodnie są usuwane.
+
+**Historia widoków**: `camHist` w `app.js` próbkuje kamerę co 300 ms i po jej zatrzymaniu odkłada poprzednie ustawienie; `[` i `]` chodzą po historii.
+
 **Rzut równoległy**: kamera ortograficzna (`ocam`) jest ustawiana przy każdej klatce z kamery perspektywicznej (`vc()`), 3 km za nią, z wysokością kadru `orthoH`. Nawigacja zawsze porusza kamerą perspektywiczną, a w rzucie równoległym przybliżanie zmienia `orthoH`.
 
 **Wymiary i opisy** (`model.dims`, `model.texts`) leżą w świecie, ale rysuje się je płasko na nakładce 2D (`drawAnnotations`), więc są czytelne pod każdym kątem; eksport PNG rysuje je drugi raz w rozdzielczości obrazu. Id w zaznaczeniu: `'d' + id`, `'t' + id`; przesuwanie i obracanie traktuje je jak odcinki (`eachTarget`).

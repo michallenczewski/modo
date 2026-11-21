@@ -232,3 +232,9 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .aiResult{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1100px,calc(100vw - 80px));max-height:calc(100vh - 60px)}
 .aiPair{display:flex;justify-content:center;background:var(--soft);border-radius:8px;overflow:hidden;min-height:120px}
 .aiPair img{display:block;max-width:100%;max-height:calc(100vh - 220px);object-fit:contain}
+
+/* rzędy samych ikon (okienko Edycja, polecenia widoku) i podpisy sekcji w menu */
+.icons{display:flex;gap:2px;flex-wrap:wrap}
+.pop.iconpop{width:auto;padding:8px;gap:4px}
+.pop.iconpop .icons+.icons{border-top:1px solid var(--line);padding-top:4px}
+.menu .mlbl{padding:5px 10px 3px;font-size:11px;color:var(--muted2)}

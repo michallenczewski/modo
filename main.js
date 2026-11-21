@@ -31,6 +31,9 @@ function saveSettings() { try { fs.writeFileSync(settingsFile(), JSON.stringify(
 /* ---------- okno ---------- */
 const wins = new Set();
 const dirty = new WeakMap();   // okno → czy są niezapisane zmiany
+const autoKeys = new WeakMap(); // okno → klucz jego autozapisu
+const liveKeys = new Set();     // klucze autozapisu okien, które teraz działają
+const crashed = new WeakSet();  // okna, w których padł proces rysujący (ich autozapis zostaje)
 function createWindow(openPath) {
   const b = settings.bounds || { width: 1440, height: 900 };
   const win = new BrowserWindow({
@@ -61,7 +64,13 @@ function createWindow(openPath) {
     if (r === 2) { e.preventDefault(); return; }
     if (r === 0) { e.preventDefault(); win.webContents.send('save-then-close'); }
   });
-  win.on('closed', () => { wins.delete(win); });
+  win.webContents.on('render-process-gone', () => crashed.add(win));
+  // zwykłe zamknięcie okna kasuje jego autozapis; po awarii plik zostaje i program zaproponuje przywrócenie
+  win.on('closed', () => {
+    wins.delete(win);
+    const k = autoKeys.get(win);
+    if (k) { liveKeys.delete(k); if (!crashed.has(win)) try { fs.unlinkSync(autoFile(k)); } catch (e) {} }
+  });
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   return win;
 }
@@ -102,6 +111,52 @@ ipcMain.handle('file-save', async (e, p, text, suggested) => {
   await fsp.rename(tmp, p);
   addRecent(p);
   return { path: p, name: path.basename(p, '.modo') };
+});
+// kopia szkicu w innym miejscu — bieżący plik zostaje bez zmian
+ipcMain.handle('file-save-copy', async (e, text, suggested) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showSaveDialog(win, { title: 'Zapisz kopię jako', filters: MODO_FILTER, defaultPath: (suggested || 'Szkic — kopia') + '.modo' });
+  if (r.canceled || !r.filePath) return null;
+  await fsp.writeFile(r.filePath, text, 'utf8');
+  return r.filePath;
+});
+// ostatnio otwierane i zapisywane pliki, które nadal istnieją
+ipcMain.handle('recent-list', () => (settings.recent || []).filter(p => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } })
+  .map(p => ({ path: p, name: path.basename(p, '.modo'), dir: path.basename(path.dirname(p)) })));
+
+/* ---------- autozapis ---------- */
+// Każde okno zapisuje niezapisany szkic do własnego pliku w folderze ustawień. Plik znika przy zapisie
+// i przy zwykłym zamknięciu okna, więc to, co tu zostaje po starcie programu, pochodzi z awarii.
+const autoDir = () => path.join(app.getPath('userData'), 'autozapis');
+const autoFile = k => path.join(autoDir(), String(k).replace(/[^a-z0-9]/gi, '') + '.json');
+ipcMain.handle('autosave', async (e, key, rec) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w) autoKeys.set(w, key);
+  liveKeys.add(key);
+  await fsp.mkdir(autoDir(), { recursive: true });
+  const f = autoFile(key);
+  await fsp.writeFile(f + '.zapis', JSON.stringify(rec), 'utf8');
+  await fsp.rename(f + '.zapis', f);
+  return true;
+});
+ipcMain.handle('autosave-clear', async (e, key) => { try { await fsp.unlink(autoFile(key)); } catch (err) {} return true; });
+ipcMain.handle('autosave-read', async (e, key) => { try { return JSON.parse(await fsp.readFile(autoFile(key), 'utf8')); } catch (err) { return null; } });
+ipcMain.handle('autosave-list', async () => {
+  const out = [];
+  let names = []; try { names = await fsp.readdir(autoDir()); } catch (err) { return out; }
+  for (const n of names) {
+    if (!/\.json$/.test(n)) continue;
+    const key = n.slice(0, -5), f = path.join(autoDir(), n);
+    if (liveKeys.has(key)) continue;
+    try {
+      const st = await fsp.stat(f);
+      // kopie starsze niż dwa tygodnie nie są już nikomu potrzebne
+      if (Date.now() - st.mtimeMs > 14 * 24 * 3600 * 1000) { await fsp.unlink(f); continue; }
+      const rec = JSON.parse(await fsp.readFile(f, 'utf8'));
+      out.push({ key, name: rec.name || 'Bez nazwy', path: rec.path || null, time: rec.time || st.mtimeMs });
+    } catch (err) {}
+  }
+  return out.sort((a, b) => b.time - a.time);
 });
 ipcMain.handle('png-save', async (e, buf, suggested) => {
   const win = BrowserWindow.fromWebContents(e.sender);

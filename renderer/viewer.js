@@ -426,7 +426,8 @@ export class Viewer {
   dimmed(s) { if (this.editSolid != null) return s.id !== this.editSolid; return this.editGroup != null && !(this.editSet && this.editSet.has(s.g)); }
   // materiał ściany: kolor, przezroczystość (szkło)
   matFor(s, st, paper, flat) {
-    const a = s.alpha ?? 1, glass = a < 0.999;
+    // prześwit: wszystkie ściany półprzezroczyste, żeby było widać, co jest w środku i z tyłu
+    const a = this.xray ? Math.min(s.alpha ?? 1, 0.32) : s.alpha ?? 1, glass = a < 0.999;
     return new THREE.MeshLambertMaterial({
       color: this.colorFor(s, st, paper), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
       transparent: glass, opacity: a, depthWrite: !glass,
@@ -627,9 +628,12 @@ export class Viewer {
       near.sort((a, b) => flat(b.object.userData.shapeId) - flat(a.object.userData.shapeId) || b.object.userData.shapeId - a.object.userData.shapeId);
       hits.splice(0, near.length, ...near);
     }
+    // zablokowane bryły są nietykalne: kursor ich nie chwyta
+    const locked = new Set(); for (const s of this.model.shapes) if (s.locked) locked.add(s.id);
     for (const h of hits) {
       const ud = h.object.userData, key = ud.keys[h.faceIndex];
       if (!key) continue;
+      if (locked.size && locked.has(ud.ids ? ud.ids[h.faceIndex] : ud.shapeId)) continue;
       return { shapeId: ud.ids ? ud.ids[h.faceIndex] : ud.shapeId, key, solidId: ud.shapeId, point: [h.point.x, h.point.y, h.point.z], normal: h.face ? [h.face.normal.x, h.face.normal.y, h.face.normal.z] : [0, 0, 1], dist: h.distance };
     }
     return null;
@@ -728,9 +732,9 @@ export class Viewer {
   }
   // widoki standardowe: kierunek patrzenia kamery
   setView(name) {
-    const D = { top: [0, 0.0001, -1], front: [0, 1, 0], back: [0, -1, 0], right: [-1, 0, 0], left: [1, 0, 0], iso: [-1, 1, -0.82] }[name];
+    const D = { top: [0, 0.0001, -1], bottom: [0, 0.0001, 1], front: [0, 1, 0], back: [0, -1, 0], right: [-1, 0, 0], left: [1, 0, 0], iso: [-1, 1, -0.82] }[name];
     if (!D) return;
-    if (name === 'top' && this.twoPoint) this.setTwoPoint(false);
+    if ((name === 'top' || name === 'bottom') && this.twoPoint) this.setTwoPoint(false);
     const f = new THREE.Vector3(...D).normalize();
     this.cam.up.set(0, 0, 1); this.cam.lookAt(this.cam.position.clone().add(f));
     this.zoomExtents();

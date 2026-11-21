@@ -8,12 +8,14 @@ import { AXIS_COLOR, AXES } from './snap.js';
 import { moveMeshPoints, booleanMesh } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
-const INK = '#1a1a19', BLUE = '#3f5f99';
+const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
 
 /* ---------- rysowanie pomocy na nakładce ---------- */
 export function drawSeg(c, v, a, b, color = INK, { width = 1.5, dash = null } = {}) {
   const A = v.toScreen(a), B = v.toScreen(b);
   if (A.behind || B.behind) return;
+  // w trybie ciemnym kreska podglądu jest jasna — ciemnej na ciemnym tle nie widać
+  if (color === INK && v.dark) color = INK_DARK;
   c.save(); c.strokeStyle = color; c.lineWidth = width; c.lineCap = 'round';
   if (dash) c.setLineDash(dash);
   c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke(); c.restore();
@@ -358,7 +360,7 @@ export class PushTool extends Tool {
   draw(c, v) {
     // tryb „nowa bryła” (Ctrl / ⌥): plus przy kursorze, jak w SketchUpie
     if (this.copy && this.mx != null) {
-      c.save(); c.strokeStyle = INK; c.lineWidth = 1.6; c.lineCap = 'round';
+      c.save(); c.strokeStyle = v.dark ? INK_DARK : INK; c.lineWidth = 1.6; c.lineCap = 'round';
       const x = this.mx + 14, y = this.my - 12;
       c.beginPath(); c.moveTo(x - 4, y); c.lineTo(x + 4, y); c.moveTo(x, y - 4); c.lineTo(x, y + 4); c.stroke(); c.restore();
     }
@@ -406,6 +408,33 @@ export class NavTool extends Tool {
   up() { this.last = null; }
 }
 
+// powiększanie ramką: zaznaczony prostokąt wypełnia okno
+export class ZoomWinTool extends Tool {
+  hint() { return 'Przeciągnij ramkę wokół miejsca, które ma wypełnić okno. <kbd>Esc</kbd> przerywa.'; }
+  reset() { this.box = null; }
+  down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y }; }
+  move(e, x, y) { if (this.box && (e.buttons & 1)) { this.box.x1 = x; this.box.y1 = y; } }
+  up() {
+    const b = this.box; this.box = null; if (!b) return;
+    const w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0), v = this.v;
+    if (w < 6 || h < 6) return;
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    v.pan(v.w / 2 - cx, v.h / 2 - cy, v.pivotAt(cx, cy));
+    v.zoomAt(v.w / 2, v.h / 2, Math.min(v.w / w, v.h / h));
+    this.app.zoomWinDone?.();
+  }
+  draw(c) {
+    const b = this.box; if (!b) return;
+    const dark = this.app.viewer.dark;
+    c.save();
+    c.fillStyle = dark ? 'rgba(150,170,210,0.10)' : 'rgba(63,95,153,0.06)';
+    c.strokeStyle = dark ? '#9fb4dc' : '#3f5f99'; c.lineWidth = 1;
+    const x = Math.min(b.x0, b.x1) + 0.5, y = Math.min(b.y0, b.y1) + 0.5;
+    c.fillRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); c.strokeRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+    c.restore();
+  }
+}
+
 export { shapeEdges };
 
 /* ---------- wspólne: co jest pod kursorem ---------- */
@@ -432,11 +461,11 @@ export function boxSelect(app, b, window_) {
   const ctx = id => app.editing == null || app.inEditing(id);
   const res = new Map();   // id → wynik
   for (const s of m.shapes) {
-    if (isHidden(m, s) || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
+    if (isHidden(m, s) || s.locked || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
     res.set(s.id, test(shapeEdges(s).map(e => [e.a, e.b])));
   }
   for (const l of m.lines) {
-    if (isHidden(m, l) || app.editSolid != null || !ctx('l' + l.id)) continue;
+    if (isHidden(m, l) || l.locked || app.editSolid != null || !ctx('l' + l.id)) continue;
     res.set('l' + l.id, test([[l.a, l.b]]));
   }
   const out = new Set();
@@ -468,11 +497,11 @@ export function pickEntity(app, x, y) {
     for (let i = 0; i < 4; i++) { const A = C[i], B = C[(i + 1) % 4], dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2)); if (Math.hypot(A.x + dx * t - x, A.y + dy * t - y) < 5) return 's' + q.id; }
   }
   let best = null, bd = 6;
-  for (const l of m.lines) { if (isHidden(m, l)) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
+  for (const l of m.lines) { if (isHidden(m, l) || l.locked) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
   if (best) return best;
   // wycięcia: wybierane po przerywanym obrysie
   for (const s of m.shapes) {
-    if (s.op !== 'cut' || isHidden(m, s)) continue;
+    if (s.op !== 'cut' || isHidden(m, s) || s.locked) continue;
     for (const e of shapeEdges(s)) { const d = segDist(e.a, e.b); if (d < bd) { bd = d; best = s.id; } }
   }
   if (best != null) return best;
@@ -856,7 +885,7 @@ export class SectionTool extends Tool {
 export class PlaceTool extends Tool {
   reset() { this.cur = null; }
   setItem(item) { this.item = item; this.edges = item.shapes.flatMap(sh => shapeEdges(sh).map(e => [e.a, e.b])).concat((item.lines || []).map(l => [l.a, l.b])); }
-  hint() { return this.item ? `Kliknij, gdzie postawić: <b>${this.item.name}</b>. Model trafia do szkicu jako komponent — kopie (W z ${this.app.isMac ? '⌥' : 'Ctrl'}) zmieniają się razem. <kbd>Esc</kbd> przerywa.` : ''; }
+  hint() { if (this.item && this.item.paste) return 'Kliknij, gdzie wkleić. <kbd>Esc</kbd> przerywa.'; return this.item ? `Kliknij, gdzie postawić: <b>${this.item.name}</b>. Model trafia do szkicu jako komponent — kopie (W z ${this.app.isMac ? '⌥' : 'Ctrl'}) zmieniają się razem. <kbd>Esc</kbd> przerywa.` : ''; }
   move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
   down() { if (!this.cur || !this.item) return; this.app.placeItem(this.item, this.cur.p.slice()); }
   draw(c, v) {
@@ -1265,9 +1294,9 @@ export function edgeAt(app, x, y) {
     bd = d; best = { a, b, ...make() };
   };
   const ctx = id => app.editing == null || app.inEditing(id);
-  if (app.editSolid == null) for (const l of m.lines) { if (isHidden(m, l) || !ctx('l' + l.id)) continue; tryEdge(l.a, l.b, () => ({ id: 'l' + l.id }), -1.5); }
+  if (app.editSolid == null) for (const l of m.lines) { if (isHidden(m, l) || l.locked || !ctx('l' + l.id)) continue; tryEdge(l.a, l.b, () => ({ id: 'l' + l.id }), -1.5); }
   for (const s of m.shapes) {
-    if (isHidden(m, s) || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
+    if (isHidden(m, s) || s.locked || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
     for (const e of shapeEdges(s)) {
       if (e.soft) continue;
       tryEdge(e.a, e.b, () => ({ id: s.id, shape: s, edge: e }));
