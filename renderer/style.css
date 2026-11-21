@@ -174,3 +174,7 @@ details.more[open]{display:flex;flex-direction:column;gap:10px}
 .scene .no:hover,.scene.on .no{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
 .scene input{flex:1;min-width:0;height:28px}
 .scene .ib{width:26px;height:28px;flex:none}
+#tools .ib.fam::after{content:"";position:absolute;right:4px;bottom:4px;border:2px solid transparent;border-right-color:var(--muted2);border-bottom-color:var(--muted2)}
+.flyout{min-width:0;z-index:60}
+.flyout button svg{flex:none;color:var(--muted)}
+.flyout button.on{background:var(--hover)}

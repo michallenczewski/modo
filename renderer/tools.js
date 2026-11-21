@@ -544,6 +544,155 @@ export class CircleTool extends Tool {
   }
 }
 
+/* ---------- wielokąt foremny ---------- */
+export class PolygonTool extends CircleTool {
+  constructor(app) { super(app); this.sides = 6; }
+  hint() { return this.c ? `Przesuń, żeby ustalić promień (do wierzchołka), i kliknij — albo wpisz promień. Liczba boków: ${this.sides}; wpisz np. <kbd>8s</kbd>, żeby zmienić.` : `Kliknij środek wielokąta (${this.sides} boków; <kbd>8s</kbd> zmienia liczbę). Strzałki ustawiają płaszczyznę.`; }
+  create(r, a0 = this.angle()) {
+    if (r < 1e-6) return;
+    this.app.checkpoint();
+    makeShape(this.model, { o: this.c, u: this.plane.u, v: this.plane.v }, circlePts(r, this.sides, a0), 0);
+    this.app.changed();
+    this.last = { c: this.c, plane: this.plane, r, a0, seq: this.app.opSeq };
+    this.reset();
+  }
+  value(str) {
+    const m = String(str).trim().match(/^(\d+)\s*s$/i);
+    if (m) { this.sides = Math.max(3, Math.min(100, +m[1])); this.app.refresh(); return true; }
+    return super.value(str);
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.c) {
+      drawPoly(c, v, circlePts(this.r(), this.sides, this.angle()).map(q => fromPlane(this.plane, q)), INK, true, { width: 1.5 });
+      drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
+    }
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? this.sides + ' boków · promień ' + fmtLength(this.r()) : s.label);
+  }
+}
+
+/* ---------- prostokąt obrócony (trzy punkty, w dowolnej płaszczyźnie) ---------- */
+export class RotRectTool extends Tool {
+  reset() { this.p0 = null; this.p1 = null; this.cur = null; }
+  hint() { return !this.p0 ? 'Kliknij pierwszy narożnik obróconego prostokąta.' : !this.p1 ? 'Kliknij koniec pierwszego boku albo wpisz jego długość.' : 'Przesuń w bok, żeby ustalić szerokość (także pod kątem, w dowolnej płaszczyźnie), i kliknij — albo wpisz szerokość.'; }
+  vcb() { return { label: this.p1 ? 'Szerokość' : 'Długość', value: this.p1 ? fmtLength(Math.abs(this.w() || 0)) : this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : '' }; }
+  move(e, x, y) {
+    this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.p1 || this.p0, lockAxis: this.app.lockAxis, plane: this.p1 && this.plane ? this.plane : null });
+  }
+  frame() {
+    const u = V.norm(V.sub(this.p1, this.p0));
+    let d = this.cur ? V.sub(this.cur.p, this.p1) : [0, 0, 0];
+    d = V.sub(d, V.mul(u, V.dot(d, u)));
+    let v = V.len(d) > 1e-6 ? V.norm(d) : null;
+    if (!v) { const w = V.cross([0, 0, 1], u); v = V.len(w) > 1e-6 ? V.norm(w) : [0, 1, 0]; }
+    return { u, v, L: V.dist(this.p0, this.p1), W: V.len(d) };
+  }
+  w() { return this.p1 && this.cur ? this.frame().W : 0; }
+  down() {
+    if (!this.cur) return;
+    if (!this.p0) { this.p0 = this.cur.p.slice(); return; }
+    if (!this.p1) { if (V.dist(this.cur.p, this.p0) > 1e-6) { this.p1 = this.cur.p.slice(); this.plane = null; } return; }
+    this.create(this.frame());
+  }
+  create(f) {
+    if (f.W < 1e-6 || f.L < 1e-6) return;
+    this.app.checkpoint();
+    makeShape(this.model, { o: this.p0, u: f.u, v: f.v }, [[0, 0], [f.L, 0], [f.L, f.W], [0, f.W]], 0);
+    this.app.changed(); this.reset(); this.app.lockAxis = null;
+  }
+  value(str) {
+    const L = parseLength(str); if (L == null || L <= 0) return false;
+    if (this.p1) { const f = this.frame(); f.W = L; this.create(f); return true; }
+    if (this.p0 && this.cur) { const d = V.sub(this.cur.p, this.p0); if (V.len(d) < 1e-9) return false; this.p1 = V.add(this.p0, V.mul(V.norm(d), L)); this.app.lockAxis = null; return true; }
+    return false;
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p1) {
+      const f = this.frame(), a = this.p0, b = this.p1, cc = V.add(b, V.mul(f.v, f.W)), d = V.add(a, V.mul(f.v, f.W));
+      drawPoly(c, v, [a, b, cc, d], INK, true, { width: 1.6 });
+    } else if (this.p0) drawSeg(c, v, this.p0, s.p, INK, { width: 1.6 });
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p);
+    drawChip(c, P.x, P.y, this.p1 ? fmtLength(V.dist(this.p0, this.p1)) + ' × ' + fmtLength(this.w()) : this.p0 ? fmtLength(V.dist(this.p0, s.p)) : s.label);
+  }
+}
+
+/* ---------- łuk ze środka i wycinek koła ---------- */
+export class CenterArcTool extends Tool {
+  constructor(app, pie) { super(app); this.pie = pie; }
+  reset() { this.c = null; this.p1 = null; this.plane = null; this.cur = null; this.ang = 0; }
+  hint() {
+    const what = this.pie ? 'wycinka koła' : 'łuku';
+    return !this.c ? `Kliknij środek ${what}. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.` : !this.p1 ? 'Kliknij początek (promień i kierunek) albo wpisz promień.' : 'Obróć do końca i kliknij — albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°.';
+  }
+  vcb() { return { label: this.p1 ? 'Kąt' : 'Promień', value: this.p1 ? (Math.round(this.ang * 1800 / Math.PI) / 10 + '°').replace('.', ',') : this.c && this.cur ? fmtLength(V.dist(this.c, this.cur.p)) : '' }; }
+  move(e, x, y) {
+    if (!this.c) { this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
+    this.cur = this.app.snapper.find(x, y, { model: this.model, plane: this.plane, anchor: this.p1 ? null : this.c });
+    if (!this.cur || !this.p1) return;
+    const a = toPlane(this.plane, this.p1), b = toPlane(this.plane, this.cur.p);
+    let t = Math.atan2(b[1], b[0]) - Math.atan2(a[1], a[0]);
+    // ciągłość: kąt narasta w tę stronę, w którą kursor już poszedł
+    const prev = this.ang || 0;
+    while (t - prev > Math.PI) t -= 2 * Math.PI;
+    while (t - prev < -Math.PI) t += 2 * Math.PI;
+    const deg = t * 180 / Math.PI, sn = Math.round(deg / 15) * 15;
+    if (Math.abs(deg - sn) < 2.5) t = sn * Math.PI / 180;
+    this.ang = Math.max(-2 * Math.PI, Math.min(2 * Math.PI, t));
+  }
+  points() {
+    const a = toPlane(this.plane, this.p1), r = Math.hypot(a[0], a[1]), a0 = Math.atan2(a[1], a[0]);
+    const n = Math.max(2, Math.round(Math.abs(this.ang) / (2 * Math.PI) * CIRCLE_SEGMENTS));
+    const pts = []; for (let i = 0; i <= n; i++) { const t = a0 + this.ang * i / n; pts.push([r * Math.cos(t), r * Math.sin(t)]); }
+    return pts;
+  }
+  down() {
+    if (!this.cur) return;
+    if (!this.c) { this.plane = planeAt(this.app, this.cur); this.c = this.cur.p.slice(); this.plane.o = this.c; return; }
+    if (!this.p1) { if (V.dist(this.cur.p, this.c) > 1e-6) { this.p1 = this.cur.p.slice(); this.ang = 0; } return; }
+    this.create();
+  }
+  create() {
+    if (Math.abs(this.ang) < 1e-4) return;
+    const pts = this.points();
+    this.app.checkpoint();
+    if (this.pie) {
+      const full = Math.abs(Math.abs(this.ang) - 2 * Math.PI) < 1e-6;
+      const poly = full ? pts.slice(0, -1) : [[0, 0], ...pts];
+      const sh = makeShape(this.model, { o: this.c, u: this.plane.u, v: this.plane.v }, this.ang < 0 ? poly.reverse() : poly, 0);
+      if (full) sh.soft = true;
+    } else {
+      let last = null;
+      const P = pts.map(q => fromPlane(this.plane, q));
+      for (let i = 0; i + 1 < P.length; i++) { last = { id: this.model.next++, a: P[i].slice(), b: P[i + 1].slice() }; this.model.lines.push(last); }
+      if (last) closeLoop(this.model, last);
+    }
+    this.app.changed(); this.reset();
+  }
+  value(str) {
+    if (this.p1) {
+      const m = String(str).trim().replace(',', '.').match(/^(-?\d+(?:\.\d+)?)\s*°?$/); if (!m) return false;
+      const deg = +m[1]; this.ang = (Math.sign(this.ang) || 1) * Math.min(360, Math.abs(deg)) * Math.PI / 180 * (deg < 0 ? -1 : 1);
+      this.create(); return true;
+    }
+    if (this.c && this.cur) { const L = parseLength(str); if (L == null || L <= 0) return false; const d = V.sub(this.cur.p, this.c); if (V.len(d) < 1e-9) return false; this.p1 = V.add(this.c, V.mul(V.norm(d), L)); this.ang = 0; return true; }
+    return false;
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p1) {
+      const P = this.points().map(q => fromPlane(this.plane, q));
+      drawPoly(c, v, this.pie ? [this.c, ...P] : P, INK, !!this.pie, { width: 1.6 });
+      drawSeg(c, v, this.c, this.p1, INK, { width: 1, dash: [3, 3] });
+    } else if (this.c) drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
+    drawMarker(c, v, this.p1 ? null : s);
+    const Q = v.toScreen(s.p);
+    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 180 / Math.PI) + '°') : this.c ? 'Promień ' + fmtLength(V.dist(this.c, s.p)) : s.label);
+  }
+}
+
 /* ---------- łuk dwupunktowy ---------- */
 export class ArcTool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.plane = null; this.cur = null; this.h = 0; }
