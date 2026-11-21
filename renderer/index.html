@@ -16,6 +16,7 @@
     <button data-style="szkic">Szkic</button><button data-style="kreska">Kreska</button><button data-style="model">Model</button>
   </div>
   <div class="sep"></div>
+  <button id="viewBtn" class="ib" aria-haspopup="dialog" aria-label="Widok, kamera i sceny" title="Widok, kamera i sceny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2"/></svg></button>
   <button id="underBtn" class="ib" aria-label="Podkład DXF / DWG" title="Podkład DXF / DWG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.3 8 11.3l6-3"/><path d="M2 11 8 14l6-3"/></svg></button>
   <button id="themeBtn" class="ib" aria-label="Wygląd: jasny albo ciemny" title="Wygląd: automatyczny / jasny / ciemny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/></svg></button>
   <button id="keysBtn" class="ib" aria-label="Skróty klawiszowe" title="Skróty klawiszowe (?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.5"/><path d="M4.5 6.7h.01M7 6.7h.01M9.5 6.7h.01M12 6.7h.01M5 9.4h6"/></svg></button>
@@ -31,7 +32,7 @@
   <div id="hint"></div>
   <button id="editChip" class="tb chip" hidden title="Esc albo klik poza grupą kończy edycję"></button>
   <button id="selChip" class="tb chip" hidden tabindex="-1"></button>
-  <button id="orthoChip" class="tb chip" hidden title="Kliknij, żeby wrócić do perspektywy">Rzut równoległy</button>
+  <button id="orthoChip" class="tb chip" hidden title="Kliknij, żeby wrócić do zwykłej perspektywy">Rzut równoległy</button>
   <button id="hiddenChip" class="tb chip" hidden></button>
   <label id="vcbWrap"><span id="vcbLabel" class="lbl">Odległość</span><input id="vcb" autocomplete="off" spellcheck="false" aria-label="Wymiar"></label>
   <button id="unitBtn" class="tb unit" aria-label="Jednostka wymiarów"></button>
@@ -54,6 +55,20 @@
     <div class="row"><span class="lbl w60">Długość</span><input id="sunLon" class="fld grow num"><span class="lbl">° E</span></div>
   </details>
   <div class="lbl note">Gdy to okienko jest otwarte, strzałki <kbd>←</kbd> <kbd>→</kbd> przesuwają godzinę o 15 minut, a z <kbd>⇧</kbd> o dzień.</div>
+</section>
+
+<section id="viewPop" class="pop" role="dialog" aria-label="Widok i sceny" hidden>
+  <div class="row"><span class="ttl">Widok</span></div>
+  <div class="views" id="viewGrid"></div>
+  <div class="seg stretch" id="projSeg" role="group" aria-label="Rzut">
+    <button data-proj="persp">Perspektywa</button><button data-proj="two">Dwupunktowa</button><button data-proj="ortho">Równoległy</button>
+  </div>
+  <div class="row"><span class="lbl w60">Kąt</span><input type="range" id="fovRange" min="15" max="100" step="1" class="grow"><span class="fld num w62" id="fovLbl"></span></div>
+  <div class="lbl note">Kąt widzenia w pionie; w milimetrach — ogniskowa dla klatki 36 × 24 mm. W perspektywie dwupunktowej przeciąganie w pionie przesuwa obiektyw, a piony zostają pionowe.</div>
+  <div class="hr"></div>
+  <div class="row"><span class="ttl grow">Sceny</span><button class="tb soft" id="sceneAdd">Dodaj scenę</button></div>
+  <div id="sceneList" class="scenes"></div>
+  <div class="lbl note" id="sceneNote">Scena zapamiętuje widok, styl i słońce. <kbd>PgUp</kbd> <kbd>PgDn</kbd> przełączają sceny.</div>
 </section>
 
 <section id="pngPop" class="pop" role="dialog" aria-label="Eksport PNG" hidden>

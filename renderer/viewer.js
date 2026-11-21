@@ -127,7 +127,7 @@ export class Viewer {
     this.cam.lookAt(4, 4, 2);
     // rzut równoległy: kamera ortograficzna podąża za perspektywiczną (ta sama orbita i kierunek)
     this.ocam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 12000);
-    this.ortho = false; this.orthoH = 20;
+    this.ortho = false; this.orthoH = 20; this.twoPoint = false; this.shift = 0;
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xe9e4d8, 1.6);
     this.hemi.position.set(0, 0, 1);
@@ -192,6 +192,7 @@ export class Viewer {
   toggleOrtho() {
     const f = this.cam.getWorldDirection(new THREE.Vector3()), t = Math.tan(this.cam.fov * Math.PI / 360);
     if (!this.ortho) {
+      if (this.twoPoint) this.setTwoPoint(false);
       const P = this.pivotAt(this.w / 2, this.h / 2);
       this.orthoH = Math.max(0.5, P.clone().sub(this.cam.position).dot(f) * t);
       this.ortho = true;
@@ -227,7 +228,7 @@ export class Viewer {
     const dpr = window.devicePixelRatio || 1;
     this.overlay.width = w * dpr; this.overlay.height = h * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.cam.aspect = w / h; this.cam.updateProjectionMatrix();
+    this.cam.aspect = w / h; this.applyShift();
     this.needs = true;
   }
 
@@ -552,6 +553,15 @@ export class Viewer {
   }
   orbit(dx, dy, pivot) {
     const cam = this.cam, Z = new THREE.Vector3(0, 0, 1);
+    if (this.twoPoint) {
+      // perspektywa dwupunktowa: obrót tylko wokół pionu, ruch w pionie przesuwa obiektyw (piony zostają pionowe)
+      const q = new THREE.Quaternion().setFromAxisAngle(Z, -dx * 0.006);
+      const fwd = cam.getWorldDirection(new THREE.Vector3()).applyQuaternion(q);
+      cam.position.sub(pivot).applyQuaternion(q).add(pivot);
+      cam.up.set(0, 0, 1); cam.lookAt(cam.position.clone().add(fwd));
+      this.shift = Math.max(-3, Math.min(3, this.shift - dy * 0.006 / Math.tan(cam.fov * Math.PI / 360)));
+      this.applyShift(); this.needs = true; return;
+    }
     const fwd = new THREE.Vector3(); cam.getWorldDirection(fwd);
     const right = new THREE.Vector3().crossVectors(fwd, Z).normalize();
     const pitchNow = Math.asin(Math.max(-1, Math.min(1, fwd.z)));
@@ -595,7 +605,35 @@ export class Viewer {
     cam.position.lerp(target, k);
     this.needs = true;
   }
+  // widoki standardowe: kierunek patrzenia kamery
+  setView(name) {
+    const D = { top: [0, 0.0001, -1], front: [0, 1, 0], back: [0, -1, 0], right: [-1, 0, 0], left: [1, 0, 0], iso: [-1, 1, -0.82] }[name];
+    if (!D) return;
+    if (name === 'top' && this.twoPoint) this.setTwoPoint(false);
+    const f = new THREE.Vector3(...D).normalize();
+    this.cam.up.set(0, 0, 1); this.cam.lookAt(this.cam.position.clone().add(f));
+    this.zoomExtents();
+  }
+  setTwoPoint(on) {
+    const cam = this.cam;
+    if (on) {
+      if (this.ortho) this.toggleOrtho();
+      const f = cam.getWorldDirection(new THREE.Vector3()), p = Math.asin(Math.max(-0.99, Math.min(0.99, f.z)));
+      if (Math.abs(f.z) > 0.97) f.set(0, 1, 0); else f.setZ(0).normalize();
+      this.shift = Math.max(-3, Math.min(3, Math.tan(p) / Math.tan(cam.fov * Math.PI / 360)));
+      cam.up.set(0, 0, 1); cam.lookAt(cam.position.clone().add(f));
+      this.twoPoint = true;
+    } else { this.twoPoint = false; this.shift = 0; }
+    this.applyShift(); this.needs = true;
+  }
+  applyShift() {
+    const cam = this.cam;
+    if (this.twoPoint && this.shift) cam.setViewOffset(this.w, this.h, 0, -this.shift * this.h / 2, this.w, this.h); else cam.clearViewOffset();
+    cam.updateProjectionMatrix();
+  }
+  setFov(deg) { this.cam.fov = Math.max(10, Math.min(110, deg)); this.cam.updateProjectionMatrix(); this.needs = true; }
   zoomExtents(only) {
+    if (this.twoPoint) { this.shift = 0; this.applyShift(); }
     const b = this.model && (only?.length ? bounds(this.model, null, only) : bounds(this.model, this.underlayBounds));
     const cam = this.cam;
     const center = b ? new THREE.Vector3(...b.center) : new THREE.Vector3(0, 0, 0);
@@ -607,13 +645,14 @@ export class Viewer {
     cam.lookAt(center);
     this.needs = true;
   }
-  getCamera() { const f = this.cam.getWorldDirection(new THREE.Vector3()); return { p: this.cam.position.toArray(), f: f.toArray(), fov: this.cam.fov, ortho: this.ortho, orthoH: this.orthoH }; }
+  getCamera() { const f = this.cam.getWorldDirection(new THREE.Vector3()); return { p: this.cam.position.toArray(), f: f.toArray(), fov: this.cam.fov, ortho: this.ortho, orthoH: this.orthoH, twoPoint: !!this.twoPoint, shift: this.shift || 0 }; }
   setCamera(c) {
     if (!c) return;
     this.cam.position.fromArray(c.p); if (c.fov) this.cam.fov = c.fov;
     this.ortho = !!c.ortho; if (c.orthoH) this.orthoH = c.orthoH;
     this.cam.up.set(0, 0, 1); this.cam.lookAt(this.cam.position.clone().add(new THREE.Vector3().fromArray(c.f)));
-    this.cam.updateProjectionMatrix(); this.needs = true;
+    this.twoPoint = !!c.twoPoint && !this.ortho; this.shift = this.twoPoint ? c.shift || 0 : 0;
+    this.applyShift(); this.needs = true;
   }
 
   /* ---------- podkład CAD ---------- */

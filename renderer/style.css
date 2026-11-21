@@ -160,3 +160,17 @@ details.more[open]{display:flex;flex-direction:column;gap:10px}
 
 .tip{position:fixed;z-index:70;display:flex;align-items:center;gap:8px;height:28px;padding:0 6px 0 10px;border-radius:7px;background:var(--tip);color:var(--tiptext);font-size:12px;white-space:nowrap;pointer-events:none}
 .tip kbd{background:#3a3a38;color:#f7f7f5;box-shadow:none}
+
+/* widok i sceny */
+.views{display:grid;grid-template-columns:repeat(2,1fr);gap:4px}
+#fovLbl{width:auto;min-width:86px;white-space:nowrap;text-align:center}
+.views button{height:30px;border-radius:7px;background:var(--soft);color:var(--text);font-size:12px;display:flex;align-items:center;justify-content:space-between;padding:0 10px}
+.views button:hover{background:var(--hover)}
+.views button kbd{background:none;box-shadow:none;color:var(--muted2);padding:0;font-size:11px}
+.scenes{display:flex;flex-direction:column;gap:4px}
+.scenes:empty{display:none}
+.scene{display:flex;align-items:center;gap:4px}
+.scene .no{width:26px;height:28px;border-radius:7px;background:var(--soft);font-size:12px;color:var(--muted);flex:none}
+.scene .no:hover,.scene.on .no{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
+.scene input{flex:1;min-width:0;height:28px}
+.scene .ib{width:26px;height:28px;flex:none}

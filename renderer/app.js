@@ -338,9 +338,15 @@ function run(act) {
     case 'hideSimilar': hideSimilar(); break;
     case 'hideSel': hideSel(); break;
     case 'unhideAll': unhideAll(); break;
-    case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); break;
+    case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'viewIso': case 'viewTop': case 'viewFront': case 'viewRight': case 'viewBack': case 'viewLeft': viewer.setView(act.slice(4).toLowerCase()); renderViewChip(); renderViewPop(); break;
+    case 'twoPoint': viewer.setTwoPoint(!viewer.twoPoint); toast(viewer.twoPoint ? 'Perspektywa dwupunktowa' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
+    case 'views': openPop('#viewPop', $('#viewBtn')); break;
+    case 'sceneAdd': addScene(); break;
+    case 'scenePrev': goScene(-1); break;
+    case 'sceneNext': goScene(1); break;
     case 'solidUnion': solidOp('union'); break;
     case 'solidIntersect': solidOp('intersect'); break;
     case 'solidSubtract': solidOp('subtract'); break;
@@ -406,7 +412,7 @@ function toggleCut() {
 function renderViewChip() {
   const n = hiddenCount(), b = $('#hiddenChip');
   b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
-  $('#orthoChip').hidden = !viewer.ortho;
+  $('#orthoChip').hidden = !viewer.ortho && !viewer.twoPoint; $('#orthoChip').textContent = viewer.ortho ? 'Rzut równoległy' : 'Perspektywa dwupunktowa';
   const ed = app.editing && app.model.groups.find(g => g.id === app.editing), eb = $('#editChip');
   eb.hidden = !ed && app.editSolid == null;
   if (app.editSolid != null) eb.textContent = 'Edytujesz bryłę — wierzchołki, krawędzie, ściany · wyjdź';
@@ -483,6 +489,7 @@ function openPop(sel, anchor, side) {
   if (sel === '#sunPop') renderSun();
   if (sel === '#pngPop') renderPng();
   if (sel === '#underPop') renderUnder();
+  if (sel === '#viewPop') renderViewPop();
 }
 function closePops() {
   let any = false;
@@ -494,6 +501,61 @@ document.addEventListener('pointerdown', e => {
   if (e.target.closest('.pop, .menu, header button, #tools button')) return;
   if (!e.target.closest('#view')) closePops();
 });
+
+/* ---------- widok, kamera, sceny ---------- */
+const VIEWS = [['viewIso', 'Izometria'], ['viewTop', 'Góra'], ['viewFront', 'Przód'], ['viewRight', 'Prawy'], ['viewBack', 'Tył'], ['viewLeft', 'Lewy']];
+app.scenes = []; app.scene = -1;
+const mmOf = fov => Math.round(12 / Math.tan(fov * Math.PI / 360));
+$('#viewBtn').addEventListener('click', () => openPop('#viewPop', $('#viewBtn')));
+function renderViewPop() {
+  if ($('#viewPop').hidden) return;
+  const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"><span>${n}</span>${k(id)}</button>`).join('');
+  $('#viewGrid').querySelectorAll('button').forEach(b => b.addEventListener('click', () => run(b.dataset.a)));
+  const proj = viewer.ortho ? 'ortho' : viewer.twoPoint ? 'two' : 'persp';
+  document.querySelectorAll('#projSeg button').forEach(b => b.classList.toggle('on', b.dataset.proj === proj));
+  const f = $('#fovRange'); f.value = Math.round(viewer.cam.fov); f.disabled = viewer.ortho; setRangeFill(f);
+  $('#fovLbl').textContent = viewer.ortho ? '—' : Math.round(viewer.cam.fov) + '° · ' + mmOf(viewer.cam.fov) + ' mm';
+  const L = $('#sceneList');
+  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num" title="Pokaż scenę">${i + 1}</button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="Nazwa sceny"><button class="ib" data-u title="Zapisz bieżący widok w tej scenie"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="Usuń scenę"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
+  L.querySelectorAll('.scene').forEach(row => {
+    const i = +row.dataset.i;
+    row.querySelector('.no').addEventListener('click', () => showScene(i));
+    const inp = row.querySelector('input');
+    inp.addEventListener('change', () => { app.scenes[i].name = inp.value.trim() || 'Scena ' + (i + 1); app.markDirty(); });
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); });
+    row.querySelector('[data-u]').addEventListener('click', () => { app.scenes[i] = { ...captureScene(), name: app.scenes[i].name }; app.scene = i; app.markDirty(); renderViewPop(); toast('Zaktualizowano scenę „' + app.scenes[i].name + '”'); });
+    row.querySelector('[data-d]').addEventListener('click', () => { app.scenes.splice(i, 1); if (app.scene >= app.scenes.length) app.scene = app.scenes.length - 1; app.markDirty(); renderViewPop(); });
+  });
+}
+document.querySelectorAll('#projSeg button').forEach(b => b.addEventListener('click', () => {
+  const want = b.dataset.proj;
+  if (want === 'ortho') { if (!viewer.ortho) viewer.toggleOrtho(); }
+  else { if (viewer.ortho) viewer.toggleOrtho(); viewer.setTwoPoint(want === 'two'); }
+  renderViewChip(); renderViewPop();
+}));
+$('#fovRange').addEventListener('input', e => { viewer.setFov(+e.target.value); setRangeFill(e.target); $('#fovLbl').textContent = Math.round(viewer.cam.fov) + '° · ' + mmOf(viewer.cam.fov) + ' mm'; });
+$('#sceneAdd').addEventListener('click', addScene);
+const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, sun: { ...viewer.sunCfg } });
+function addScene() {
+  app.scenes.push({ name: 'Scena ' + (app.scenes.length + 1), ...captureScene() });
+  app.scene = app.scenes.length - 1; app.markDirty();
+  toast('Dodano scenę „' + app.scenes[app.scene].name + '”');
+  renderViewPop();
+}
+function showScene(i) {
+  const sc = app.scenes[i]; if (!sc) return;
+  app.scene = i;
+  viewer.setCamera(sc.camera);
+  if (sc.style && STYLES[sc.style]) setStyle(sc.style);
+  if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
+  renderViewChip(); renderViewPop();
+}
+function goScene(d) {
+  if (!app.scenes.length) return toast('Nie ma jeszcze scen — dodaj je w okienku Widok.');
+  const i = ((app.scene < 0 ? (d > 0 ? -1 : 0) : app.scene) + d + app.scenes.length) % app.scenes.length;
+  showScene(i); toast(app.scenes[i].name);
+}
 
 /* ---------- słońce ---------- */
 const MON = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
@@ -755,7 +817,7 @@ $('#fileBtn').addEventListener('click', () => {
 function serialize() {
   return JSON.stringify({
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
-    sun: viewer.sunCfg, axes: viewer.showAxes, units: getUnit(), underlay: app.underlay
+    sun: viewer.sunCfg, axes: viewer.showAxes, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
 }
 function load(text, name, path) {
@@ -770,6 +832,7 @@ function load(text, name, path) {
   app.opSeq++;
   viewer.showAxes = d.axes !== false;
   app.underlay = d.underlay || null; applyUnderlay();
+  app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
 }
@@ -778,7 +841,7 @@ async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma ni
 async function newSketch() {
   if (!(await confirmDiscard())) return;
   app.editing = null; viewer.editGroup = null;
-  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay();
+  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
 }
 async function openSketch(p) {
@@ -826,7 +889,7 @@ function toast(text, action) {
 app.toast = (t, a) => toast(t, a);
 $('#hiddenChip').addEventListener('click', () => unhideAll());
 $('#editChip').addEventListener('click', () => app.editSolid != null ? app.exitSolid() : app.exitGroup());
-$('#orthoChip').addEventListener('click', () => run('persp'));
+$('#orthoChip').addEventListener('click', () => run(viewer.ortho ? 'persp' : 'twoPoint'));
 
 /* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */
 const THEME_NAME = { auto: 'automatyczny', light: 'jasny', dark: 'ciemny' };
