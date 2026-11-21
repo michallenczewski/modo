@@ -17,9 +17,9 @@
     async pickBinary(ext) { const f = await pick([].concat(ext).map(x => '.' + x).join(',')); return f ? { path: null, name: f.name, data: new Uint8Array(await f.arrayBuffer()) } : null; },
     async pickUnderlay() {
       const f = await pick('.dxf,.dwg'); if (!f) return null;
-      if (/\.dwg$/i.test(f.name)) return { name: f.name, error: 'W przeglądarce DWG nie da się zamienić — użyj programu albo pliku DXF', code: 'WEB' };
-      return { path: null, name: f.name, data: new Uint8Array(await f.arrayBuffer()) };
+      return { path: null, name: f.name, dwg: /\.dwg$/i.test(f.name), data: new Uint8Array(await f.arrayBuffer()) };
     },
+    async dwgViaOda() { return { error: 'Brak programu ODA File Converter', code: 'NO_ODA' }; },
     async odaStatus() { return { path: null, web: true }; },
     async odaPick() { return null; },
     showInFolder() {}, openExternal(url) { window.open(url, '_blank'); },

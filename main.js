@@ -180,6 +180,10 @@ ipcMain.handle('pick-binary', async (e, ext, label) => {
   try { return { path: r.filePaths[0], name: path.basename(r.filePaths[0]), data: new Uint8Array(await fsp.readFile(r.filePaths[0])) }; }
   catch (err) { return { name: path.basename(r.filePaths[0]), error: err.message }; }
 });
+ipcMain.handle('dwg-oda', async (e, p) => {
+  try { return { data: new Uint8Array(await dwgToDxf(p)) }; }
+  catch (err) { return { error: err.message, code: err.code || null }; }
+});
 ipcMain.handle('underlay-pick', async (e, p) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!p) {
@@ -187,10 +191,10 @@ ipcMain.handle('underlay-pick', async (e, p) => {
     if (r.canceled || !r.filePaths[0]) return null;
     p = r.filePaths[0];
   }
+  // DWG czyta sam program (LibreDWG w oknie); ODA File Converter jest tylko zapasem — patrz 'dwg-oda'
   const isDwg = /\.dwg$/i.test(p);
   try {
-    const data = isDwg ? await dwgToDxf(p) : await fsp.readFile(p);
-    return { path: p, name: path.basename(p), converted: isDwg, data: new Uint8Array(data) };
+    return { path: p, name: path.basename(p), dwg: isDwg, data: new Uint8Array(await fsp.readFile(p)) };
   } catch (err) {
     return { path: p, name: path.basename(p), error: err.message, code: err.code || null };
   }

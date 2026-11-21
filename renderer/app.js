@@ -944,8 +944,19 @@ async function pickUnderlay(path) {
     return;
   }
   try {
-    const d = parseDxf(r.data);
-    app.underlay = { name: r.name, path: r.path || null, converted: !!r.converted, height: app.underlay?.height ?? 0, opacity: 0.6, snap: true, units: d.units, offset: d.offset, layers: d.layers, truncated: d.truncated };
+    let d;
+    if (r.dwg) {
+      toast('Czytam ' + r.name + '…'); await new Promise(res => setTimeout(res, 30));
+      try { d = await (await import('./dwg.js')).readDwg(r.data, parseDxf); }
+      catch (err) {
+        // zapas: ODA File Converter, jeśli jest zainstalowany
+        const o = r.path ? await api.dwgViaOda(r.path) : { code: 'NO_ODA' };
+        if (o.data) d = parseDxf(o.data);
+        else if (o.code === 'NO_ODA') { toast('Tego pliku DWG nie udało się odczytać wbudowanym czytnikiem. Pomoże darmowy ODA File Converter albo zapis rysunku jako DXF.', api.web ? null : ['Pobierz ODA', () => api.openExternal('https://www.opendesign.com/guestfiles/oda_file_converter')]); return; }
+        else throw new Error(o.error || err.message);
+      }
+    } else d = parseDxf(r.data);
+    app.underlay = { name: r.name, path: r.path || null, converted: !!r.dwg, height: app.underlay?.height ?? 0, opacity: 0.6, snap: true, units: d.units, offset: d.offset, layers: d.layers, truncated: d.truncated };
     applyUnderlay();
     viewer.zoomExtents();
     closePops(); openPop('#underPop', $('#underBtn'));
@@ -958,15 +969,15 @@ async function renderUnder() {
   $('#underEmpty').hidden = !!u; $('#underFull').hidden = !u;
   if (!u) {
     const s = await api.odaStatus();
-    $('#odaInfo').innerHTML = s.web ? 'W wersji przeglądarkowej działa tylko DXF.'
-      : s.path ? 'ODA File Converter jest zainstalowany — pliki DWG zadziałają.'
-        : 'Do plików DWG potrzebny jest darmowy ODA File Converter. <a href="#" id="odaGet">Pobierz</a> · <a href="#" id="odaPick">Wskaż program…</a>';
+    $('#odaInfo').innerHTML = s.web ? ''
+      : s.path ? 'ODA File Converter jest zainstalowany — posłuży jako zapas, gdyby wbudowany czytnik nie poradził sobie z plikiem.'
+        : 'Gdyby jakiś plik DWG się nie otworzył, zapasem jest darmowy ODA File Converter. <a href="#" id="odaGet">Pobierz</a> · <a href="#" id="odaPick">Wskaż program…</a>';
     $('#odaGet')?.addEventListener('click', e => { e.preventDefault(); api.openExternal('https://www.opendesign.com/guestfiles/oda_file_converter'); });
     $('#odaPick')?.addEventListener('click', async e => { e.preventDefault(); await api.odaPick(); renderUnder(); });
     return;
   }
   $('#underName').textContent = u.name;
-  $('#underInfo').textContent = (u.converted ? 'Zamieniony na DXF (ODA File Converter) · ' : '') + 'środek rysunku przesunięty do początku układu' + (u.truncated ? ' · plik bardzo duży, część linii pominięta' : '');
+  $('#underInfo').textContent = (u.converted ? 'Odczytany z DWG · ' : '') + 'środek rysunku przesunięty do początku układu' + (u.truncated ? ' · plik bardzo duży, część linii pominięta' : '');
   if (document.activeElement !== $('#underH')) $('#underH').value = String(u.height).replace('.', ',') + ' m';
   $('#underUnits').value = u.units;
   const op = $('#underOp'); op.value = u.opacity; setRangeFill(op);

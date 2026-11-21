@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   savePng: (buf, suggested) => ipcRenderer.invoke('png-save', buf, suggested),
   saveObj: (obj, mtl, suggested) => ipcRenderer.invoke('obj-save', obj, mtl, suggested),
   pickBinary: (ext, label) => ipcRenderer.invoke('pick-binary', ext, label),
+  dwgViaOda: p => ipcRenderer.invoke('dwg-oda', p),
   pickUnderlay: p => ipcRenderer.invoke('underlay-pick', p || null),
   odaStatus: () => ipcRenderer.invoke('oda-status'),
   odaPick: () => ipcRenderer.invoke('oda-pick'),

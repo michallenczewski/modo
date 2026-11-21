@@ -16,7 +16,9 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 - `Ctrl` (Windows) albo `⌥` (Mac): przy wypychaniu nowa bryła z zostawieniem istniejących krawędzi, przy przesuwaniu i obracaniu kopia.
 - Zamknięte obrysy z linii i łuków same zamieniają się w ściany; okręgi po wypchnięciu dają walce z miękkimi krawędziami.
 - Słońce według daty i godziny (domyślnie Warszawa), miękkie cienie; trzy style: Szkic, Kreska, Model (`⇧1`, `⇧2`, `⇧3`); wygląd automatyczny, jasny albo ciemny.
-- Podkład z DXF (warstwy, wysokość, krycie, przyklejanie); DWG przez ODA File Converter, jeśli jest zainstalowany.
+- Podkład z DXF i DWG (warstwy, wysokość, krycie, przyklejanie). DWG czyta wbudowany LibreDWG, także w wersji przeglądarkowej.
+- Import modeli SketchUpa (`.skp`, menu Plik): grupy i komponenty z zagnieżdżeniami, warstwy, sceny, kolory i przezroczystość materiałów, miękkie krawędzie. Bez tekstur. Model trafia do szkicu jako jedna grupa.
+- Operacje na bryłach i wycięcia liczy Manifold — wynik jest zawsze szczelną bryłą.
 - Zapis i otwieranie plików `.modo`, eksport PNG w wysokiej rozdzielczości (jasny albo ciemny) i OBJ.
 - Skróty w układzie Q W E R / A S D / Z X C, każdy do zmiany w oknie skrótów (`?`).
 - Bryły z dowolnych ścian: dwuklik w bryłę pozwala przesuwać jej wierzchołki, krawędzie i ściany (W), dzielić ściany linią i wypychać część ściany. Bryły można łączyć, przecinać, odejmować i przycinać (menu podręczne albo okno skrótów).
@@ -30,9 +32,11 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 
 Instalatory są w [Wydaniach](https://github.com/michallenczewski/modo/releases). Na Macu program nie jest podpisany u Apple: przy pierwszym uruchomieniu kliknij go w Aplikacjach prawym przyciskiem → Otwórz.
 
-Plików SketchUpa (`.skp`) Modo nie otwiera — to format zamknięty. Model ze SketchUpa można przenieść przez DXF albo OBJ.
+Pliki DWG Modo czyta samo. Gdyby któryś się nie otworzył, zapasem jest darmowy [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) — instaluje się go osobno (jego licencja nie pozwala dołączyć go do programu), a Modo znajdzie go samo.
 
-Do plików DWG potrzebny jest darmowy [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter). Licencja ODA nie pozwala dołączyć go do Modo, więc instaluje się go osobno; Modo znajdzie go sam.
+## Licencja i biblioteki
+
+Modo jest wolnym oprogramowaniem na licencji GNU GPL w wersji 3 lub nowszej (plik `LICENSE`). Korzysta z bibliotek: [three.js](https://github.com/mrdoob/three.js) (MIT), [Manifold](https://github.com/elalish/manifold) (Apache-2.0), [OpenSKP](https://github.com/iamahsanmehmood/openskp) (MIT) z [fflate](https://github.com/101arrowz/fflate) i [earcut](https://github.com/mapbox/earcut), [LibreDWG](https://www.gnu.org/software/libredwg/) w wydaniu [libredwg-web](https://github.com/mlightcad/libredwg-web) (GPL-3).
 
 ## Praca nad programem
 

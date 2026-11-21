@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Lekki szkicownik brył architektonicznych",
   "author": "Michał Lenczewski",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "main": "main.js",
   "scripts": {

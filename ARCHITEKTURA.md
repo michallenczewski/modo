@@ -22,6 +22,9 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/annot.js` | Wymiary i opisy: rysowanie na płaskiej nakładce (okno i PNG) i trafianie kursorem. |
 | `renderer/export.js` | Eksport OBJ + MTL (wycięcia odjęte, obiekty nazwane ścieżką grup, oś Y w górę). |
 | `renderer/lib.js` | Biblioteka modeli budowanych z kodu (samochód, van, ludzie, drzewa 2D, krzew, ławka) i zapis własnych modeli w `localStorage` (`modo.library`). |
+| `renderer/solid.js` | Operacje na bryłach przez Manifold (WASM). Każda funkcja może zwrócić `null` — wtedy `csg.js` liczy po staremu drzewami BSP. |
+| `renderer/skp.js` | Import `.skp`: model z OpenSKP → bryły z dowolnych ścian, linie, grupy, komponenty, warstwy, sceny. |
+| `renderer/dwg.js` | Czytanie DWG przez LibreDWG (WASM): baza encji → prosty tekst DXF → `dxf.js`; druga droga to zapis DXF samego LibreDWG. |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
 
 ## Model
@@ -69,10 +72,29 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 
 Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
+## Biblioteki zewnętrzne
+
+Wszystkie leżą w `renderer/vendor/` jako gotowe pliki, żeby program i wersja przeglądarkowa działały bez budowania. Ciężkie moduły (OpenSKP, LibreDWG) ładują się dopiero przy pierwszym użyciu.
+
+| Katalog | Co to | Skąd i jak odświeżyć |
+| --- | --- | --- |
+| `three.*` | three.js r187 (MIT) | `build/` wydania three.js |
+| `manifold/` | Manifold (Apache-2.0), commit 8c41f36 z 21.11.2026 | `manifold.wasm` i klej Emscripten z gałęzi `gh-pages` repozytorium elalish/manifold (`assets/three/`): z pliku `three.js` wycięta funkcja modułu (ta z `manifold.wasm` w środku), ścieżka do `.wasm` zmieniona na względną, import pomocnika Vite zamieniony na `node:module`. Prościej: `manifold.js` i `manifold.wasm` z paczki npm `manifold-3d`. |
+| `openskp/` | OpenSKP 1.5.0 (MIT), commit 8373731 | Z `packages/typescript/src` tylko pliki czytnika (`parser, vff, legacy, geometry, model, transforms, errors, observability, edge-flags, edge-store, vertex-store, face-groups, pages-dimensions, triangulator`) skompilowane `tsc --target es2020 --module esnext`; `index.js` to wycięta funkcja `parseToRaw` plus `parseSkp` i `buildScene`; importy dostają końcówkę `.js`, `fflate` i `earcut` wskazują sąsiednie katalogi. |
+| `fflate/`, `earcut/` | rozpakowywanie ZIP i triangulacja dla OpenSKP (MIT, ISC) | `src/index.ts` fflate skompilowany `tsc` (wątki zastąpione atrapą `node-worker.js`); `src/earcut.js` bez zmian |
+| `libredwg/` | libredwg-web (GPL-3), commit 8e307b3 | `bindings/javascript/wasm/` bez zmian oraz `bindings/javascript/src` skompilowane `tsc`; w `libredwg.js` import modułu WASM wskazuje `./wasm/`. |
+
+**Manifold** wymaga w nagłówku CSP `'wasm-unsafe-eval'` i `'unsafe-eval'` (klej embind buduje funkcje dynamicznie). Program ładuje wyłącznie własne pliki, więc to dopuszczalne; nie ładuj w oknie niczego z sieci.
+
+**LibreDWG bywa zawodny**: na części plików przerywa moduł WASM albo psuje jego pamięć. Dlatego `dwg.js` (1) dla każdego pliku tworzy świeży egzemplarz modułu, (2) czyta z bazy tylko encje potrzebne w podkładzie — teksty, kreskowania, bryły ACIS i pełny nagłówek są pomijane, bo to na nich wykładał się najczęściej, (3) ma drugą drogę (własny zapis DXF LibreDWG, lepszy dla formatów R13–2000), a w programie trzecią: ODA File Converter, jeśli jest zainstalowany. Na próbkach LibreDWG (R13–2018) wynik zgadza się z wzorcowymi DXF; jedna próbka z dziesięciu (`example_2018.dwg`) nie przechodzi żadną z dwóch dróg.
+
+**Import .skp**: geometria każdego wystąpienia komponentu jest kopiowana do świata (tak działa cały model Modo), więc model z tysiącami kopii rośnie. Kolor bryły to najczęstszy materiał jej ścian — Modo nie ma koloru na pojedynczej ścianie ani tekstur. Miękkie krawędzie są zapisane w bryle jako `softs` (odcinki), rysowane tylko jako kontur.
+
 ## Sygnały, że trzeba wrócić do tematu
 
 - **Wydajność przy dużych modelach** — dziś każda zmiana przebudowuje całą geometrię. Przy setkach brył trzeba przebudowywać tylko zmienione.
 - **Geometria łączona między bryłami** (wspólne krawędzie różnych brył) — dzielenie ścian działa w obrębie jednej bryły (tryb edycji bryły); łączenie brył w jedną to „Suma brył”. Pełna lepka geometria jak w SketchUpie byłaby zmianą modelu.
-- **Otwieranie .skp** — możliwe tylko przez oficjalne SketchUp C SDK (biblioteka natywna, osobne warunki Trimble) albo niedojrzałe czytniki open source. Dziś świadomie nie.
+- **Duże modele ze SketchUpa** — powyżej kilkudziesięciu tysięcy ścian przebudowa sceny i cofanie (kopia całego modelu) zaczynają być odczuwalne. Wtedy: przebudowa tylko zmienionych brył i współdzielona geometria kopii komponentu.
+- **Kolor na ścianie i tekstury** — import .skp sprowadza materiały do jednego koloru na bryłę.
 - **Wiele wycięć w dużych bryłach** — CSG liczy się przy każdej przebudowie sceny (także w trakcie push/pull). Przy dziesiątkach okien w jednej bryle trzeba będzie zapamiętywać wynik i liczyć tylko zmienione bryły.
 - **Bardzo duże podkłady** — przyklejanie korzysta z siatki odcinków (`Snapper.setUnderlay`), rysowanie z jednego `LineSegments` na warstwę. Powyżej ~600 tys. odcinków czytnik przerywa.

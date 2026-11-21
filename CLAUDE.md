@@ -7,7 +7,9 @@
 - Michał pracuje na Windows w biurze i na Macu w domu: opisy skrótów i podpowiedzi muszą się zgadzać dla obu systemów (⌘/⌥ i Ctrl/Alt).
 - Domyślne skróty to układ Michała (Q zaznacz, W przesuń, E obróć, R skaluj, A linia, S gumka, D prostokąt, F ukryj resztę, G ukryj podobne, Z pokaż wszystko, X push/pull, C perspektywa/równoległy, M wiaderko) — w `renderer/keys.js`. Nie zmieniaj ich bez jego prośby. Pozostałe skróty dobrałem sam (lista w oknie skrótów); nowe polecenia dostają wolne klawisze albo żadnego.
 - three.js leży w `renderer/vendor/` (wersja r187, bez npm), żeby program i wersja przeglądarkowa działały bez budowania. Aktualizacja: podmień `three.module.js` i `three.core.js` z `build/` wydania three.js.
-- ODA File Converter (DWG → DXF) nie może być dołączany do programu — licencja ODA zabrania rozpowszechniania. Modo tylko wywołuje program zainstalowany na komputerze.
-- Plików .skp nie otwieramy (format zamknięty).
+- DWG czyta wbudowany LibreDWG (WASM, `renderer/dwg.js`); ODA File Converter jest tylko zapasem i nie może być dołączany do programu — licencja ODA zabrania rozpowszechniania, Modo najwyżej wywołuje program zainstalowany na komputerze.
+- Modo jest na licencji GPL-3.0-or-later, bo dołącza LibreDWG (GPL-3). Michał nie planuje sprzedaży programu; nie dodawaj zależności, których licencja kłóci się z GPL-3.
+- Biblioteki w `renderer/vendor/` są dołączone jako gotowe pliki (bez npm): three.js, Manifold (bryły), OpenSKP + fflate + earcut (import .skp), LibreDWG. Skąd i jak je odświeżyć — w `ARCHITEKTURA.md`, rozdział „Biblioteki zewnętrzne”.
+- Pliki .skp importujemy przez OpenSKP (`renderer/skp.js`); to czytnik odtworzony z formatu, bez SDK Trimble — nie dodawaj oficjalnego SDK.
 - Program sam sprawdza nowe wersje w wydaniach GitHuba (`releases/latest`) i szuka pliku `Modo-<wersja>-win-x64.exe` albo `Modo-<wersja>-mac-<arm64|x64>.dmg`. Nie zmieniaj tych nazw.
 - Nowe miejsce, które pomija ukryte elementy, musi korzystać z `isHidden(model, e)` (warstwy i ukrywanie), a nie z samego pola `hidden`.
