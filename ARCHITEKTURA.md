@@ -18,6 +18,10 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/csg.js` | Odejmowanie brył (drzewa BSP na wzór csg.js) i wyciąganie krawędzi z wyniku: dzielenie na złączach T, pomijanie szwów w jednej płaszczyźnie, łączenie kawałków w całe krawędzie. |
 | `renderer/dxf.js` | Czytnik DXF do podkładu (linie, polilinie z łukami, okręgi, łuki, elipsy, splajny, bloki). |
 | `renderer/sun.js` | Położenie słońca (algorytm NOAA) dla daty, godziny i miejsca, z czasem letnim. |
+| `renderer/mesh.js` | Bryły z dowolnych ścian (`kind: 'mesh'`): ściany jako wielokąty, dzielenie linią, przesuwanie wierzchołków, wypychanie części ściany, operacje na bryłach (`booleanMesh`), pole i objętość. |
+| `renderer/annot.js` | Wymiary i opisy: rysowanie na płaskiej nakładce (okno i PNG) i trafianie kursorem. |
+| `renderer/export.js` | Eksport OBJ + MTL (wycięcia odjęte, obiekty nazwane ścieżką grup, oś Y w górę). |
+| `renderer/lib.js` | Biblioteka modeli budowanych z kodu (samochód, van, ludzie, drzewa 2D, krzew, ławka) i zapis własnych modeli w `localStorage` (`modo.library`). |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
 
 ## Model
@@ -40,7 +44,17 @@ Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę,
 
 **Rzut równoległy**: kamera ortograficzna (`ocam`) jest ustawiana przy każdej klatce z kamery perspektywicznej (`vc()`), 3 km za nią, z wysokością kadru `orthoH`. Nawigacja zawsze porusza kamerą perspektywiczną, a w rzucie równoległym przybliżanie zmienia `orthoH`.
 
-Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model, kamera, styl, słońce, podkład (już przeliczony na metry, więc działa na obu komputerach bez oryginalnego DXF).
+**Wymiary i opisy** (`model.dims`, `model.texts`) leżą w świecie, ale rysuje się je płasko na nakładce 2D (`drawAnnotations`), więc są czytelne pod każdym kątem; eksport PNG rysuje je drugi raz w rozdzielczości obrazu. Id w zaznaczeniu: `'d' + id`, `'t' + id`; przesuwanie i obracanie traktuje je jak odcinki (`eachTarget`).
+
+**Przekrój** (`model.sections`: punkt `o`, normalna `n`, `on`) — jeden aktywny naraz. Ściany dostają `clippingPlanes` three.js (z `clipShadows`), shader krawędzi przycina odcinki tą samą płaszczyzną (uniform `sect`), a każda przecięta bryła dostaje drugą siatkę z materiałem `BackSide` w kolorze wypełnienia: przez przecięcie widać jej wnętrze, więc wygląda jak wypełniony przekrój. Linia cięcia to przecięcie trójkątów z płaszczyzną, rysowane na nakładce (`drawSection`).
+
+**Warstwy** (`model.tags`) — elementy i grupy mają pole `tag`. Widoczność sprawdza `isHidden(model, e)`: własna flaga `hidden`, warstwa elementu albo warstwa którejkolwiek z grup nad nim. Wszystkie miejsca, które pomijają ukryte (scena, przyklejanie, zaznaczanie, granice modelu, eksport), korzystają z tej funkcji.
+
+**Figury 2D** (ludzie, drzewa z biblioteki) to płaskie ściany z flagą `bill`. Viewer buduje je osobno (`addBillboard`) we własnej grupie z osią w punkcie `o` i przy każdej klatce obraca je wokół pionu do kamery (`faceBillboards`).
+
+**Kamera**: widoki standardowe (`setView`), perspektywa dwupunktowa (`twoPoint`: kamera pozioma, a patrzenie w górę i w dół to przesunięcie obiektywu przez `setViewOffset`), kąt widzenia (`setFov`). Sceny (`app.scenes`, zapisywane w pliku obok modelu) pamiętają kamerę, styl, słońce i aktywny przekrój.
+
+Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model, kamera, styl, słońce, sceny, podkład (już przeliczony na metry, więc działa na obu komputerach bez oryginalnego DXF).
 
 ## Rysunek
 
@@ -58,6 +72,7 @@ Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model
 ## Sygnały, że trzeba wrócić do tematu
 
 - **Wydajność przy dużych modelach** — dziś każda zmiana przebudowuje całą geometrię. Przy setkach brył trzeba przebudowywać tylko zmienione.
-- **Geometria łączona** (dzielenie ścian liniami, wspólne krawędzie brył) — to zmiana modelu, nie dodatek. Zastanowić się przed.
+- **Geometria łączona między bryłami** (wspólne krawędzie różnych brył) — dzielenie ścian działa w obrębie jednej bryły (tryb edycji bryły); łączenie brył w jedną to „Suma brył”. Pełna lepka geometria jak w SketchUpie byłaby zmianą modelu.
+- **Otwieranie .skp** — możliwe tylko przez oficjalne SketchUp C SDK (biblioteka natywna, osobne warunki Trimble) albo niedojrzałe czytniki open source. Dziś świadomie nie.
 - **Wiele wycięć w dużych bryłach** — CSG liczy się przy każdej przebudowie sceny (także w trakcie push/pull). Przy dziesiątkach okien w jednej bryle trzeba będzie zapamiętywać wynik i liczyć tylko zmienione bryły.
 - **Bardzo duże podkłady** — przyklejanie korzysta z siatki odcinków (`Snapper.setUnderlay`), rysowanie z jednego `LineSegments` na warstwę. Powyżej ~600 tys. odcinków czytnik przerywa.
