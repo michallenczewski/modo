@@ -2,7 +2,7 @@
 // i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
 
 import * as THREE from './vendor/three.module.js';
-import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, V } from './model.js';
+import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, V } from './model.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
 
@@ -242,6 +242,7 @@ export class Viewer {
     const paper = new THREE.Color(st.paper);
     const edgeList = [];
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
+    this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
     const cutters = this.model.shapes.filter(s => s.op === 'cut' && !s.hidden && s.h > 0).map(s => ({ s, box: boxOf(s) }));
     const polysOf = s => {
       const out = [];
@@ -313,7 +314,7 @@ export class Viewer {
     return base;
   }
   // przy edycji grupy reszta modelu jest przygaszona
-  dimmed(s) { return this.editGroup != null && s.g !== this.editGroup; }
+  dimmed(s) { return this.editGroup != null && !(this.editSet && this.editSet.has(s.g)); }
   // materiał ściany: kolor, przezroczystość (szkło)
   matFor(s, st, paper, flat) {
     const a = s.alpha ?? 1, glass = a < 0.999;

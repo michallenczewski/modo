@@ -364,13 +364,35 @@ export function boxOf(s) {
 export const boxesTouch = (a, b, e = 1e-4) => a.lo[0] <= b.hi[0] + e && b.lo[0] <= a.hi[0] + e && a.lo[1] <= b.hi[1] + e && b.lo[1] <= a.hi[1] + e && a.lo[2] <= b.hi[2] + e && b.lo[2] <= a.hi[2] + e;
 
 /* ---------- grupy i komponenty ---------- */
-// Grupa: { id, kind: 'group' | 'comp', def, frame } — członkowie to bryły i linie z polem g = id grupy.
-// Komponent to grupa z definicją `def`: wszystkie grupy o tym samym `def` są jego wystąpieniami.
-// Geometria każdego wystąpienia leży w modelu we współrzędnych świata (narzędzia działają bez zmian),
-// a `frame` (o, x, y, z — przekształcenie afiniczne) mówi, jak wystąpienie jest ustawione względem definicji.
-// Po edycji jednego wystąpienia pozostałe są przeliczane z niego (syncComponent).
-export const membersOf = (m, gid) => [...m.shapes.filter(s => s.g === gid).map(s => s.id), ...m.lines.filter(l => l.g === gid).map(l => 'l' + l.id)];
-export const groupOf = (m, id) => { const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : m.lines.find(l => 'l' + l.id === id); return e && e.g ? m.groups.find(g => g.id === e.g) || null : null; };
+// Grupa: { id, kind: 'group' | 'comp', p, def, frame } — p to grupa nadrzędna (grupy mogą być w grupach).
+// Bryły i linie należą do najbliższej grupy przez pole g. Komponent to grupa z definicją `def`:
+// wszystkie grupy o tym samym `def` są jego wystąpieniami. Geometria każdego wystąpienia leży w modelu
+// we współrzędnych świata (narzędzia działają bez zmian), a `frame` (o, x, y, z — przekształcenie afiniczne)
+// mówi, jak wystąpienie jest ustawione względem definicji. Po edycji jednego wystąpienia pozostałe są
+// przeliczane z niego razem z całym wnętrzem (syncComponent).
+const gById = (m, id) => m.groups.find(g => g.id === id) || null;
+// id grupy i jej wszystkich podgrup
+export function subtreeIds(m, gid) {
+  const out = new Set([gid]); let grow = true;
+  while (grow) { grow = false; for (const g of m.groups) if (g.p != null && out.has(g.p) && !out.has(g.id)) { out.add(g.id); grow = true; } }
+  return out;
+}
+export function membersOf(m, gid) {
+  const t = subtreeIds(m, gid);
+  return [...m.shapes.filter(s => t.has(s.g)).map(s => s.id), ...m.lines.filter(l => t.has(l.g)).map(l => 'l' + l.id)];
+}
+const elem = (m, id) => typeof id === 'number' ? m.shapes.find(s => s.id === id) : m.lines.find(l => 'l' + l.id === id);
+export const groupOf = (m, id) => { const e = elem(m, id); return e && e.g ? gById(m, e.g) : null; };
+// łańcuch grup od najbliższej do najwyższej
+export function chainOf(m, gid) { const out = []; let g = gById(m, gid); while (g) { out.push(g); g = g.p != null ? gById(m, g.p) : null; } return out; }
+// grupa, którą klik w element zaznacza, gdy edytujesz grupę E (null = cały model): ta z łańcucha, która leży bezpośrednio w E
+export function topUnder(m, id, E) {
+  const e = elem(m, id); if (!e || !e.g || e.g === E) return null;
+  const ch = chainOf(m, e.g);
+  const hit = ch.find(g => (g.p ?? null) === E);
+  return hit || ch[ch.length - 1];
+}
+export const insideGroup = (m, id, E) => { const e = elem(m, id); return !!e && e.g != null && chainOf(m, e.g).some(g => g.id === E); };
 export const IDENT = o => ({ o: o.slice(), x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] });
 export const mapPoint = (F, l) => V.add(V.add(V.add(F.o, V.mul(F.x, l[0])), V.mul(F.y, l[1])), V.mul(F.z, l[2]));
 export const mapVec = (F, l) => V.add(V.add(V.mul(F.x, l[0]), V.mul(F.y, l[1])), V.mul(F.z, l[2]));
@@ -401,31 +423,47 @@ export function transformFrame(F, f) {
 export function groupsWhollyIn(m, ids) {
   return m.groups.filter(g => { const mem = membersOf(m, g.id); return mem.length && mem.every(i => ids.has(i)); });
 }
-// kopie elementów; grupy kopiowane w całości dostają nowe grupy (wystąpienia tego samego komponentu)
+// kopie elementów; grupy kopiowane w całości (z podgrupami) dostają nowe grupy — wystąpienia tych samych komponentów
 export function duplicateIds(m, ids) {
   const out = new Set(), gmap = new Map();
-  for (const g of groupsWhollyIn(m, ids)) { const c = JSON.parse(JSON.stringify(g)); c.id = m.next++; m.groups.push(c); gmap.set(g.id, c.id); }
+  const whole = groupsWhollyIn(m, ids);
+  for (const g of whole) gmap.set(g.id, m.next++);
+  for (const g of whole) { const c = JSON.parse(JSON.stringify(g)); c.id = gmap.get(g.id); if (gmap.has(c.p)) c.p = gmap.get(c.p); m.groups.push(c); }
   const S = m.shapes.filter(s => ids.has(s.id)), L = m.lines.filter(l => ids.has('l' + l.id)), G = m.guides.filter(g => ids.has('g' + g.id));
-  const fix = c => { if (c.g) { if (gmap.has(c.g)) c.g = gmap.get(c.g); } };
+  const fix = c => { if (c.g != null && gmap.has(c.g)) c.g = gmap.get(c.g); };
   for (const s of S) { const c = JSON.parse(JSON.stringify(s)); c.id = m.next++; fix(c); m.shapes.push(c); out.add(c.id); }
   for (const l of L) { const c = JSON.parse(JSON.stringify(l)); c.id = m.next++; fix(c); m.lines.push(c); out.add('l' + c.id); }
   for (const g of G) { const c = JSON.parse(JSON.stringify(g)); c.id = m.next++; m.guides.push(c); out.add('g' + c.id); }
   return out;
 }
-// przelicz wszystkie wystąpienia komponentu z wystąpienia `gid`
+// przelicz wszystkie wystąpienia komponentu z wystąpienia `gid` (razem z grupami i komponentami w środku)
 export function syncComponent(m, gid) {
-  const src = m.groups.find(g => g.id === gid); if (!src || src.kind !== 'comp') return;
-  const local = s => transformShape(JSON.parse(JSON.stringify(s)), p => unmapPoint(src.frame, p));
-  const defShapes = m.shapes.filter(s => s.g === gid).map(local);
-  const defLines = m.lines.filter(l => l.g === gid).map(l => ({ ...l, a: unmapPoint(src.frame, l.a), b: unmapPoint(src.frame, l.b) }));
-  for (const g of m.groups) {
-    if (g.id === gid || g.kind !== 'comp' || g.def !== src.def) continue;
-    const hidden = m.shapes.some(s => s.g === g.id && s.hidden);
-    m.shapes = m.shapes.filter(s => s.g !== g.id); m.lines = m.lines.filter(l => l.g !== g.id);
-    for (const d of defShapes) { const c = transformShape(JSON.parse(JSON.stringify(d)), p => mapPoint(g.frame, p)); c.id = m.next++; c.g = g.id; if (hidden) c.hidden = true; else delete c.hidden; m.shapes.push(c); }
-    for (const d of defLines) m.lines.push({ ...d, id: m.next++, g: g.id, a: mapPoint(g.frame, d.a), b: mapPoint(g.frame, d.b) });
+  const src = gById(m, gid); if (!src || src.kind !== 'comp') return;
+  const sub = subtreeIds(m, gid);
+  const toLocal = p => unmapPoint(src.frame, p);
+  const defGroups = m.groups.filter(g => sub.has(g.id) && g.id !== gid).map(g => ({ ...JSON.parse(JSON.stringify(g)), frame: g.frame ? transformFrame(g.frame, toLocal) : undefined }));
+  const defShapes = m.shapes.filter(s => sub.has(s.g)).map(s => transformShape(JSON.parse(JSON.stringify(s)), toLocal));
+  const defLines = m.lines.filter(l => sub.has(l.g)).map(l => ({ ...l, a: toLocal(l.a), b: toLocal(l.b) }));
+  for (const g of [...m.groups]) {
+    if (g.id === gid || g.kind !== 'comp' || g.def !== src.def || sub.has(g.id)) continue;
+    const old = subtreeIds(m, g.id);
+    const hidden = m.shapes.some(s => old.has(s.g) && s.hidden);
+    m.shapes = m.shapes.filter(s => !old.has(s.g)); m.lines = m.lines.filter(l => !old.has(l.g));
+    m.groups = m.groups.filter(q => q.id === g.id || !old.has(q.id));
+    const toWorld = p => mapPoint(g.frame, p);
+    const gmap = new Map([[gid, g.id]]);
+    for (const d of defGroups) gmap.set(d.id, m.next++);
+    for (const d of defGroups) m.groups.push({ ...JSON.parse(JSON.stringify(d)), id: gmap.get(d.id), p: gmap.get(d.p) ?? d.p, frame: d.frame ? transformFrame(d.frame, toWorld) : undefined });
+    for (const d of defShapes) { const c = transformShape(JSON.parse(JSON.stringify(d)), toWorld); c.id = m.next++; c.g = gmap.get(d.g); if (hidden) c.hidden = true; else delete c.hidden; m.shapes.push(c); }
+    for (const d of defLines) m.lines.push({ ...d, id: m.next++, g: gmap.get(d.g), a: toWorld(d.a), b: toWorld(d.b) });
   }
 }
 export function instancesOf(m, def) { return m.groups.filter(g => g.kind === 'comp' && g.def === def); }
 // grupy bez członków są usuwane
-export function pruneGroups(m) { const used = new Set([...m.shapes.map(s => s.g), ...m.lines.map(l => l.g)]); m.groups = m.groups.filter(g => used.has(g.id)); }
+export function pruneGroups(m) {
+  const used = new Set([...m.shapes.map(s => s.g), ...m.lines.map(l => l.g)]);
+  let grow = true;
+  while (grow) { grow = false; for (const g of m.groups) if (used.has(g.id) && g.p != null && !used.has(g.p)) { used.add(g.p); grow = true; } }
+  m.groups = m.groups.filter(g => used.has(g.id));
+  for (const g of m.groups) if (g.p != null && !m.groups.some(q => q.id === g.p)) delete g.p;
+}

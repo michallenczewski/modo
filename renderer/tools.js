@@ -81,7 +81,7 @@ export class SelectTool extends Tool {
   down(e, x, y) {
     const id = this.pickAny(x, y), sel = this.app.selection;
     // klik poza edytowaną grupą kończy jej edycję
-    if (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
+    while (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
     const ids = id == null ? [] : this.app.expand(id);
     if (id == null) { if (!e.shiftKey) sel.clear(); }
     else if (e.shiftKey) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
@@ -91,8 +91,8 @@ export class SelectTool extends Tool {
   // dwuklik w grupę albo komponent: edycja w środku
   dbl(e, x, y) {
     const id = this.pickAny(x, y); if (id == null) return;
-    const g = this.app.groupAt(id);
-    if (g && this.app.editing !== g.id) this.app.enterGroup(g.id);
+    const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
+    if (g) this.app.enterGroup(g.id);
   }
 }
 
