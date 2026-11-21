@@ -1,0 +1,488 @@
+// Widok 3D: scena three.js z osią Z w górę, nawigacja jak w SketchUpie, słońce z miękkimi cieniami
+// i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
+
+import * as THREE from './vendor/three.module.js';
+import { triangulate, edges as shapeEdges, bounds, V } from './model.js';
+import { sunPosition, sunVector } from './sun.js';
+
+/* ---------- style rysunku ---------- */
+export const STYLES = {
+  szkic: { name: 'Szkic', paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 9, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
+  kreska: { name: 'Kreska', paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
+  model: { name: 'Model', paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
+};
+export const DEFAULT_COLOR = '#f6f4ee';
+
+/* ---------- shader krawędzi ---------- */
+const EDGE_VS = `
+uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar;
+attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul;
+varying float vHalf, vD, vFade; varying vec3 vCol;
+void main(){
+  vec4 va = modelViewMatrix * vec4(ea, 1.0), vb = modelViewMatrix * vec4(eb, 1.0);
+  float nz = -nearZ * 1.001;
+  if (va.z > nz && vb.z > nz) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  float ta = 0.0, tb = 1.0;
+  if (va.z > nz) ta = (nz - va.z) / (vb.z - va.z);
+  if (vb.z > nz) tb = (nz - va.z) / (vb.z - va.z);
+  float tt = clamp(t, ta, tb);
+  vec4 vp = mix(va, vb, tt), cp = projectionMatrix * vp;
+  vec4 pA = projectionMatrix * mix(va, vb, ta), pB = projectionMatrix * mix(va, vb, tb);
+  vec2 sA = pA.xy / pA.w * 0.5 * res, sB = pB.xy / pB.w * 0.5 * res;
+  vec2 dir = sB - sA; float L = length(dir); dir = L > 1e-4 ? dir / L : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  vec2 s = cp.xy / cp.w * 0.5 * res;
+  float e = ext * px * min(1.0, L / (40.0 * px));
+  if (t <= 0.0 && ta <= 0.0) s -= dir * e * (0.7 + 0.6 * fract(seed * 7.13));
+  if (t >= 1.0 && tb >= 1.0) s += dir * e * (0.7 + 0.6 * fract(seed * 3.71));
+  float amp = wobble * px * (fract(seed * 13.37) - 0.5) * 2.0 * min(1.0, L / (60.0 * px));
+  s += nrm * amp * sin(3.14159 * tt) + nrm * amp * 0.35 * sin(6.28318 * tt + seed * 6.0);
+  vec3 wp = mix(ea, eb, tt);
+  vec3 vd = normalize(cameraPosition - wp);
+  float f1 = dot(n1, vd), f2 = hasN2 > 0.5 ? dot(n2, vd) : -1.0;
+  bool sil = (f1 > 0.0) != (f2 > 0.0);
+  float w = (sil ? wSil : wIn) * px * wmul;
+  vHalf = w * 0.5;
+  vD = side * (vHalf + px);
+  s += nrm * vD;
+  vFade = clamp((-vp.z - fadeNear) / max(fadeFar - fadeNear, 0.001), 0.0, 1.0);
+  vCol = col;
+  gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);
+}`;
+const EDGE_FS = `
+uniform vec3 ink, inkFar; uniform float fade, px, opacity;
+varying float vHalf, vD, vFade; varying vec3 vCol;
+void main(){
+  float a = clamp(vHalf + 0.5 * px - abs(vD), 0.0, px) / px;
+  if (a <= 0.0) discard;
+  vec3 c = vCol.r < 0.0 ? mix(ink, inkFar, vFade * fade) : vCol;
+  gl_FragColor = vec4(c, a * opacity * (1.0 - 0.55 * vFade * fade));
+}`;
+
+const SEG = 6;   // każda krawędź dzielona na odcinki, żeby linia mogła lekko falować
+
+function buildEdgeGeometry(list) {
+  // list: [{ a, b, n1, n2, col:[r,g,b]|null, w }]
+  const nQ = list.length * SEG, nV = nQ * 4;
+  const A = k => new Float32Array(nV * k);
+  const ea = A(3), eb = A(3), n1 = A(3), n2 = A(3), col = A(3), pos = A(3), t = A(1), side = A(1), seed = A(1), hasN2 = A(1), wmul = A(1);
+  const idx = new Uint32Array(nQ * 6);
+  let v = 0, q = 0;
+  for (let k = 0; k < list.length; k++) {
+    const E = list[k];
+    const sd = Math.abs(Math.sin((E.a[0] * 12.9898 + E.a[1] * 78.233 + E.b[0] * 37.719 + E.b[2] * 4.581 + E.b[1] * 1.37) * 43758.5453)) % 1;
+    for (let s = 0; s < SEG; s++) {
+      const t0 = s / SEG, t1 = (s + 1) / SEG;
+      for (const [tv, sv] of [[t0, -1], [t0, 1], [t1, -1], [t1, 1]]) {
+        ea.set(E.a, v * 3); eb.set(E.b, v * 3); n1.set(E.n1, v * 3); if (E.n2) n2.set(E.n2, v * 3);
+        col.set(E.col || [-1, -1, -1], v * 3);
+        pos.set(V.lerp(E.a, E.b, tv), v * 3);
+        t[v] = tv; side[v] = sv; seed[v] = sd; hasN2[v] = E.n2 ? 1 : 0; wmul[v] = E.w || 1;
+        v++;
+      }
+      const b = v - 4;
+      idx.set([b, b + 2, b + 1, b + 1, b + 2, b + 3], q * 6); q++;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  const at = (n, arr, k) => g.setAttribute(n, new THREE.BufferAttribute(arr, k));
+  at('position', pos, 3); at('ea', ea, 3); at('eb', eb, 3); at('n1', n1, 3); at('n2', n2, 3); at('col', col, 3);
+  at('t', t, 1); at('side', side, 1); at('seed', seed, 1); at('hasN2', hasN2, 1); at('wmul', wmul, 1);
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  return g;
+}
+
+const hex3 = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
+
+export class Viewer {
+  constructor(host) {
+    this.host = host;
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'gl';
+    this.overlay = document.createElement('canvas');
+    this.overlay.className = 'ov';
+    host.append(this.canvas, this.overlay);
+    this.ctx = this.overlay.getContext('2d');
+
+    const r = this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    r.setPixelRatio(window.devicePixelRatio || 1);
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.VSMShadowMap;
+    r.outputColorSpace = THREE.SRGBColorSpace;
+
+    this.scene = new THREE.Scene();
+    this.cam = new THREE.PerspectiveCamera(35, 1, 0.1, 8000);
+    this.cam.up.set(0, 0, 1);
+    this.cam.position.set(30, -34, 22);
+    this.cam.lookAt(4, 4, 2);
+
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0xe9e4d8, 1.6);
+    this.hemi.position.set(0, 0, 1);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1.9);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.blurSamples = 16;
+    this.sun.shadow.radius = 6;
+    this.scene.add(this.hemi, this.sun, this.sun.target);
+
+    this.groundMat = new THREE.ShadowMaterial({ opacity: 0.24, color: 0x3b362c, depthWrite: false });
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.groundMat);
+    this.ground.receiveShadow = true;
+    this.ground.position.z = -0.002;
+    this.scene.add(this.ground);
+
+    this.axes = this.makeAxes();
+    this.scene.add(this.axes);
+
+    this.modelGroup = new THREE.Group(); this.scene.add(this.modelGroup);
+    this.underlayGroup = new THREE.Group(); this.scene.add(this.underlayGroup);
+    this.previewGroup = new THREE.Group(); this.scene.add(this.previewGroup);
+
+    this.edgeMat = new THREE.ShaderMaterial({
+      vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false,
+      uniforms: {
+        res: { value: new THREE.Vector2(1, 1) }, px: { value: 1 }, wSil: { value: 2 }, wIn: { value: 1 }, ext: { value: 8 }, wobble: { value: 1 },
+        nearZ: { value: 0.05 }, fadeNear: { value: 10 }, fadeFar: { value: 80 }, ink: { value: new THREE.Color() }, inkFar: { value: new THREE.Color() },
+        fade: { value: 0.8 }, opacity: { value: 1 }
+      }
+    });
+    this.edgeMesh = null;
+
+    this.style = 'szkic';
+    this.sunCfg = { date: new Date().toISOString().slice(0, 10), hour: 13, lat: 52.23, lon: 21.01, tz: 'Europe/Warsaw', shadows: true, soft: 0.45, light: 0.7 };
+    this.model = null; this.selected = new Set(); this.hover = null;
+    this.showAxes = true;
+    this.pxScale = 1;
+    this.needs = true;
+    this.overlayDraw = null;   // funkcja narzędzia rysująca pomoce na nakładce 2D
+
+    new ResizeObserver(() => this.resize()).observe(host);
+    this.resize();
+    const loop = () => { if (this.needs) { this.needs = false; this.render(); } requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+
+  makeAxes() {
+    // osie dzielone na krótkie odcinki: linia, która w całości przechodzi za kamerę, bywa przez niektóre karty gubiona
+    const g = new THREE.Group(), L = 1500, N = 150;
+    const mk = (dir, color, neg) => {
+      const pts = [];
+      for (let i = 0; i < N; i++) { const a = (neg ? -1 : 1) * L * i / N, b = (neg ? -1 : 1) * L * (i + 1) / N; pts.push(new THREE.Vector3(...dir).multiplyScalar(a), new THREE.Vector3(...dir).multiplyScalar(b)); }
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const m = neg ? new THREE.LineDashedMaterial({ color, dashSize: 0.25, gapSize: 0.5, transparent: true, opacity: 0.5 }) : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 });
+      const l = new THREE.LineSegments(geo, m); if (neg) l.computeLineDistances(); l.frustumCulled = false; return l;
+    };
+    g.add(mk([1, 0, 0], 0xc47a6a), mk([1, 0, 0], 0xc47a6a, true), mk([0, 1, 0], 0x7d9d76), mk([0, 1, 0], 0x7d9d76, true), mk([0, 0, 1], 0x7c8fb3));
+    return g;
+  }
+
+  resize() {
+    const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
+    this.w = w; this.h = h;
+    this.renderer.setSize(w, h, false);
+    const dpr = window.devicePixelRatio || 1;
+    this.overlay.width = w * dpr; this.overlay.height = h * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.cam.aspect = w / h; this.cam.updateProjectionMatrix();
+    this.needs = true;
+  }
+
+  /* ---------- model ---------- */
+  setModel(model, opts = {}) {
+    this.model = model;
+    this.rebuild(opts);
+  }
+  rebuild({ highlight } = {}) {
+    for (const c of [...this.modelGroup.children]) { c.geometry.dispose(); if (c.material.dispose && c.material !== this.edgeMat) c.material.dispose(); this.modelGroup.remove(c); }
+    this.meshes = [];
+    const st = STYLES[this.style];
+    const paper = new THREE.Color(st.paper);
+    const edgeList = [];
+    for (const s of this.model.shapes) {
+      const pos = [], nor = [], keys = [];
+      for (const f of triangulate(s)) {
+        const n = new THREE.Vector3(...f.normal);
+        for (const tri of f.tris) {
+          const [a, b, c] = tri.map(p => new THREE.Vector3(...p));
+          const g = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+          const ord = g.dot(n) < 0 ? [a, c, b] : [a, b, c];
+          for (const p of ord) { pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); }
+          keys.push(f.key);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      const sel = this.selected.has(s.id);
+      const base = new THREE.Color(s.color || DEFAULT_COLOR);
+      if (s.color) base.lerp(paper, st.tint);
+      if (sel) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
+      const flat = s.h === 0;
+      const mat = new THREE.MeshLambertMaterial({ color: base, side: flat ? THREE.DoubleSide : THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = !flat; mesh.receiveShadow = true;
+      mesh.userData = { shapeId: s.id, keys };
+      this.modelGroup.add(mesh); this.meshes.push(mesh);
+      if (st.lines) {
+        const col = sel ? hex3('#3f5f99') : null;
+        for (const e of shapeEdges(s)) edgeList.push({ ...e, col });
+      }
+    }
+    if (st.lines) for (const l of this.model.lines) {
+      const sel = this.selected.has('l' + l.id);
+      edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
+    }
+    if (this.edgeMesh) { this.edgeMesh.geometry.dispose(); this.scene.remove(this.edgeMesh); this.edgeMesh = null; }
+    if (edgeList.length) {
+      this.edgeMesh = new THREE.Mesh(buildEdgeGeometry(edgeList), this.edgeMat);
+      this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
+      this.scene.add(this.edgeMesh);
+    }
+    this.updateSun();
+    this.needs = true;
+  }
+
+  // podświetlenie ściany pod kursorem (push/pull) albo bryły (zaznaczanie)
+  setHoverFace(verts) {
+    for (const c of [...this.previewGroup.children]) { c.geometry.dispose(); this.previewGroup.remove(c); }
+    if (verts) {
+      const pts = verts.map(p => new THREE.Vector3(...p));
+      const idx = []; for (let i = 1; i < pts.length - 1; i++) idx.push(0, i, i + 1);
+      const g = new THREE.BufferGeometry().setFromPoints(pts); g.setIndex(idx);
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x6b86b5, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+      m.renderOrder = 3;
+      this.previewGroup.add(m);
+    }
+    this.needs = true;
+  }
+
+  /* ---------- styl i słońce ---------- */
+  setStyle(name) {
+    this.style = name;
+    if (this.model) this.rebuild(); else this.needs = true;
+  }
+  setSun(cfg) { Object.assign(this.sunCfg, cfg); this.updateSun(); }
+  sunInfo() { const c = this.sunCfg; return sunPosition(c.date, c.hour, c.lat, c.lon, c.tz); }
+  updateSun() {
+    const st = STYLES[this.style], c = this.sunCfg;
+    const { alt, az } = this.sunInfo();
+    const up = alt > 0;
+    const dir = sunVector(Math.max(alt, 0.5), az);
+    // mapa cieni obejmuje tylko bryły — duży podkład z okolicą rozmyłby cienie
+    const b = (this.model && this.model.shapes.length && bounds({ shapes: this.model.shapes, lines: [] })) || { center: [0, 0, 0], radius: 25 };
+    const R = b.radius * 1.4 + 4, ctr = new THREE.Vector3(...b.center);
+    this.sun.target.position.copy(ctr);
+    this.sun.position.copy(ctr).addScaledVector(new THREE.Vector3(...dir), R * 3);
+    const sc = this.sun.shadow.camera;
+    sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 0.1; sc.far = R * 4 + R * 2 / Math.max(Math.sin(Math.max(alt, 0.5) * Math.PI / 180), 0.08);
+    sc.updateProjectionMatrix();
+    this.sun.castShadow = c.shadows && up;
+    this.sun.shadow.radius = 1 + c.soft * 14;
+    // nisko nad horyzontem słońce słabnie; ściany w cieniu rozjaśnia światło nieba (suwak „Jasność”)
+    const k = up ? Math.min(1, Math.sin(alt * Math.PI / 180) * 2.2 + 0.25) : 0;
+    this.sun.intensity = 1.7 * k;
+    this.hemi.intensity = 1.3 + c.light * 1.5 + (up ? 0 : 0.4);
+    this.groundMat.opacity = st.shadow * (0.6 + 0.4 * k);
+    this.ground.visible = c.shadows && up;
+    const gs = Math.max(400, b.radius * 40);
+    this.ground.scale.set(gs, gs, 1); this.ground.position.x = ctr.x; this.ground.position.y = ctr.y;
+    this.needs = true;
+  }
+
+  /* ---------- rysowanie klatki ---------- */
+  applyStyleUniforms(scale = 1, w = this.w, h = this.h) {
+    const st = STYLES[this.style], u = this.edgeMat.uniforms;
+    const dpr = this.renderer.getPixelRatio();
+    u.res.value.set(w * dpr * scale, h * dpr * scale);
+    u.px.value = dpr * scale;
+    u.wSil.value = st.wSil; u.wIn.value = st.wIn; u.ext.value = st.ext; u.wobble.value = st.wobble; u.fade.value = st.fade;
+    u.ink.value.set(st.ink); u.inkFar.value.set(st.inkFar);
+    u.nearZ.value = this.cam.near;
+    const b = this.model && bounds(this.model);
+    if (b) {
+      const d = this.cam.position.distanceTo(new THREE.Vector3(...b.center));
+      u.fadeNear.value = Math.max(0.1, d - b.radius * 0.6); u.fadeFar.value = d + b.radius * 1.2;
+    }
+  }
+  render() {
+    const st = STYLES[this.style];
+    this.scene.background = new THREE.Color(st.paper);
+    this.axes.visible = this.showAxes;
+    this.applyStyleUniforms();
+    this.renderer.render(this.scene, this.cam);
+    this.drawOverlay();
+  }
+  drawOverlay() {
+    const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
+    if (this.overlayDraw) this.overlayDraw(c, this);
+  }
+  redraw() { this.needs = true; }
+
+  // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
+  async exportPng(W, H, { transparent = false, axes = false, underlay = false } = {}) {
+    const r = this.renderer, st = STYLES[this.style];
+    const keepAxes = this.showAxes, keepUnder = this.underlayGroup.visible, keepMap = this.sun.shadow.mapSize.x;
+    this.showAxes = axes; this.axes.visible = axes; this.underlayGroup.visible = underlay && keepUnder;
+    this.sun.shadow.mapSize.set(8192, 8192); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
+    const aspect = this.cam.aspect; this.cam.aspect = W / H; this.cam.updateProjectionMatrix();
+    const rt = new THREE.WebGLRenderTarget(W, H, { samples: 4, colorSpace: THREE.SRGBColorSpace });
+    const bg = this.scene.background; this.scene.background = transparent ? null : new THREE.Color(st.paper);
+    const dpr = r.getPixelRatio();
+    // skala linii: ten sam wygląd co w oknie, tylko w większej rozdzielczości
+    const scale = W / (this.w * dpr);
+    this.applyStyleUniforms(scale, this.w, this.h);
+    this.edgeMat.uniforms.res.value.set(W, H);
+    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.cam); r.setRenderTarget(null);
+    const px = new Uint8Array(W * H * 4);
+    r.readRenderTargetPixels(rt, 0, 0, W, H, px);
+    rt.dispose();
+    this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
+    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder;
+    this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
+    this.needs = true;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const cx = cv.getContext('2d'), img = cx.createImageData(W, H);
+    for (let y = 0; y < H; y++) img.data.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+    cx.putImageData(img, 0, 0);
+    return new Promise(res => cv.toBlob(res, 'image/png'));
+  }
+
+  /* ---------- rzutowanie i promienie ---------- */
+  ray(x, y) {
+    const v = new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1);
+    const rc = new THREE.Raycaster(); rc.setFromCamera(v, this.cam);
+    return rc.ray;
+  }
+  toScreen(p) {
+    const v = new THREE.Vector3(p[0], p[1], p[2]).project(this.cam);
+    return { x: (v.x + 1) / 2 * this.w, y: (1 - v.y) / 2 * this.h, behind: v.z > 1 };
+  }
+  // ściana pod kursorem: { shapeId, key, point, normal }
+  pick(x, y) {
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1), this.cam);
+    const hits = rc.intersectObjects(this.meshes || [], false);
+    for (const h of hits) {
+      const key = h.object.userData.keys[h.faceIndex];
+      if (!key) continue;
+      return { shapeId: h.object.userData.shapeId, key, point: [h.point.x, h.point.y, h.point.z], normal: h.face ? [h.face.normal.x, h.face.normal.y, h.face.normal.z] : [0, 0, 1], dist: h.distance };
+    }
+    return null;
+  }
+  // punkt na płaszczyźnie (o, n) pod kursorem
+  onPlane(x, y, o, n) {
+    const ray = this.ray(x, y);
+    const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(...n), new THREE.Vector3(...o));
+    const p = new THREE.Vector3();
+    if (!ray.intersectPlane(pl, p)) return null;
+    if (p.distanceTo(this.cam.position) > 5000) return null;
+    return [p.x, p.y, p.z];
+  }
+  // najbliższy kursorowi punkt prostej (o, d): zwraca { p, t }
+  onLine(x, y, o, d) {
+    const ray = this.ray(x, y);
+    const P = new THREE.Vector3(...o), D = new THREE.Vector3(...d).normalize();
+    const w0 = new THREE.Vector3().subVectors(ray.origin, P);
+    const a = ray.direction.dot(ray.direction), b = ray.direction.dot(D), c = D.dot(D), dd = ray.direction.dot(w0), e = D.dot(w0);
+    const den = a * c - b * b;
+    if (Math.abs(den) < 1e-9) return null;
+    const t = (a * e - b * dd) / den;
+    return { p: [P.x + D.x * t, P.y + D.y * t, P.z + D.z * t], t };
+  }
+  pixelSize(p) {
+    // rozmiar piksela w metrach w odległości punktu p (do tolerancji)
+    const d = this.cam.position.distanceTo(new THREE.Vector3(...p));
+    return 2 * d * Math.tan(this.cam.fov * Math.PI / 360) / this.h;
+  }
+
+  /* ---------- nawigacja ---------- */
+  pivotAt(x, y) {
+    const hit = this.pick(x, y);
+    if (hit) return new THREE.Vector3(...hit.point);
+    const g = this.onPlane(x, y, [0, 0, 0], [0, 0, 1]);
+    if (g && V.dist(g, this.cam.position.toArray()) < 3000) return new THREE.Vector3(...g);
+    const ray = this.ray(x, y);
+    const b = this.model && bounds(this.model);
+    const d = b ? this.cam.position.distanceTo(new THREE.Vector3(...b.center)) : 40;
+    return ray.origin.clone().addScaledVector(ray.direction, d);
+  }
+  orbit(dx, dy, pivot) {
+    const cam = this.cam, Z = new THREE.Vector3(0, 0, 1);
+    const fwd = new THREE.Vector3(); cam.getWorldDirection(fwd);
+    const right = new THREE.Vector3().crossVectors(fwd, Z).normalize();
+    const pitchNow = Math.asin(Math.max(-1, Math.min(1, fwd.z)));
+    let dp = dy * 0.006;
+    const lim = 1.55;
+    if (pitchNow - dp > lim) dp = pitchNow - lim;
+    if (pitchNow - dp < -lim) dp = pitchNow + lim;
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(Z, -dx * 0.006);
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(right, -dp);
+    const q = qYaw.multiply(qPitch);
+    cam.position.sub(pivot).applyQuaternion(q).add(pivot);
+    fwd.applyQuaternion(q);
+    cam.up.set(0, 0, 1);
+    cam.lookAt(cam.position.clone().add(fwd));
+    this.needs = true;
+  }
+  pan(dx, dy, pivot) {
+    const cam = this.cam;
+    const d = pivot ? pivot.clone().sub(cam.position).dot(cam.getWorldDirection(new THREE.Vector3())) : 30;
+    const s = 2 * Math.max(d, 0.1) * Math.tan(cam.fov * Math.PI / 360) / this.h;
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+    cam.position.addScaledVector(right, -dx * s).addScaledVector(up, dy * s);
+    this.needs = true;
+  }
+  zoomAt(x, y, factor) {
+    // factor > 1 przybliża; kamera jedzie w stronę punktu pod kursorem
+    const target = this.pivotAt(x, y);
+    const cam = this.cam;
+    const dist = cam.position.distanceTo(target);
+    let k = 1 - 1 / factor;
+    if (factor > 1 && dist * (1 - k) < 0.3) k = Math.max(0, 1 - 0.3 / dist);
+    cam.position.lerp(target, k);
+    this.needs = true;
+  }
+  zoomExtents() {
+    const b = this.model && bounds(this.model, this.underlayBounds);
+    const cam = this.cam;
+    const center = b ? new THREE.Vector3(...b.center) : new THREE.Vector3(0, 0, 0);
+    const r = b ? b.radius : 15;
+    const fwd = cam.getWorldDirection(new THREE.Vector3());
+    const d = r / Math.sin(Math.min(cam.fov, cam.fov * cam.aspect) * Math.PI / 360) * 1.05;
+    cam.position.copy(center).addScaledVector(fwd, -d);
+    cam.lookAt(center);
+    this.needs = true;
+  }
+  getCamera() { const f = this.cam.getWorldDirection(new THREE.Vector3()); return { p: this.cam.position.toArray(), f: f.toArray(), fov: this.cam.fov }; }
+  setCamera(c) {
+    if (!c) return;
+    this.cam.position.fromArray(c.p); if (c.fov) this.cam.fov = c.fov;
+    this.cam.up.set(0, 0, 1); this.cam.lookAt(this.cam.position.clone().add(new THREE.Vector3().fromArray(c.f)));
+    this.cam.updateProjectionMatrix(); this.needs = true;
+  }
+
+  /* ---------- podkład CAD ---------- */
+  setUnderlay(u) {
+    for (const c of [...this.underlayGroup.children]) { c.geometry.dispose(); c.material.dispose(); this.underlayGroup.remove(c); }
+    this.underlayBounds = null;
+    if (!u) { this.needs = true; return; }
+    let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    for (const L of u.layers) {
+      if (!L.visible || !L.segs.length) continue;
+      const pos = new Float32Array(L.segs.length / 2 * 3);
+      for (let i = 0, j = 0; i < L.segs.length; i += 2, j += 3) {
+        pos[j] = L.segs[i]; pos[j + 1] = L.segs[i + 1]; pos[j + 2] = u.height;
+        if (L.segs[i] < lo[0]) lo[0] = L.segs[i]; if (L.segs[i] > hi[0]) hi[0] = L.segs[i];
+        if (L.segs[i + 1] < lo[1]) lo[1] = L.segs[i + 1]; if (L.segs[i + 1] > hi[1]) hi[1] = L.segs[i + 1];
+      }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const m = new THREE.LineBasicMaterial({ color: new THREE.Color(L.color), transparent: true, opacity: u.opacity, depthWrite: false });
+      const ls = new THREE.LineSegments(g, m); ls.renderOrder = 1;
+      this.underlayGroup.add(ls);
+    }
+    if (lo[0] !== Infinity) this.underlayBounds = [[lo[0], lo[1], u.height], [hi[0], hi[1], u.height]];
+    this.updateSun();
+  }
+}

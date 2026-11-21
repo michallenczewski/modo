@@ -1,0 +1,76 @@
+{
+  "name": "modo",
+  "productName": "Modo",
+  "version": "0.1.0",
+  "description": "Lekki szkicownik brył architektonicznych",
+  "author": "Michał Lenczewski",
+  "license": "MIT",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "node scripts/serve-web.js",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^42.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "pl.lenczewski.modo",
+    "productName": "Modo",
+    "artifactName": "Modo-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "fileAssociations": [
+      {
+        "ext": "modo",
+        "name": "Szkic Modo",
+        "role": "Editor"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": null,
+      "extendInfo": {
+        "CFBundleDisplayName": "Modo"
+      }
+    },
+    "dmg": {
+      "title": "Modo ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "Modo"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Modo"
+    },
+    "afterSign": "build/adhoc.js"
+  }
+}
