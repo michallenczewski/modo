@@ -3,6 +3,7 @@
 // Wynik: lista wielokątów do narysowania oraz krawędzie (bez szwów między kawałkami jednej płaszczyzny).
 
 import { V } from './model.js';
+import { solidBoolean } from './solid.js';
 
 const EPS = 1e-5;
 const COPLANAR = 0, FRONT = 1, BACK = 2, SPANNING = 3;
@@ -73,25 +74,30 @@ class Node {
 const mk = list => list.map(p => new Poly(p.vs.map(v => v.slice()), p.shared));
 const clone = list => list.map(p => new Poly(p.vs.map(v => v.slice()), p.shared, p.plane));
 
-export function subtract(aPolys, bPolys) {
+function bspSubtract(aPolys, bPolys) {
   const a = new Node(mk(aPolys)), b = new Node(mk(bPolys));
   a.invert(); a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert(); a.build(b.all()); a.invert();
   return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
 }
-export function union(aPolys, bPolys) {
+function bspUnion(aPolys, bPolys) {
   const a = new Node(mk(aPolys)), b = new Node(mk(bPolys));
   a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert(); a.build(b.all());
   return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
 }
-export function intersect(aPolys, bPolys) {
+function bspIntersect(aPolys, bPolys) {
   const a = new Node(mk(aPolys)), b = new Node(mk(bPolys));
   a.invert(); b.clipTo(a); b.invert(); a.clipTo(b); b.clipTo(a); a.build(b.all()); a.invert();
   return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
 }
 // odejmowanie kilku brył po kolei
+// najpierw Manifold (szczelny wynik, szybki); gdy go nie ma albo bryła wejściowa nie jest szczelna — drzewa BSP
+export const subtract = (a, b) => solidBoolean(a, [b], 'subtract') || bspSubtract(a, b);
+export const union = (a, b) => solidBoolean(a, [b], 'union') || bspUnion(a, b);
+export const intersect = (a, b) => solidBoolean(a, [b], 'intersect') || bspIntersect(a, b);
 export function subtractAll(aPolys, cutters) {
+  const fast = solidBoolean(aPolys, cutters, 'subtract'); if (fast) return fast;
   let cur = aPolys;
-  for (const c of cutters) cur = subtract(cur, c);
+  for (const c of cutters) cur = bspSubtract(cur, c);
   return cur;
 }
 

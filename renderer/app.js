@@ -8,6 +8,7 @@ import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } fro
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
 import { exportObj } from './export.js';
+import { initSolid, solidReady } from './solid.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
 import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds } from './model.js';
 import { meshVolume, meshArea } from './mesh.js';
@@ -1247,4 +1248,7 @@ setFile(null, 'Bez nazwy'); app.markDirty(false);
 const startPath = new URLSearchParams(location.search).get('p');
 if (startPath) openSketch(startPath);
 window.modo = app;   // do testów w konsoli
+app.solidReady = solidReady;
+// Manifold ładuje się w tle; po załadowaniu scena przelicza wycięcia już nim
+initSolid().then(ok => { if (ok && app.model.shapes.some(q => q.op === 'cut')) viewer.rebuild(); });
 app.run = run;
