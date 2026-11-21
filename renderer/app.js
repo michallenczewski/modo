@@ -98,7 +98,7 @@ app.revertLast = () => { if (!app.undo.length) return false; app.model = app.und
 const auto = { key: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), seq: 0, saved: 0, written: false };
 function autoClear() { auto.saved = auto.seq; if (auto.written) { auto.written = false; api.autosaveClear(auto.key); } }
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); if (v) auto.seq++; else autoClear(); };
-app.changed = () => { postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
+app.changed = () => { app.clearSub(); postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
 // po każdej zmianie: nowe elementy w edytowanej grupie należą do niej, a inne wystąpienia komponentu dostają tę samą zmianę
 function postEdit(prev = app.undo[app.undo.length - 1]) {
   const m = app.model;
@@ -114,14 +114,27 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
 }
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
-app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
+app.commitLive = start => { app.clearSub(); app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
 // zablokowane elementy nie mogą trafić do zaznaczenia żadną drogą (ramka, panel, „zaznacz wszystko”)
 function dropLocked() {
   const m = app.model; if (!m.shapes.some(s => s.locked) && !m.lines.some(l => l.locked)) return;
   for (const id of [...app.selection]) { const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : String(id)[0] === 'l' ? m.lines.find(l => 'l' + l.id === id) : null; if (e && e.locked) app.selection.delete(id); }
 }
-app.selectionChanged = () => { dropLocked(); viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
+// Zaznaczone pojedyncze ściany i krawędzie brył (klik narzędziem Zaznacz) leżą osobno od zaznaczenia całych
+// elementów: [{ id bryły, kind: 'face' | 'edge', pts, polys | a, b }]. Każda zmiana modelu je czyści.
+app.sub = [];
+function showSub() { viewer.setSubFaces(app.sub.filter(q => q.kind === 'face').flatMap(q => q.polys)); }
+app.clearSub = () => { if (!app.sub.length) return; app.sub = []; showSub(); };
+function drawSub(c, v) {
+  for (const q of app.sub) {
+    if (q.kind !== 'edge') continue;
+    const A = v.toScreen(q.a), B = v.toScreen(q.b); if (A.behind || B.behind) continue;
+    c.save(); c.strokeStyle = viewer.dark ? '#8fa8d8' : '#3f5f99'; c.lineWidth = 3.2; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke(); c.restore();
+  }
+}
+app.selectionChanged = () => { dropLocked(); if (app.selection.size) app.sub = []; showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
 app.setPaint = (c, a) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; renderSwatches(); };
 
 /* ---------- grupy i komponenty ---------- */
@@ -248,7 +261,7 @@ function setTool(id) {
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
-  viewer.overlayDraw = (c, v) => tool.draw(c, v);
+  viewer.overlayDraw = (c, v) => { drawSub(c, v); tool.draw(c, v); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
@@ -368,6 +381,7 @@ window.addEventListener('keydown', e => {
     if (closePops()) return;
     if (vcbBuf) { vcbBuf = ''; app.refresh(); return; }
     const busy = tool.active || tool.anchor || tool.p0 || tool.c || tool.b || tool.face || tool.p1;
+    if (!busy && app.sub.length) { app.clearSub(); app.refresh(); renderPanel(); return; }
     if (!busy && app.editSolid != null) { app.exitSolid(); return; }
     if (!busy && app.editing) { app.exitGroup(); return; }
     tool.cancel(); app.lockAxis = null; app.refresh(); return;
@@ -407,7 +421,7 @@ function run(act) {
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
     case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': setTool(act); break;
-    case 'selectNone': app.selection.clear(); app.selectionChanged(); break;
+    case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
     case 'selectInvert': selectInvert(); break;
     case 'copy': copySel(); break;
     case 'cutClip': if (copySel()) deleteSelection(); break;
@@ -450,7 +464,15 @@ function run(act) {
     case 'comp': makeGroup('comp'); break;
     case 'explode': explode(); break;
     case 'unique': makeUnique(); break;
-    case 'editGroup': { const g = selectedGroups()[0]; if (g) app.enterGroup(g.id); else app.exitGroup(); break; }
+    case 'editGroup': {
+      const g = selectedGroups()[0], one = [...app.selection].filter(i => typeof i === 'number');
+      if (g) app.enterGroup(g.id);
+      else if (app.editSolid != null) app.exitSolid();
+      // jedna zaznaczona bryła luzem: edycja jej wierzchołków, krawędzi i ścian
+      else if (one.length === 1 && app.selection.size === 1 && app.model.shapes.some(s => s.id === one[0] && !s.bill)) app.enterSolid(one[0]);
+      else app.exitGroup();
+      break;
+    }
     case 'clearGuides': if (app.model.guides.length) { app.checkpoint(); app.model.guides = []; app.changed(); } break;
     case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
@@ -546,6 +568,7 @@ function solidOp(op) {
 }
 
 function deleteSelection() {
+  if (!app.selection.size && app.sub.length) return toast('Ściany ani krawędzi nie da się usunąć osobno. Dwuklik zaznacza całą bryłę.');
   if (!app.selection.size) return;
   app.checkpoint();
   removeIds(app.model, app.selection);
@@ -554,6 +577,7 @@ function deleteSelection() {
 function undo() {
   if (tool.active || tool.anchor || tool.p0) tool.cancel();
   if (!app.undo.length) return;
+  app.clearSub();
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
   app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
@@ -561,6 +585,7 @@ function undo() {
 }
 function redo() {
   if (!app.redo.length) return;
+  app.clearSub();
   app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
   app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
@@ -751,7 +776,14 @@ function renderInfo() {
   const size = ids => { const b = bounds(m, null, ids); return b ? infoRow('Wymiary', `${fmtNum(b.hi[0] - b.lo[0])} × ${fmtNum(b.hi[1] - b.lo[1])} × ${fmtLength(b.hi[2] - b.lo[2])}`) : ''; };
   const vol = ss => { let v = 0, a = 0; for (const s of ss) { const q = meshCopy(s); v += Math.abs(meshVolume(q)); a += meshArea(q); } return ss.length ? infoRow('Pole ścian', fmtA(a)) + infoRow('Objętość', fmtV(v)) : ''; };
   let html = '';
-  if (!sel.length) {
+  if (!sel.length && app.sub.length) {
+    // pojedyncze ściany i krawędzie: pole i długość
+    const F = app.sub.filter(q => q.kind === 'face'), E = app.sub.filter(q => q.kind === 'edge');
+    const polyArea = p => { let s = [0, 0, 0]; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s = [s[0] + a[1] * b[2] - a[2] * b[1], s[1] + a[2] * b[0] - a[0] * b[2], s[2] + a[0] * b[1] - a[1] * b[0]]; } return Math.hypot(...s) / 2; };
+    const area = F.reduce((t, q) => t + q.polys.reduce((u, p) => u + polyArea(p), 0), 0), len = E.reduce((t, q) => t + Math.hypot(q.a[0] - q.b[0], q.a[1] - q.b[1], q.a[2] - q.b[2]), 0);
+    html = `<div class="muted">${F.length && E.length ? 'Ściany i krawędzie bryły' : F.length > 1 ? 'Ściany bryły: ' + F.length : F.length ? 'Ściana bryły' : E.length > 1 ? 'Krawędzie bryły: ' + E.length : 'Krawędź bryły'}. Dwuklik zaznacza całą bryłę.</div>`
+      + (F.length ? infoRow('Pole', fmtA(area)) : '') + (E.length ? infoRow('Długość', fmtLength(len)) : '');
+  } else if (!sel.length) {
     const solids = m.shapes.filter(s => isSolid(s) && s.op !== 'cut');
     html = `<div class="muted">Nic nie zaznaczono. Kliknij element, żeby zobaczyć jego wymiary, pole i objętość.</div>`
       + infoRow('Bryły', solids.length) + infoRow('Grupy', m.groups.filter(g => g.kind !== 'comp').length) + infoRow('Komponenty', new Set(m.groups.filter(g => g.kind === 'comp').map(g => g.def)).size + ' rodz. · ' + m.groups.filter(g => g.kind === 'comp').length + ' wyst.')
@@ -1295,6 +1327,7 @@ function openContext(x, y, cx, cy) {
   } else if (sel.length) {
     items.push(['info', 'Informacje o elemencie'], null);
     if (groups.length === 1) items.push(['editGroup', groups[0].kind === 'comp' ? 'Edytuj komponent' : 'Edytuj grupę']);
+    else if (!groups.length && sel.length === 1 && solids.length === 1 && app.editSolid == null) items.push(['editGroup', 'Edytuj bryłę (wierzchołki, krawędzie, ściany)']);
     items.push(['group', 'Utwórz grupę'], ['comp', 'Utwórz komponent']);
     if (groups.length) items.push(['explode', 'Rozbij']);
     if (groups.some(g => g.kind === 'comp')) items.push(['unique', 'Zrób unikalny']);
@@ -1356,7 +1389,7 @@ function serialize() {
 function load(text, name, path) {
   const d = JSON.parse(text);
   if (d.app !== 'Modo') throw new Error('To nie jest plik Modo');
-  app.editing = null; viewer.editGroup = null; app.editSolid = null; viewer.editSolid = null;
+  app.editing = null; viewer.editGroup = null; app.editSolid = null; viewer.editSolid = null; app.clearSub();
   app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
@@ -1374,7 +1407,7 @@ function setFile(path, name) { app.file.path = path; app.file.name = name || 'Be
 async function confirmDiscard() { return !app.file.dirty || confirm('Szkic ma niezapisane zmiany. Porzucić je?'); }
 async function newSketch() {
   if (!(await confirmDiscard())) return;
-  app.editing = null; viewer.editGroup = null;
+  app.editing = null; viewer.editGroup = null; app.clearSub();
   app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, 'Bez nazwy'); app.markDirty(false); setTool('select');
   app.docId = Math.random().toString(36).slice(2); camReset(); renderViewChip();

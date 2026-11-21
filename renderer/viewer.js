@@ -160,6 +160,7 @@ export class Viewer {
     this.modelGroup = new THREE.Group(); this.scene.add(this.modelGroup);
     this.underlayGroup = new THREE.Group(); this.scene.add(this.underlayGroup);
     this.previewGroup = new THREE.Group(); this.scene.add(this.previewGroup);
+    this.subGroup = new THREE.Group(); this.scene.add(this.subGroup);   // zaznaczone pojedyncze ściany
     this.guideGroup = new THREE.Group(); this.scene.add(this.guideGroup);
     this.ghostGroup = new THREE.Group(); this.scene.add(this.ghostGroup);
 
@@ -480,6 +481,17 @@ export class Viewer {
     }
   }
 
+  // zaznaczone pojedyncze ściany (lista wielokątów); krawędzie rysuje nakładka 2D w app.js
+  setSubFaces(polys) {
+    for (const c of [...this.subGroup.children]) { c.geometry.dispose(); this.subGroup.remove(c); }
+    for (const verts of polys || []) {
+      const pts = []; for (const t of triangulatePoly(verts)) for (const p of t) pts.push(new THREE.Vector3(...p));
+      const m = new THREE.Mesh(new THREE.BufferGeometry().setFromPoints(pts), new THREE.MeshBasicMaterial({ color: 0x3f5f99, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
+      m.renderOrder = 2;
+      this.subGroup.add(m);
+    }
+    this.needs = true;
+  }
   // podświetlenie ściany pod kursorem (push/pull) albo bryły (zaznaczanie)
   setHoverFace(verts) {
     for (const c of [...this.previewGroup.children]) { c.geometry.dispose(); this.previewGroup.remove(c); }

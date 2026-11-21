@@ -96,6 +96,26 @@ export class Snapper {
     if (opts.extraPoints) for (const p of opts.extraPoints) tryPt(p, 'end');
 
     const label = { end: 'Punkt końcowy', mid: 'Środek', cross: 'Przecięcie' };
+    // krawędź pod kursorem i ściana pod kursorem — także dla narzędzi związanych z prostą, płaszczyzną albo osią
+    const edgeNear = () => {
+      let eb = null;
+      for (const [a, b] of segs) {
+        const L = V.dist(a, b); if (L < 1e-9) continue;
+        const r = v.onLine(x, y, a, V.sub(b, a)); if (!r) continue;
+        const t = Math.max(0, Math.min(L, r.t));
+        const p = V.add(a, V.mul(V.norm(V.sub(b, a)), t));
+        const d = d2(p);
+        if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)) };
+      }
+      return eb;
+    };
+    // ściana innej bryły niż ta, którą właśnie zmieniasz
+    // (liczy się tylko bryła, która istniała przed rozpoczęciem operacji — nie jej świeża kopia ani bryła-gospodarz)
+    const faceHit = () => {
+      const h = v.pick(x, y); if (!h || !model) return null;
+      const id = h.shapeId;
+      return model.shapes.some(s => s.id === id) && id !== opts.exclude && !(ex && ex.has(id)) && !(opts.noFace && opts.noFace.has(id)) ? h : null;
+    };
 
     // ograniczenie do prostej (push/pull): punkt rzutujemy na prostą
     if (opts.line) {
@@ -105,6 +125,12 @@ export class Snapper {
         const t = V.dot(V.sub(best.p, o), d);
         const p = V.add(o, V.mul(d, t));
         return { p, t, type: 'from', label: V.dist(p, best.p) < 1e-6 ? label[best.type] : 'Od punktu', guide: V.dist(p, best.p) < 1e-6 ? null : [best.p, p], ref: best.p, refType: best.type };
+      }
+      // krawędź albo ściana pod kursorem: wyrównanie do niej (np. wypchnięcie do wysokości sąsiedniej bryły)
+      const eb = edgeNear(), fh = eb ? null : faceHit(), ref = eb ? eb.p : fh ? fh.point : null;
+      if (ref) {
+        const t = V.dot(V.sub(ref, o), d), p = V.add(o, V.mul(d, t)), on = V.dist(p, ref) < 1e-6;
+        return { p, t, type: 'from', label: eb ? (on ? 'Na krawędzi' : 'Od krawędzi') : (on ? 'Na ścianie' : 'Od ściany'), guide: on ? null : [ref, p], ref };
       }
       const r = v.onLine(x, y, o, d);
       if (!r) return null;
@@ -121,6 +147,12 @@ export class Snapper {
         const on = Math.abs(off) < 1e-6;
         return { p, type: on ? best.type : 'from', label: on ? label[best.type] : 'Od punktu', guide: on ? null : [best.p, p], ref: best.p };
       }
+      // krawędź pod kursorem: punkt na niej, zrzutowany na płaszczyznę rysowania
+      const eb = edgeNear();
+      if (eb) {
+        const off = V.dot(V.sub(eb.p, o), n), p = V.sub(eb.p, V.mul(n, off)), on = Math.abs(off) < 1e-6;
+        return { p, type: on ? 'edge' : 'from', label: on ? 'Na krawędzi' : 'Od krawędzi', guide: on ? null : [eb.p, p], ref: eb.p, dir: eb.dir };
+      }
       const p = v.onPlane(x, y, o, n);
       return p ? { p, type: 'free', label: '' } : null;
     }
@@ -132,6 +164,12 @@ export class Snapper {
         this.remember(best.p);
         const p = V.add(o, V.mul(a, V.dot(V.sub(best.p, o), a)));
         return { p, type: 'axis', axis: opts.lockAxis, label: AXIS_NAME[opts.lockAxis], guide: V.dist(p, best.p) > 1e-6 ? [best.p, p] : null, locked: true };
+      }
+      // przy zablokowanej osi krawędź albo ściana pod kursorem wyznacza, jak daleko po tej osi
+      const eb = edgeNear(), fh = eb ? null : faceHit(), ref = eb ? eb.p : fh ? fh.point : null;
+      if (ref) {
+        const p = V.add(o, V.mul(a, V.dot(V.sub(ref, o), a)));
+        return { p, type: 'axis', axis: opts.lockAxis, label: eb ? 'Od krawędzi' : 'Od ściany', guide: V.dist(p, ref) > 1e-6 ? [ref, p] : null, locked: true };
       }
       const r = v.onLine(x, y, o, a);
       if (r) return { p: r.p, type: 'axis', axis: opts.lockAxis, label: AXIS_NAME[opts.lockAxis], locked: true };
@@ -162,15 +200,7 @@ export class Snapper {
     }
 
     // 3. krawędzie
-    let eb = null;
-    for (const [a, b] of segs) {
-      const L = V.dist(a, b); if (L < 1e-9) continue;
-      const r = v.onLine(x, y, a, V.sub(b, a)); if (!r) continue;
-      const t = Math.max(0, Math.min(L, r.t));
-      const p = V.add(a, V.mul(V.norm(V.sub(b, a)), t));
-      const d = d2(p);
-      if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)) };
-    }
+    const eb = edgeNear();
     // ściana pod kursorem
     const hit = v.pick(x, y);
     if (eb) return { p: eb.p, type: 'edge', label: 'Na krawędzi', face: hit, dir: eb.dir };

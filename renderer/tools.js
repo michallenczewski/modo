@@ -73,7 +73,24 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Kliknij bryłę albo linię, żeby ją zaznaczyć; <kbd>⇧</kbd> dodaje. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. Dwuklik w grupę — edycja w środku. Prawy klik — menu.'; }
+  hint() { return 'Klik zaznacza ścianę albo krawędź bryły, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza całą bryłę, a w grupie — wchodzi do środka. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. Prawy klik — menu.'; }
+  // bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się osobno
+  loose(id) {
+    const s = this.model.shapes.find(q => q.id === id);
+    return !!s && !s.bill && s.op !== 'cut' && !s.locked && !this.app.groupAt(id) && (!this.app.editing || this.app.inEditing(id));
+  }
+  // ściana albo krawędź pod kursorem: { id bryły, kind, pts — punkty do przesunięcia, polys | a, b }
+  subAt(id, x, y) {
+    const e = edgeAt(this.app, x, y);
+    if (e && e.shape && e.edge && (id == null || id === e.id) && this.loose(e.id)) return { id: e.id, kind: 'edge', a: e.edge.a.slice(), b: e.edge.b.slice(), pts: [e.edge.a.slice(), e.edge.b.slice()] };
+    if (typeof id !== 'number' || !this.loose(id)) return null;
+    const s = this.model.shapes.find(q => q.id === id), hit = this.v.pick(x, y);
+    if (!hit || hit.shapeId !== id) return null;
+    const f = faceByKey(s, hit.key); if (!f) return null;
+    const polys = (f.region || [f.verts]).map(p => p.map(q => q.slice())), pts = [];
+    for (const p of polys) for (const q of p) if (!pts.some(r => V.dist(r, q) < 1e-5)) pts.push(q.slice());
+    return { id, kind: 'face', key: hit.key, polys, pts };
+  }
   pickAny(x, y) { return pickEntity(this.app, x, y); }
   move(e, x, y) {
     if (this.drag(x, y)) return;
@@ -86,10 +103,21 @@ export class SelectTool extends Tool {
   reset() { this.box = null; }
   // przycisk w dół zapamiętuje miejsce; przeciągnięcie rysuje ramkę (także zaczęte na bryle), zwykły klik zaznacza przy puszczeniu
   down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y, add: e.shiftKey, id: this.pickAny(x, y) }; }
-  click(id, shift) {
+  click(id, shift, x, y) {
     const sel = this.app.selection;
+    const sub = x == null ? null : this.subAt(id, x, y);
+    if (sub && id == null) id = sub.id;
     if (this.app.editSolid != null && id !== this.app.editSolid) this.app.exitSolid();
     while (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
+    if (sub) {
+      // ta sama ściana albo krawędź kliknięta z ⇧ wypada z zaznaczenia
+      const same = q => q.id === sub.id && q.kind === sub.kind && (sub.kind === 'face' ? q.key === sub.key : V.dist(q.a, sub.a) < 1e-6 && V.dist(q.b, sub.b) < 1e-6);
+      const had = this.app.sub.some(same);
+      sel.clear();
+      this.app.sub = shift ? (had ? this.app.sub.filter(q => !same(q)) : [...this.app.sub, sub]) : [sub];
+      this.app.selectionChanged(); return;
+    }
+    if (!shift || id != null) this.app.sub = [];
     const ids = id == null ? [] : this.app.expand(id);
     if (id == null) { if (!shift) sel.clear(); }
     else if (shift) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
@@ -100,7 +128,8 @@ export class SelectTool extends Tool {
   up(e, x, y) {
     const b = this.box; if (!b) return; this.box = null;
     const sel = this.app.selection;
-    if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.add);
+    if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.add, b.x0, b.y0);
+    this.app.sub = [];
     // od lewej do prawej: tylko to, co w całości w ramce; od prawej do lewej: wszystko, czego ramka dotyka
     const window_ = b.x1 >= b.x0, hits = boxSelect(this.app, b, window_);
     if (!b.add) sel.clear();
@@ -124,7 +153,10 @@ export class SelectTool extends Tool {
     if (typeof id === 'string' && id[0] === 't') { const t = this.model.texts.find(q => 't' + q.id === id); if (t) this.app.editText(t, false); return; }
     const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
     if (g) this.app.enterGroup(g.id);
-    else if (typeof id === 'number') this.app.enterSolid(id);   // bryła: edycja wierzchołków, krawędzi i ścian
+    else if (typeof id === 'number') {
+      // dwuklik w bryłę zaznacza ją całą (edycja bryły: Enter albo menu podręczne)
+      this.app.sub = []; this.app.selection.clear(); this.app.expand(id).forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
+    }
   }
 }
 
@@ -266,7 +298,7 @@ export class PushTool extends Tool {
       return;
     }
     const A = this.active;
-    this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, exclude: A.shapeId });
+    this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, exclude: A.shapeId, noFace: A.host ? new Set([A.host.shape.id]) : null });
     if (!this.cur) return;
     this.dist = V.dot(V.sub(this.cur.p, A.o), A.d);
     this.apply(this.dist);
@@ -989,6 +1021,7 @@ export class MoveTool extends Tool {
   hint() {
     const k = copyKey(this.app);
     if (this.app.editSolid != null && !this.p0) return 'Edycja bryły: chwyć wierzchołek, krawędź albo ścianę i przesuń. Strzałki blokują oś, wymiar wpiszesz z klawiatury.';
+    if (this.app.sub.length && !this.app.selection.size && !this.p0) return 'Kliknij punkt, za który chwytasz zaznaczoną ścianę albo krawędź — przesunie się tylko ona, a bryła się odkształci.';
     return this.p0
       ? `Kliknij punkt docelowy albo wpisz odległość. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`
       : `Kliknij punkt, za który chwytasz zaznaczenie (albo bryłę pod kursorem). <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
@@ -1025,7 +1058,14 @@ export class MoveTool extends Tool {
     if (!this.cur) return;
     if (!this.p0) {
       // w edycji bryły: chwytasz wierzchołek, krawędź albo ścianę i ją przesuwasz
-      const sub = this.app.editSolid != null && this.subAt(this.cur);
+      let sub = this.app.editSolid != null && this.subAt(this.cur);
+      // zaznaczona ściana albo krawędź: przesuwają się jej punkty, a bryła się odkształca
+      if (!sub && this.app.sub.length && !this.app.selection.size) {
+        const id = this.app.sub[0].id, pts = [];
+        for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
+        sub = { id, pts, what: 'zaznaczenie' };
+        this.app.clearSub();
+      }
       if (sub) { this.sub = sub; this.targets = new Set(); this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0]; this.v.setHoverFace(null); return; }
       const t = targetsAt(this.app, x, y); if (!t) return;
       this.targets = t; this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0];

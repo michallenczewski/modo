@@ -25,7 +25,7 @@ export const ACTIONS = [
   { group: 'Edycja', id: 'comp', name: 'Utwórz komponent', keys: ['Mod+Space', 'Ctrl+Space'] },
   { group: 'Edycja', id: 'unique', name: 'Komponent: zrób unikalny', keys: ['Shift+U'] },
   { group: 'Edycja', id: 'explode', name: 'Rozbij grupę / komponent', keys: ['Shift+Space'] },
-  { group: 'Edycja', id: 'editGroup', name: 'Edytuj grupę (albo dwuklik) / zakończ', keys: ['Enter'] },
+  { group: 'Edycja', id: 'editGroup', name: 'Edytuj grupę (albo dwuklik) lub bryłę / zakończ', keys: ['Enter'] },
   { group: 'Edycja', id: 'move', name: 'Przesuń', keys: ['W'] },
   { group: 'Edycja', id: 'rotate', name: 'Obróć', keys: ['E'] },
   { group: 'Edycja', id: 'scale', name: 'Skaluj', keys: ['R'] },
