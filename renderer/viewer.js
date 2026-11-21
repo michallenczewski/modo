@@ -444,6 +444,7 @@ export class Viewer {
   }
   drawOverlay() {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
+    if (this.annotDraw) this.annotDraw(c, p => this.toScreen(p), 1);
     if (this.overlayDraw) this.overlayDraw(c, this);
   }
   redraw() { this.needs = true; }
@@ -470,6 +471,13 @@ export class Viewer {
     r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); r.setRenderTarget(null);
     const px = new Uint8Array(W * H * 4);
     r.readRenderTargetPixels(rt, 0, 0, W, H, px);
+    // wymiary i opisy: osobna warstwa 2D w rozdzielczości eksportu (rzut kamerą eksportu)
+    let ann = null;
+    if (this.annotDraw) {
+      ann = document.createElement('canvas'); ann.width = W; ann.height = H;
+      const vc = this.vc(), proj = p => { const q = new THREE.Vector3(p[0], p[1], p[2]).project(vc); return { x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H, behind: q.z > 1 }; };
+      this.annotDraw(ann.getContext('2d'), proj, W / this.w, { dark, paper: transparent ? null : st.paper });
+    }
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
     this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
@@ -480,6 +488,7 @@ export class Viewer {
     const cx = cv.getContext('2d'), img = cx.createImageData(W, H);
     for (let y = 0; y < H; y++) img.data.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
     cx.putImageData(img, 0, 0);
+    if (ann) cx.drawImage(ann, 0, 0);
     return new Promise(res => cv.toBlob(res, 'image/png'));
   }
 

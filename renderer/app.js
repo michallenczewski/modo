@@ -3,13 +3,14 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { pickEntity, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { pickEntity, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
 import { exportObj } from './export.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
-import { faces as facesOfShape, isSolid } from './model.js';
+import { faces as facesOfShape, isSolid, removeIds } from './model.js';
+import { drawAnnotations } from './annot.js';
 import { UNITS, getUnit, setUnit } from './units.js';
 
 const api = window.api;
@@ -38,6 +39,9 @@ const IC = {
   rrect: '<path d="M2.5 9.5 8.5 3.5l5 5-6 6z"/>',
   polygon: '<path d="M8 2.2 13.5 6.2l-2.1 6.5H4.6L2.5 6.2z"/>',
   carc: '<path d="M13.5 8A5.5 5.5 0 0 0 4.1 4.1"/><circle cx="8" cy="8" r=".8"/><path d="M8 8 13.5 8" stroke-dasharray="1.2 1.6"/>',
+  dim: '<path d="M2.5 5v7M13.5 5v7M2.5 9.5h11"/><path d="M4 11l-1.4-1.4M13.4 9.6 12 8"/>',
+  text: '<path d="M3.5 4h9M8 4v8.5"/>',
+  protractor: '<path d="M2.5 12.5h11"/><path d="M2.5 12.5A5.5 5.5 0 0 1 13.5 12.5"/><path d="M8 12.5 11.5 5" stroke-dasharray="1.4 1.6"/>',
   pie: '<path d="M8 8V2.5A5.5 5.5 0 1 1 2.5 8z"/>',
   extents: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>'
 };
@@ -151,17 +155,18 @@ function makeUnique() {
 /* ---------- narzędzia ---------- */
 const tools = {
   select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), circle: new CircleTool(app), arc: new ArcTool(app),
+  dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
 };
 let tool = tools.select;
-const TOOL_NAME = { rect: 'Prostokąt', rrect: 'Prostokąt obrócony', circle: 'Okrąg', polygon: 'Wielokąt', arc: 'Łuk przez dwa punkty', carc: 'Łuk ze środka', pie: 'Wycinek koła' };
+const TOOL_NAME = { tape: 'Taśma i prowadnice', protractor: 'Kątomierz', dim: 'Wymiar', text: 'Opis', rect: 'Prostokąt', rrect: 'Prostokąt obrócony', circle: 'Okrąg', polygon: 'Wielokąt', arc: 'Łuk przez dwa punkty', carc: 'Łuk ze środka', pie: 'Wycinek koła' };
 // rodziny narzędzi: jeden przycisk na pasku, warianty w wysuwanym menu po najechaniu
-const FAMILIES = { rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'carc', 'pie'] };
+const FAMILIES = { rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'] };
 const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
-const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
+const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['dim', 'Wymiar'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -206,8 +211,9 @@ function setTool(id) {
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  $('#view').className = ['line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
+  viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
 let tipEl = null;
@@ -363,7 +369,7 @@ function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
     case 'hideRest': hideRest(); break;
     case 'hideSimilar': hideSimilar(); break;
     case 'hideSel': hideSel(); break;
@@ -478,9 +484,7 @@ function solidOp(op) {
 function deleteSelection() {
   if (!app.selection.size) return;
   app.checkpoint();
-  app.model.shapes = app.model.shapes.filter(s => !app.selection.has(s.id));
-  app.model.lines = app.model.lines.filter(l => !app.selection.has('l' + l.id));
-  app.model.guides = app.model.guides.filter(g => !app.selection.has('g' + g.id));
+  removeIds(app.model, app.selection);
   app.selection.clear(); app.changed();
 }
 function undo() {
@@ -793,6 +797,33 @@ function renderKeys() {
     box.append(col);
   }
 }
+
+/* ---------- edycja tekstu opisu ---------- */
+app.editText = (t, isNew) => {
+  const P = viewer.toScreen(t.q), r = $('#view').getBoundingClientRect();
+  const ta = document.createElement('textarea');
+  ta.className = 'textEdit'; ta.value = t.text || ''; ta.rows = Math.max(1, ta.value.split('\n').length);
+  ta.style.left = (r.left + P.x + 6) + 'px'; ta.style.top = (r.top + P.y - 12) + 'px';
+  document.body.append(ta);
+  // fokus dopiero po zakończeniu kliknięcia (inaczej mysz od razu go zabiera)
+  let done = false, ready = false;
+  setTimeout(() => { ta.focus(); ta.select(); ready = true; }, 30);
+  const finish = ok => {
+    if (done) return; done = true;
+    const v = ta.value.replace(/\s+$/, ''); ta.remove();
+    if (!ok || !v) { if (!isNew && ok && !v) { app.checkpoint(); app.model.texts = app.model.texts.filter(x => x.id !== t.id); app.changed(); } app.refresh(); return; }
+    app.checkpoint();
+    if (isNew) app.model.texts.push({ ...t, text: v }); else { const x = app.model.texts.find(x => x.id === t.id); if (x) x.text = v; }
+    app.changed();
+  };
+  ta.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    else setTimeout(() => { ta.rows = Math.max(1, ta.value.split('\n').length); });
+  });
+  ta.addEventListener('blur', () => { if (ready) finish(true); });
+};
 
 /* ---------- menu podręczne (prawy klik) ---------- */
 function openContext(x, y, cx, cy) {

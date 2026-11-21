@@ -2,7 +2,8 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
+import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds } from './model.js';
+import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { moveMeshPoints } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
@@ -118,6 +119,7 @@ export class SelectTool extends Tool {
   // dwuklik w grupę albo komponent: edycja w środku
   dbl(e, x, y) {
     const id = this.pickAny(x, y); if (id == null) return;
+    if (typeof id === 'string' && id[0] === 't') { const t = this.model.texts.find(q => 't' + q.id === id); if (t) this.app.editText(t, false); return; }
     const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
     if (g) this.app.enterGroup(g.id);
     else if (typeof id === 'number') this.app.enterSolid(id);   // bryła: edycja wierzchołków, krawędzi i ścian
@@ -450,6 +452,8 @@ export function pickEntity(app, x, y) {
     const t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2));
     return Math.hypot(A.x + dx * t - x, A.y + dy * t - y);
   };
+  const an = pickAnnotation(m, p => v.toScreen(p), x, y);
+  if (an) return an;
   let best = null, bd = 6;
   for (const l of m.lines) { if (l.hidden) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
   if (best) return best;
@@ -693,6 +697,101 @@ export class CenterArcTool extends Tool {
   }
 }
 
+/* ---------- wymiar ---------- */
+export class DimTool extends Tool {
+  reset() { this.a = null; this.b = null; this.cur = null; this.off = null; }
+  hint() { return !this.a ? 'Kliknij pierwszy punkt wymiaru (koniec, środek, krawędź).' : !this.b ? 'Kliknij drugi punkt.' : 'Odsuń linię wymiarową i kliknij — albo wpisz odsunięcie.'; }
+  vcb() { return { label: this.b ? 'Odsunięcie' : 'Długość', value: this.b && this.off ? fmtLength(V.len(this.off)) : this.a && this.cur ? fmtLength(V.dist(this.a, this.cur.p)) : '' }; }
+  move(e, x, y) {
+    if (!this.b) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.a, lockAxis: this.app.lockAxis }); return; }
+    // odsunięcie wzdłuż tej osi (prostopadłej do odcinka), w którą stronę kursor odsuwa się od niego na ekranie
+    const ab = V.norm(V.sub(this.b, this.a)), mid = V.lerp(this.a, this.b, 0.5), M = this.v.toScreen(mid), A = this.v.toScreen(this.a), B = this.v.toScreen(this.b);
+    let lx = B.x - A.x, ly = B.y - A.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
+    const mx0 = x - M.x, my0 = y - M.y, mdot = mx0 * lx + my0 * ly, mx = mx0 - lx * mdot, my = my0 - ly * mdot, mlen = Math.hypot(mx, my);
+    const eps = Math.max(0.01, 50 * this.v.pixelSize(mid));
+    let best = null;
+    for (const ax of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) {
+      let w = V.sub(ax, V.mul(ab, V.dot(ax, ab))); if (V.len(w) < 0.2) continue; w = V.norm(w);
+      const W = this.v.toScreen(V.add(mid, V.mul(w, eps))); if (W.behind) continue;
+      let sx = (W.x - M.x) / eps, sy = (W.y - M.y) / eps; const sd = sx * lx + sy * ly; sx -= lx * sd; sy -= ly * sd;
+      const sl = Math.hypot(sx, sy); if (sl < 1e-6) continue;
+      const score = mlen > 1e-6 ? Math.abs(mx * sx + my * sy) / (mlen * sl) : 0;
+      if (!best || score > best.score + 0.05 || (Math.abs(score - best.score) <= 0.05 && sl > best.sl)) best = { w, score, sl, amt: (mx * sx + my * sy) / (sl * sl) };
+    }
+    if (!best) return;
+    this.off = V.mul(best.w, best.amt);
+    this.cur = { p: V.add(mid, this.off) };
+  }
+  down() {
+    if (!this.a) { if (!this.cur) return; this.a = this.cur.p.slice(); return; }
+    if (!this.b) { if (!this.cur || V.dist(this.cur.p, this.a) < 1e-6) return; this.b = this.cur.p.slice(); return; }
+    if (this.off) this.create(this.off);
+  }
+  create(off) {
+    this.app.checkpoint();
+    this.model.dims.push({ id: this.model.next++, a: this.a.slice(), b: this.b.slice(), off });
+    this.app.changed(); this.reset(); this.app.lockAxis = null;
+  }
+  value(str) {
+    const L = parseLength(str); if (L == null) return false;
+    if (this.b && this.off) { const n = V.len(this.off) > 1e-9 ? V.norm(this.off) : [0, 0, 1]; this.create(V.mul(n, L)); return true; }
+    return false;
+  }
+  draw(c, v) {
+    const s = this.cur;
+    if (this.b && this.off) drawAnnotations(c, p => v.toScreen(p), { dims: [{ id: 0, a: this.a, b: this.b, off: this.off }], texts: [] }, { dark: v.dark, paper: v.st().paper });
+    else if (this.a && s) { drawSeg(c, v, this.a, s.p, INK, { width: 1, dash: [3, 3] }); }
+    if (s && !this.b) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.a ? fmtLength(V.dist(this.a, s.p)) : s.label); }
+  }
+}
+
+/* ---------- opis z odnośnikiem ---------- */
+export class TextTool extends Tool {
+  reset() { this.p = null; this.cur = null; }
+  hint() { return !this.p ? 'Kliknij punkt, który opisujesz (albo dwa razy w to samo miejsce — opis bez strzałki).' : 'Kliknij, gdzie ma stać tekst, a potem go wpisz. <kbd>Enter</kbd> kończy, <kbd>⇧</kbd><kbd>Enter</kbd> — nowy wiersz.'; }
+  move(e, x, y) { this.cur = this.p ? this.app.snapper.find(x, y, { model: this.model, plane: { o: this.p, n: V.norm(this.v.getCamera().f) } }) : this.app.snapper.find(x, y, { model: this.model }); }
+  down() {
+    if (!this.cur) return;
+    if (!this.p) { this.p = this.cur.p.slice(); return; }
+    const t = { id: this.model.next++, p: this.p.slice(), q: this.cur.p.slice(), text: '' };
+    this.reset();
+    this.app.editText(t, true);
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p) { drawSeg(c, v, this.p, s.p, INK, { width: 1 }); const P = v.toScreen(this.p); c.fillStyle = INK; c.beginPath(); c.arc(P.x, P.y, 2.2, 0, 7); c.fill(); }
+    else drawMarker(c, v, s);
+  }
+}
+
+/* ---------- kątomierz: prowadnica pod kątem ---------- */
+export class ProtractorTool extends CenterArcTool {
+  constructor(app) { super(app, false); }
+  hint() { return !this.c ? 'Kliknij wierzchołek kąta. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.' : !this.p1 ? 'Kliknij punkt na ramieniu odniesienia (np. na krawędzi).' : 'Obróć i kliknij — albo wpisz kąt w stopniach. Powstanie prowadnica pod tym kątem.'; }
+  create() {
+    const a = toPlane(this.plane, this.p1), a0 = Math.atan2(a[1], a[0]) + this.ang;
+    const d = V.norm(V.add(V.mul(this.plane.u, Math.cos(a0)), V.mul(this.plane.v, Math.sin(a0))));
+    this.app.checkpoint();
+    this.model.guides.push({ id: this.model.next++, o: this.c.slice(), d });
+    this.app.changed(); this.reset();
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p1) {
+      const a = toPlane(this.plane, this.p1), r = Math.hypot(a[0], a[1]), a0 = Math.atan2(a[1], a[0]);
+      const R = Math.max(r, 40 * v.pixelSize(this.c)), pts = [];
+      for (let i = 0; i <= 24; i++) { const t = a0 + this.ang * i / 24; pts.push(fromPlane(this.plane, [R * 0.6 * Math.cos(t), R * 0.6 * Math.sin(t)])); }
+      drawPoly(c, v, pts, INK, false, { width: 1 });
+      const e = fromPlane(this.plane, [R * 3 * Math.cos(a0 + this.ang), R * 3 * Math.sin(a0 + this.ang)]);
+      drawSeg(c, v, this.c, this.p1, INK, { width: 1 });
+      drawSeg(c, v, this.c, e, INK, { width: 1, dash: [5, 4] });
+    } else if (this.c) drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
+    drawMarker(c, v, this.p1 ? null : s);
+    const Q = v.toScreen(s.p);
+    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 1800 / Math.PI) / 10 + '°').replace('.', ',') : s.label);
+  }
+}
+
 /* ---------- łuk dwupunktowy ---------- */
 export class ArcTool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.plane = null; this.cur = null; this.h = 0; }
@@ -765,6 +864,12 @@ function eachTarget(m, targets, fs, fl, fg) {
   for (const s of m.shapes) if (targets.has(s.id)) fs(s);
   for (const l of m.lines) if (targets.has('l' + l.id)) fl(l);
   for (const g of m.guides) if (targets.has('g' + g.id)) fg(g);
+  // wymiary i opisy przekształcamy jak odcinki (przekształcenia są afiniczne)
+  for (const d of m.dims || []) if (targets.has('d' + d.id)) {
+    const A = { a: d.a.slice(), b: d.b.slice() }, B = { a: V.add(d.a, d.off), b: d.b.slice() };
+    fl(A); fl(B); d.a = A.a; d.b = A.b; d.off = V.sub(B.a, A.a);
+  }
+  for (const t of m.texts || []) if (targets.has('t' + t.id)) { const L = { a: t.p.slice(), b: t.q.slice() }; fl(L); t.p = L.a; t.q = L.b; }
 }
 // kopie elementów (nowe id, grupy i komponenty kopiowane w całości); zwraca zbiór id kopii
 const duplicate = (m, targets) => duplicateIds(m, targets);
@@ -1075,12 +1180,9 @@ export class EraserTool extends Tool {
     const id0 = pickEntity(this.app, x, y); if (id0 == null) return;
     if (!this.started) { this.app.checkpoint(); this.started = true; }
     const m = this.model;
-    for (const id of this.app.expand(id0)) {
-      if (typeof id === 'number') m.shapes = m.shapes.filter(s => s.id !== id);
-      else if (id[0] === 'l') m.lines = m.lines.filter(l => 'l' + l.id !== id);
-      else m.guides = m.guides.filter(g => 'g' + g.id !== id);
-      this.app.selection.delete(id);
-    }
+    const ids = new Set(this.app.expand(id0));
+    removeIds(m, ids);
+    ids.forEach(id => this.app.selection.delete(id));
     this.app.changed();
   }
 }
