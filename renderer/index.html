@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: data: https://generativelanguage.googleapis.com">
 <title>Modo</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -23,6 +23,7 @@
   <button id="keysBtn" class="ib" aria-label="Skróty klawiszowe" title="Skróty klawiszowe (?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.5"/><path d="M4.5 6.7h.01M7 6.7h.01M9.5 6.7h.01M12 6.7h.01M5 9.4h6"/></svg></button>
   <button id="panelBtn" class="ib" aria-label="Panel: element, warstwy, struktura" title="Panel: element, warstwy, struktura"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.8" width="12" height="10.4" rx="1.5"/><path d="M10 2.8v10.4"/></svg></button>
   <button id="fileBtn" class="ib" aria-label="Plik" aria-haspopup="menu" title="Plik"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.8h5.2L12 4.6v9.6H4z"/><path d="M9 1.8v3h3"/></svg></button>
+  <button id="aiBtn" class="tb" aria-haspopup="dialog" aria-label="Render widoku przez Gemini"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 9.5 6.5 13.8 8 9.5 9.5 8 13.8 6.5 9.5 2.2 8 6.5 6.5z"/></svg><span>Render</span></button>
   <button id="pngBtn" class="tb" aria-haspopup="dialog" aria-label="Eksport PNG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M5 7.5l3 3 3-3"/><path d="M2.5 11v2.5h11V11"/></svg><span>PNG</span></button>
 </header>
 
@@ -94,6 +95,24 @@
   <div class="lbl note" id="libNote">Zaznacz bryły (albo grupę) i zapisz je tutaj — będą dostępne w każdym szkicu na tym komputerze.</div>
 </section>
 
+<section id="aiPop" class="pop wide" role="dialog" aria-label="Render przez Gemini" hidden>
+  <div class="row"><span class="ttl grow">Render widoku</span><span class="lbl">Gemini · Nano Banana</span></div>
+  <div id="aiKeyBox">
+    <div class="lbl note">Potrzebny jest Twój klucz API Gemini (z Google AI Studio). Zostaje na tym komputerze.</div>
+    <div class="row"><input id="aiKey" class="fld grow" type="password" autocomplete="off" spellcheck="false" placeholder="Klucz API" aria-label="Klucz API Gemini"><button class="tb soft" id="aiKeySave">Zapisz</button></div>
+  </div>
+  <div id="aiMain">
+    <div class="row"><span class="lbl w60">Model</span><select id="aiModel" class="fld grow" aria-label="Model"></select></div>
+    <div class="row" id="aiCustomRow" hidden><span class="lbl w60">Nazwa</span><input id="aiCustom" class="fld grow" spellcheck="false" placeholder="identyfikator modelu" aria-label="Identyfikator modelu"></div>
+    <div class="row"><span class="lbl w60">Rozmiar</span><div class="seg stretch grow" id="aiSize" role="group" aria-label="Rozmiar obrazu"><button data-s="1K">1K</button><button data-s="2K">2K</button><button data-s="4K">4K</button></div></div>
+    <textarea id="aiPrompt" class="fld" rows="6" spellcheck="false" aria-label="Opis renderu"></textarea>
+    <div class="row"><button class="tb soft" id="aiPromptReset">Przywróć opis</button><span class="grow"></span><button class="tb soft" id="aiKeyChange">Zmień klucz</button></div>
+    <div class="lbl note">Do Gemini trafia bieżący widok w wybranym stylu, bez osi i prowadnic. Każdy render jest płatny według cennika Google.</div>
+    <div class="hr"></div>
+    <div class="row"><span class="lbl grow ell" id="aiStatus"></span><button class="primary" id="aiGo">Renderuj</button></div>
+  </div>
+</section>
+
 <section id="pngPop" class="pop" role="dialog" aria-label="Eksport PNG" hidden>
   <div class="row"><span class="ttl grow">Eksport PNG</span><span class="lbl" id="pngStyle"></span></div>
   <div class="seg stretch" id="pngSize" role="group" aria-label="Rozdzielczość"><button data-s="x2">Widok ×2</button><button data-s="4k">4K</button><button data-s="6k">6K</button><button data-s="own">Własna</button></div>
@@ -140,6 +159,15 @@
 
 <div id="menu" class="menu" role="menu" hidden></div>
 <div id="ctxMenu" class="menu" role="menu" hidden></div>
+
+<div id="aiModal" hidden>
+  <div class="scrim"></div>
+  <section class="pop modal aiResult" role="dialog" aria-label="Wynik renderu">
+    <div class="row"><span class="ttl grow">Render</span><span class="lbl" id="aiInfo"></span></div>
+    <div class="aiPair"><img id="aiImg" alt="Render z Gemini"></div>
+    <div class="row"><button class="tb soft" id="aiCompare">Przytrzymaj: widok z Modo</button><span class="grow"></span><button class="tb soft" id="aiAgain">Jeszcze raz</button><button class="tb soft" id="aiClose">Zamknij</button><button class="primary" id="aiSave">Zapisz…</button></div>
+  </section>
+</div>
 
 <div id="keysModal" hidden>
   <div class="scrim"></div>

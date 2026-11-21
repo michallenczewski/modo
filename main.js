@@ -1,5 +1,5 @@
 // Modo — proces główny: okno, pliki (.modo, PNG, DXF/DWG), zamiana DWG na DXF przez ODA File Converter, aktualizacje.
-const { app, BrowserWindow, ipcMain, dialog, shell, net, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, net, protocol, safeStorage } = require('electron');
 const { pathToFileURL } = require('url');
 const path = require('path');
 const fs = require('fs');
@@ -24,7 +24,7 @@ function serveRenderer() {
 
 /* ---------- ustawienia ---------- */
 const settingsFile = () => path.join(app.getPath('userData'), 'ustawienia.json');
-let settings = { bounds: null, maximized: false, recent: [], odaPath: null };
+let settings = { bounds: null, maximized: false, recent: [], odaPath: null, geminiKey: null };
 function loadSettings() { try { Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))); } catch (e) {} }
 function saveSettings() { try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch (e) {} }
 
@@ -110,6 +110,33 @@ ipcMain.handle('png-save', async (e, buf, suggested) => {
   await fsp.writeFile(r.filePath, Buffer.from(buf));
   return r.filePath;
 });
+/* ---------- render przez Gemini (Nano Banana) ---------- */
+// Klucz API zostaje w procesie głównym (zaszyfrowany przez system, gdy to możliwe); okno wie tylko, czy klucz jest.
+function geminiKey() {
+  const k = settings.geminiKey; if (!k) return null;
+  try { return k.enc ? safeStorage.decryptString(Buffer.from(k.enc, 'base64')) : k.plain || null; } catch (e) { return null; }
+}
+ipcMain.handle('gemini-key-has', () => !!geminiKey());
+ipcMain.handle('gemini-key-set', (e, key) => {
+  key = String(key || '').trim();
+  if (!key) settings.geminiKey = null;
+  else settings.geminiKey = safeStorage.isEncryptionAvailable() ? { enc: safeStorage.encryptString(key).toString('base64') } : { plain: key };
+  saveSettings(); return !!key;
+});
+ipcMain.handle('gemini-render', async (e, req) => {
+  const key = geminiKey();
+  if (!key) return { error: 'Brak klucza API Gemini.', code: 'NO_KEY' };
+  try {
+    const r = await net.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(req.model) + ':generateContent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(req.body)
+    });
+    const text = await r.text();
+    let j = null; try { j = JSON.parse(text); } catch (err) {}
+    if (!r.ok) return { error: (j && j.error && j.error.message) || ('Gemini odpowiedział ' + r.status), status: r.status };
+    return { json: j };
+  } catch (err) { return { error: 'Nie udało się połączyć z Gemini: ' + err.message }; }
+});
+
 // OBJ z materiałami: plik .mtl o tej samej nazwie obok
 ipcMain.handle('obj-save', async (e, obj, mtl, suggested) => {
   const win = BrowserWindow.fromWebContents(e.sender);

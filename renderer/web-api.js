@@ -14,6 +14,19 @@
     async saveFile(p, text, suggested) { download(new Blob([text], { type: 'application/json' }), (suggested || 'Szkic') + '.modo'); return { path: null, name: suggested || 'Szkic' }; },
     async savePng(buf, suggested) { download(new Blob([buf], { type: 'image/png' }), (suggested || 'Modo') + '.png'); return (suggested || 'Modo') + '.png'; },
     async saveObj(obj, mtl, suggested) { const n = suggested || 'Modo'; download(new Blob([obj.replace(/^mtllib .*$/m, 'mtllib ' + n + '.mtl')], { type: 'text/plain' }), n + '.obj'); setTimeout(() => download(new Blob([mtl], { type: 'text/plain' }), n + '.mtl'), 300); return n + '.obj'; },
+    // w przeglądarce klucz leży w pamięci przeglądarki, a zapytanie idzie wprost do Gemini
+    async geminiHasKey() { try { return !!localStorage.getItem('modo.geminiKey'); } catch (e) { return false; } },
+    async geminiSetKey(k) { try { k ? localStorage.setItem('modo.geminiKey', String(k).trim()) : localStorage.removeItem('modo.geminiKey'); } catch (e) {} return !!k; },
+    async geminiRender(req) {
+      let key = null; try { key = localStorage.getItem('modo.geminiKey'); } catch (e) {}
+      if (!key) return { error: 'Brak klucza API Gemini.', code: 'NO_KEY' };
+      try {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(req.model) + ':generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(req.body) });
+        const j = await r.json().catch(() => null);
+        if (!r.ok) return { error: (j && j.error && j.error.message) || ('Gemini odpowiedział ' + r.status), status: r.status };
+        return { json: j };
+      } catch (err) { return { error: 'Nie udało się połączyć z Gemini: ' + err.message }; }
+    },
     async pickBinary(ext) { const f = await pick([].concat(ext).map(x => '.' + x).join(',')); return f ? { path: null, name: f.name, data: new Uint8Array(await f.arrayBuffer()) } : null; },
     async pickUnderlay() {
       const f = await pick('.dxf,.dwg'); if (!f) return null;

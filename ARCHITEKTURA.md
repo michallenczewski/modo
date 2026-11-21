@@ -72,6 +72,10 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 
 Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
+## Render przez Gemini
+
+Przycisk Render wysyła bieżący widok (PNG, dłuższy bok 1600 px) do Gemini API: `POST v1beta/models/<model>:generateContent`, w treści opis i obraz (`inline_data`), w `generationConfig` — `responseModalities: ['IMAGE']` oraz `imageConfig` (`aspectRatio` najbliższe proporcjom okna, `imageSize` 1K/2K/4K). Obraz wraca w `candidates[0].content.parts[].inlineData`. W programie zapytanie wysyła proces główny (`gemini-render` w `main.js`), a klucz leży w `ustawienia.json` zaszyfrowany przez `safeStorage`; okno wie tylko, czy klucz jest. W wersji przeglądarkowej klucz leży w `localStorage`, a zapytanie idzie wprost z okna (stąd adres Gemini w `connect-src`). Lista modeli jest w `AI_MODELS` w `app.js` — nazwy modeli Google zmienia często, dlatego jest też pole „Inny model”.
+
 ## Biblioteki zewnętrzne
 
 Wszystkie leżą w `renderer/vendor/` jako gotowe pliki, żeby program i wersja przeglądarkowa działały bez budowania. Ciężkie moduły (OpenSKP, LibreDWG) ładują się dopiero przy pierwszym użyciu.

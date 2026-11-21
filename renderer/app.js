@@ -333,6 +333,7 @@ window.addEventListener('keydown', e => {
     else setSun({ hour: Math.max(0, Math.min(24, viewer.sunCfg.hour + dir * 0.25)) });
     return;
   }
+  if (e.key === 'Escape' && !$('#aiModal').hidden) { $('#aiModal').hidden = true; return; }
   if (e.key === 'Escape') {
     if (closePops()) return;
     if (vcbBuf) { vcbBuf = ''; app.refresh(); return; }
@@ -383,6 +384,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'render': openPop('#aiPop', $('#aiBtn')); break;
     case 'importSkp': importSkp(); break;
     case 'library': openPop('#libPop', $('#libBtn')); break;
     case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
@@ -540,6 +542,7 @@ function openPop(sel, anchor, side) {
   if (sel === '#underPop') renderUnder();
   if (sel === '#viewPop') renderViewPop();
   if (sel === '#libPop') renderLib();
+  if (sel === '#aiPop') renderAi();
 }
 function closePops() {
   let any = false;
@@ -1207,6 +1210,91 @@ async function saveObj() {
     if (p) toast('Zapisano OBJ: ' + r.count + ' obiektów (metry, oś Y w górę)', api.web ? null : ['Pokaż', () => api.showInFolder(p)]);
   } catch (err) { toast('Nie udało się zapisać OBJ: ' + err.message); }
 }
+/* ---------- render widoku przez Gemini (Nano Banana) ---------- */
+const AI_MODELS = [['gemini-nano-banana-2.1', 'Nano Banana 2.1'], ['gemini-3-pro-image', 'Nano Banana Pro'], ['gemini-3.1-flash-image', 'Nano Banana 2'], ['gemini-3.1-flash-lite-image', 'Nano Banana 2 Lite (tylko 1K)'], ['', 'Inny model…']];
+const AI_PROMPT = 'Turn this architectural massing sketch into a photorealistic architectural photograph. Keep the geometry, proportions, openings, camera position and composition exactly as in the image; do not add, remove or reshape any building volumes. Remove the sketch outlines. Use realistic, restrained materials, natural daylight consistent with the direction of the shadows in the image, a believable ground, subtle greenery and a few people for scale.';
+const AI_RATIOS = [['1:1', 1], ['5:4', 1.25], ['4:3', 4 / 3], ['3:2', 1.5], ['16:9', 16 / 9], ['21:9', 21 / 9], ['4:5', 0.8], ['3:4', 0.75], ['2:3', 2 / 3], ['9:16', 9 / 16]];
+const aiGet = (k, d) => { try { return localStorage.getItem('modo.ai.' + k) ?? d; } catch (e) { return d; } };
+const aiSet = (k, v) => { try { localStorage.setItem('modo.ai.' + k, v); } catch (e) {} };
+let aiBusy = false, aiLast = null;   // aiLast: { url, blob, source }
+$('#aiBtn').addEventListener('click', () => openPop('#aiPop', $('#aiBtn')));
+$('#aiModel').innerHTML = AI_MODELS.map(([id, n]) => `<option value="${id}">${n}</option>`).join('');
+async function renderAi(forceKey) {
+  const has = await api.geminiHasKey();
+  $('#aiKeyBox').hidden = has && !forceKey; $('#aiMain').hidden = !has || !!forceKey;
+  if (!has || forceKey) { $('#aiKey').value = ''; setTimeout(() => $('#aiKey').focus(), 30); return; }
+  const model = aiGet('model', AI_MODELS[0][0]);
+  $('#aiModel').value = AI_MODELS.some(m => m[0] === model) ? model : '';
+  $('#aiCustomRow').hidden = $('#aiModel').value !== ''; if ($('#aiModel').value === '') $('#aiCustom').value = model;
+  const size = aiGet('size', '2K');
+  document.querySelectorAll('#aiSize button').forEach(b => b.classList.toggle('on', b.dataset.s === size));
+  if (document.activeElement !== $('#aiPrompt')) $('#aiPrompt').value = aiGet('prompt', AI_PROMPT);
+  $('#aiGo').disabled = aiBusy; if (!aiBusy) $('#aiStatus').textContent = '';
+}
+$('#aiKey').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') $('#aiKeySave').click(); });
+$('#aiKeySave').addEventListener('click', async () => { const k = $('#aiKey').value.trim(); if (!k) return; await api.geminiSetKey(k); $('#aiKey').value = ''; renderAi(); });
+$('#aiKeyChange').addEventListener('click', () => renderAi(true));
+$('#aiModel').addEventListener('change', e => { if (e.target.value) aiSet('model', e.target.value); else aiSet('model', $('#aiCustom').value.trim()); renderAi(); });
+$('#aiCustom').addEventListener('keydown', e => e.stopPropagation());
+$('#aiCustom').addEventListener('change', e => aiSet('model', e.target.value.trim()));
+document.querySelectorAll('#aiSize button').forEach(b => b.addEventListener('click', () => { aiSet('size', b.dataset.s); renderAi(); }));
+$('#aiPrompt').addEventListener('keydown', e => e.stopPropagation());
+$('#aiPrompt').addEventListener('change', e => aiSet('prompt', e.target.value));
+$('#aiPromptReset').addEventListener('click', () => { aiSet('prompt', AI_PROMPT); $('#aiPrompt').value = AI_PROMPT; });
+const b64 = async blob => { const u = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+async function aiRender() {
+  if (aiBusy) return;
+  const model = (aiGet('model', AI_MODELS[0][0]) || '').trim(), prompt = ($('#aiPrompt').value || '').trim() || AI_PROMPT;
+  if (!model) return toast('Wpisz identyfikator modelu.');
+  let size = aiGet('size', '2K'); if (/lite/.test(model)) size = '1K';
+  aiBusy = true; $('#aiGo').disabled = true; $('#aiStatus').textContent = 'Przygotowuję widok…';
+  try {
+    // widok w proporcjach okna, dłuższy bok 1600 px — tyle wystarcza modelowi jako wzór
+    const k = 1600 / Math.max(viewer.w, viewer.h), W = Math.round(viewer.w * k), H = Math.round(viewer.h * k);
+    const src = await viewer.exportPng(W, H, { dark: false });
+    const ar = viewer.w / viewer.h, ratio = AI_RATIOS.reduce((a, b) => Math.abs(Math.log(b[1] / ar)) < Math.abs(Math.log(a[1] / ar)) ? b : a)[0];
+    $('#aiStatus').textContent = 'Gemini renderuje… to trwa zwykle kilkanaście sekund';
+    const t0 = Date.now();
+    const r = await api.geminiRender({ model, body: {
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/png', data: await b64(src) } }] }],
+      generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: ratio, imageSize: size } }
+    } });
+    if (r.error) { if (r.code === 'NO_KEY') renderAi(true); throw new Error(r.error); }
+    const parts = r.json?.candidates?.[0]?.content?.parts || [];
+    const img = parts.map(p => p.inlineData || p.inline_data).find(Boolean);
+    if (!img || !img.data) {
+      const why = r.json?.promptFeedback?.blockReason || r.json?.candidates?.[0]?.finishReason, txt = parts.map(p => p.text).filter(Boolean).join(' ').slice(0, 200);
+      throw new Error('Gemini nie zwrócił obrazu' + (why ? ' (' + why + ')' : '') + (txt ? ': ' + txt : '.'));
+    }
+    const bin = atob(img.data), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    const blob = new Blob([u], { type: img.mimeType || img.mime_type || 'image/png' });
+    if (aiLast) { URL.revokeObjectURL(aiLast.url); URL.revokeObjectURL(aiLast.source); }
+    aiLast = { url: URL.createObjectURL(blob), blob, source: URL.createObjectURL(src) };
+    closePops();
+    $('#aiImg').src = aiLast.url; $('#aiInfo').textContent = (AI_MODELS.find(m => m[0] === model)?.[1] || model) + ' · ' + size + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s';
+    $('#aiModal').hidden = false;
+  } catch (err) { toast('Render się nie udał: ' + (err.message || err)); $('#aiStatus').textContent = ''; }
+  finally { aiBusy = false; $('#aiGo').disabled = false; if ($('#aiStatus').textContent.startsWith('Gemini') || $('#aiStatus').textContent.startsWith('Przyg')) $('#aiStatus').textContent = ''; }
+}
+$('#aiGo').addEventListener('click', aiRender);
+const aiClose = () => { $('#aiModal').hidden = true; };
+$('#aiClose').addEventListener('click', aiClose);
+$('#aiModal .scrim').addEventListener('click', aiClose);
+$('#aiAgain').addEventListener('click', () => { aiClose(); openPop('#aiPop', $('#aiBtn')); });
+// przytrzymanie przycisku pokazuje widok wysłany z Modo — do porównania
+for (const [ev, on] of [['pointerdown', true], ['pointerup', false], ['pointerleave', false]]) $('#aiCompare').addEventListener(ev, () => { if (aiLast) $('#aiImg').src = on ? aiLast.source : aiLast.url; });
+$('#aiSave').addEventListener('click', async () => {
+  if (!aiLast) return;
+  try {
+    // zapis zawsze jako PNG, niezależnie od formatu odpowiedzi
+    const bmp = await createImageBitmap(aiLast.blob), cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height; cv.getContext('2d').drawImage(bmp, 0, 0);
+    const png = await new Promise(res => cv.toBlob(res, 'image/png'));
+    const p = await api.savePng(new Uint8Array(await png.arrayBuffer()), app.file.name + ' · render');
+    if (p) toast('Zapisano render', api.web ? null : ['Pokaż', () => api.showInFolder(p)]);
+  } catch (err) { toast('Nie udało się zapisać: ' + err.message); }
+});
+app.aiRender = aiRender;
+
 /* ---------- import ze SketchUpa ---------- */
 async function importSkp(file) {
   const r = file || await api.pickBinary('skp', 'Model SketchUp');

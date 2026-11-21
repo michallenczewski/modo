@@ -221,3 +221,14 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .libitem .del{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:5px;display:none;align-items:center;justify-content:center;color:var(--muted)}
 .libitem:hover .del{display:flex}
 .libitem .del:hover{background:var(--card);color:var(--text)}
+
+/* render przez Gemini */
+#aiKeyBox,#aiMain{display:flex;flex-direction:column;gap:12px}
+#aiPrompt{height:auto;padding:8px 10px;resize:vertical;line-height:1.45;font-size:12px}
+#aiModal{position:fixed;inset:0;z-index:50}
+#aiModal[hidden]{display:none}
+#aiModal .scrim{position:absolute;inset:0;background:rgba(247,247,245,.6)}
+[data-theme=dark] #aiModal .scrim{background:rgba(22,22,22,.6)}
+.aiResult{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1100px,calc(100vw - 80px));max-height:calc(100vh - 60px)}
+.aiPair{display:flex;justify-content:center;background:var(--soft);border-radius:8px;overflow:hidden;min-height:120px}
+.aiPair img{display:block;max-width:100%;max-height:calc(100vh - 220px);object-fit:contain}

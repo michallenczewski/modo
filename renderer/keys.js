@@ -73,6 +73,7 @@ export const ACTIONS = [
   { group: 'Plik', id: 'save', name: 'Zapisz', keys: ['Mod+S'] },
   { group: 'Plik', id: 'saveAs', name: 'Zapisz jako', keys: ['Mod+Shift+S'] },
   { group: 'Plik', id: 'png', name: 'Eksport PNG', keys: ['Mod+Shift+E'] },
+  { group: 'Plik', id: 'render', name: 'Render widoku przez Gemini', keys: ['Mod+G'] },
   { group: 'Plik', id: 'obj', name: 'Eksport OBJ (3ds Max)', keys: ['Mod+Shift+O'] },
   { group: 'Plik', id: 'importSkp', name: 'Importuj model SketchUpa (.skp)', keys: [] },
   { group: 'Plik', id: 'underlay', name: 'Podkład DXF / DWG', keys: ['Mod+Shift+I'] },

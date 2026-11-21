@@ -28,6 +28,7 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 - Wymiary i opisy z odnośnikiem: zawsze czytelne, w jednostce szkicu, widoczne w eksporcie PNG; tekst opisu zmienia się dwuklikiem.
 - Panel boczny (I): informacje o elemencie (nazwa, wymiary, pole ścian, objętość), warstwy z widocznością i struktura grup i komponentów.
 - Biblioteka modeli (L): samochód, van, ludzie i drzewa 2D zawsze zwrócone do kamery, krzew, ławka. Własne modele zapisuje się z zaznaczenia; są dostępne w każdym szkicu na danym komputerze.
+- Render widoku przez Gemini („Nano Banana”, przycisk Render albo Ctrl+G / ⌘G): bieżący widok trafia do modelu obrazów Gemini razem z opisem, wynik można porównać z widokiem i zapisać jako PNG. Potrzebny jest własny klucz API Gemini; zostaje na komputerze (w programie zaszyfrowany przez system).
 - Eksport OBJ z plikiem materiałów (Ctrl+⇧O, na Macu ⌘⇧O) dla 3ds Maxa: każda bryła to osobny obiekt nazwany ścieżką grup, wycięcia są odjęte, oś Y w górę.
 
 ## Instalacja
