@@ -14,7 +14,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/model.js` | Dane modelu i geometria: bryły, ściany, krawędzie, push/pull, ściana z zamkniętego obrysu. |
 | `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |
 | `renderer/tools.js` | Narzędzia: zaznacz, linia, prostokąt, okrąg, łuk, wypchnij/wciśnij, przesuń, obróć, odsunięcie, taśma, gumka, wiaderko, orbita/przesuw/zoom lewym przyciskiem. Każde narzędzie pamięta swoją ostatnią operację (`last` z numerem `app.opSeq`), żeby wymiar wpisany po zakończeniu ją poprawił. |
-| `renderer/keys.js` | Lista poleceń ze skrótami (domyślnie SketchUp), zapis własnych skrótów w `localStorage`. |
+| `renderer/keys.js` | Lista poleceń ze skrótami (domyślnie własny układ Modo), zapis własnych skrótów w `localStorage`. |
 | `renderer/csg.js` | Odejmowanie brył (drzewa BSP na wzór csg.js) i wyciąganie krawędzi z wyniku: dzielenie na złączach T, pomijanie szwów w jednej płaszczyźnie, łączenie kawałków w całe krawędzie. |
 | `renderer/dxf.js` | Czytnik DXF do podkładu (linie, polilinie z łukami, okręgi, łuki, elipsy, splajny, bloki). |
 | `renderer/sun.js` | Położenie słońca (algorytm NOAA) dla daty, godziny i miejsca, z czasem letnim. |
