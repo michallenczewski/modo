@@ -428,7 +428,7 @@ export class Viewer {
   matFor(s, st, paper, flat) {
     const a = s.alpha ?? 1, glass = a < 0.999;
     return new THREE.MeshLambertMaterial({
-      color: this.colorFor(s, st, paper), side: flat || glass ? THREE.DoubleSide : THREE.FrontSide,
+      color: this.colorFor(s, st, paper), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
       transparent: glass, opacity: a, depthWrite: !glass,
       polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2
     });

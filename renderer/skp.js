@@ -37,8 +37,8 @@ function localGeometry(def) {
   // łączenie ścian przez wspólne krawędzie
   const faces = def.faces.filter(f => !f.hidden && f.loops && f.loops.length);
   const parent = faces.map((_, i) => i), find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const byEdge = new Map(), used = new Set();
-  faces.forEach((f, i) => { for (const l of f.loops) for (const ce of l) { used.add(ce.edgeId); const j = byEdge.get(ce.edgeId); if (j === undefined) byEdge.set(ce.edgeId, i); else parent[find(i)] = find(j); } });
+  const byEdge = new Map(), used = new Set(), uses = new Map();
+  faces.forEach((f, i) => { for (const l of f.loops) for (const ce of l) { used.add(ce.edgeId); uses.set(ce.edgeId, (uses.get(ce.edgeId) || 0) + 1); const j = byEdge.get(ce.edgeId); if (j === undefined) byEdge.set(ce.edgeId, i); else parent[find(i)] = find(j); } });
   const comps = new Map();
   faces.forEach((f, i) => {
     const r = find(i); let c = comps.get(r); if (!c) comps.set(r, c = { polys: [], softs: [], mats: new Map(), edges: new Set() });
@@ -59,7 +59,8 @@ function localGeometry(def) {
     if (!c.polys.length) continue;
     for (const id of c.edges) { const e = edge.get(id); if (e && (e.soft || e.smooth || e.hidden)) { const a = vert.get(e.v1Id), b = vert.get(e.v2Id); if (a && b) c.softs.push([a, b]); } }
     let best = null, bn = -1; for (const [m, k] of c.mats) if (k > bn) { bn = k; best = m; }
-    solids.push({ polys: c.polys, softs: c.softs, mat: best });
+    let open = false; for (const id of c.edges) if (uses.get(id) !== 2) { open = true; break; }
+    solids.push({ polys: c.polys, softs: c.softs, mat: best, open });
   }
   const lines = [];
   for (const e of def.edges) { if (used.has(e.id) || e.hidden) continue; const a = vert.get(e.v1Id), b = vert.get(e.v2Id); if (a && b && V.dist(a, b) > 1e-6) lines.push([a, b]); }
@@ -93,6 +94,7 @@ export function skpToModo(skp, nextId, name = 'SketchUp') {
       }
       if (!polys.length) continue;
       const sh = { id: nextId(), kind: 'mesh', polys, marks: [], g: gid };
+      if (s.open) sh.open = true;
       if (s.softs.length) sh.softs = s.softs.map(([a, b]) => [f(a), f(b)]);
       const m = mats.get(s.mat ?? inheritMat) || mats.get(inheritMat);
       if (m && m.color) { sh.color = hex(m.color); const a = Math.min((m.color.a ?? 255) / 255, m.transparency ?? 1); if (a < 0.995) sh.alpha = Math.max(0.05, r6(a)); }

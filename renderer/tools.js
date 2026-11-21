@@ -5,7 +5,7 @@
 import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
 import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
-import { moveMeshPoints } from './mesh.js';
+import { moveMeshPoints, booleanMesh } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
 const INK = '#1a1a19', BLUE = '#3f5f99';
@@ -249,7 +249,7 @@ export class PushTool extends Tool {
     const mod = this.app.isMac ? '⌥' : 'Ctrl';
     return this.active
       ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
-      : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle i wciśnięta w nią wycina otwór. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
+      : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle zmienia tę bryłę: wyciągnięta staje się jej częścią, wciśnięta wycina w niej otwór albo wnękę. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
   }
   vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
@@ -275,11 +275,18 @@ export class PushTool extends Tool {
     const k = A.flip ? -d : d;   // płaska ściana oglądana od spodu: ciągniemy przeciwnie do jej normalnej
     let target = null;
     if (this.copy) target = extrudeFace(m, s, A.key, k);
-    else {
-      pushPull(s, A.key, k); target = s;
-      // ścianka narysowana na bryle i wciśnięta w nią staje się wycięciem (otwór, wnęka, dziedziniec)
-      if (A.host) { if (V.dot(V.mul(A.d, d), A.host.normal) < -1e-9) s.op = 'cut'; else delete s.op; }
+    else if (A.host && this.shapeOf(A.host.shape.id, m)) {
+      // ścianka narysowana na bryle zmienia tę bryłę (jak w SketchUpie): wyciągnięta staje się jej częścią, wciśnięta wycina w niej
+      const host = this.shapeOf(A.host.shape.id, m), inward = V.dot(V.mul(A.d, d), A.host.normal) < 0;
+      pushPull(s, A.key, k);
+      if (s.h > 1e-7) {
+        const part = toMesh(JSON.parse(JSON.stringify(s)), facesOf);
+        toMesh(host, facesOf);
+        booleanMesh(host, part, inward ? 'subtract' : 'union');
+        m.shapes = m.shapes.filter(q => q !== s && (q !== host || host.polys.length));
+      }
     }
+    else { pushPull(s, A.key, k); target = s; }
     this.app.setModelLive(m);
     const nk = this.copy ? 'top' : (A.key === 'face' ? (k >= 0 ? 'top' : 'bottom') : A.key);
     const f = target && faceByKey(target, target.h === 0 ? 'face' : nk);
@@ -1240,22 +1247,96 @@ export class TapeTool extends Tool {
 }
 
 /* ---------- gumka ---------- */
+// Najbliższa widoczna krawędź pod kursorem: { id, shape?, mark?, a, b }. Krawędzie zasłonięte przez ściany się nie liczą.
+export function edgeAt(app, x, y) {
+  const v = app.viewer, m = app.model;
+  const an = pickAnnotation(m, p => v.toScreen(p), x, y);
+  if (an) return { id: an };
+  const ray = v.ray(x, y), org = ray.origin.toArray(), hit = v.pick(x, y);
+  // punkt krawędzi najbliżej kursora musi leżeć przed pierwszą ścianą pod kursorem (z małym zapasem)
+  const visible = p => { if (!hit) return true; const d = V.dist(org, p); return d <= hit.dist + Math.max(0.02, d * 0.004); };
+  let best = null, bd = 7;
+  const tryEdge = (a, b, make, bias = 0) => {
+    const A = v.toScreen(a), B = v.toScreen(b); if (A.behind || B.behind) return;
+    const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2));
+    const d = Math.hypot(A.x + dx * t - x, A.y + dy * t - y) + bias;
+    if (d >= bd || !visible(V.lerp(a, b, t))) return;
+    bd = d; best = { a, b, ...make() };
+  };
+  const ctx = id => app.editing == null || app.inEditing(id);
+  if (app.editSolid == null) for (const l of m.lines) { if (isHidden(m, l) || !ctx('l' + l.id)) continue; tryEdge(l.a, l.b, () => ({ id: 'l' + l.id }), -1.5); }
+  for (const s of m.shapes) {
+    if (isHidden(m, s) || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
+    for (const e of shapeEdges(s)) {
+      if (e.soft) continue;
+      tryEdge(e.a, e.b, () => ({ id: s.id, shape: s, edge: e }));
+    }
+  }
+  if (best) return best;
+  // prowadnice (bez końców): odcinek wokół miejsca najbliższego kamerze
+  bd = 5;
+  for (const g of m.guides || []) {
+    const c = v.cam.position.toArray(), t = V.dot(V.sub(c, g.o), g.d), mid = V.add(g.o, V.mul(g.d, t)), R = Math.max(20, V.dist(c, mid) * 4);
+    for (let i = 0; i < 16; i++) {
+      const a = V.add(mid, V.mul(g.d, -R + 2 * R * i / 16)), b = V.add(mid, V.mul(g.d, -R + 2 * R * (i + 1) / 16)), A = v.toScreen(a), B = v.toScreen(b);
+      if (A.behind || B.behind) continue;
+      const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, tt = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2));
+      const d = Math.hypot(A.x + dx * tt - x, A.y + dy * tt - y);
+      if (d < bd) { bd = d; best = { id: 'g' + g.id }; }
+    }
+  }
+  return best;
+}
+// znacznik (linia dzieląca ścianę bryły), na którym leży krawędź e
+function markOf(s, e) {
+  if (!s.marks || !s.marks.length) return -1;
+  const mid = V.lerp(e.a, e.b, 0.5);
+  return s.marks.findIndex(([a, b]) => { const L = V.dist(a, b); if (L < 1e-9) return false; const d = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(mid, a), d); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(a, V.mul(d, t)), mid) < 1e-5; });
+}
+
 export class EraserTool extends Tool {
-  hint() { return 'Kliknij bryłę, linię albo prowadnicę, żeby ją usunąć. Przeciągnij, żeby usuwać kolejne.'; }
+  reset() { this.hover = null; this.erasing = false; }
+  hint() { return 'Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Gumka łapie tylko widoczne krawędzie: linia dzieląca ścianę znika i ściana się scala, krawędź płaskiej ściany usuwa ścianę (pozostałe krawędzie zostają), krawędź bryły usuwa bryłę.'; }
   move(e, x, y) {
-    hoverShape(this.app, x, y);
+    this.hover = edgeAt(this.app, x, y);
     if (this.erasing && (e.buttons & 1)) this.erase(x, y);
   }
   down(e, x, y) { this.erasing = true; this.started = false; this.erase(x, y); }
   up() { this.erasing = false; }
   erase(x, y) {
-    const id0 = pickEntity(this.app, x, y); if (id0 == null) return;
-    if (!this.started) { this.app.checkpoint(); this.started = true; }
-    const m = this.model;
-    const ids = new Set(this.app.expand(id0));
+    const h = edgeAt(this.app, x, y); if (!h) return;
+    const m = this.model, begin = () => { if (!this.started) { this.app.checkpoint(); this.started = true; } };
+    const s = h.shape;
+    // linia dzieląca ścianę: znika, a ściana się scala
+    if (s && s.kind === 'mesh') {
+      const k = markOf(s, h.edge);
+      if (k >= 0) { begin(); s.marks = s.marks.filter((_, i) => i !== k); this.hover = null; this.app.changed(); return; }
+    }
+    const grouped = this.app.expand(h.id);
+    // krawędź płaskiej ściany (poza grupą): ściana znika, pozostałe krawędzie zostają jako linie
+    if (s && s.h === 0 && grouped.length === 1) {
+      begin();
+      const same = (p, q) => V.dist(p, q) < 1e-6, e0 = h.edge;
+      for (const e of shapeEdges(s)) {
+        if ((same(e.a, e0.a) && same(e.b, e0.b)) || (same(e.a, e0.b) && same(e.b, e0.a))) continue;
+        const l = { id: m.next++, a: e.a.slice(), b: e.b.slice() }; if (s.g != null) l.g = s.g;
+        m.lines.push(l);
+      }
+      m.shapes = m.shapes.filter(q => q !== s); this.app.selection.delete(s.id);
+      this.hover = null; this.app.changed(); return;
+    }
+    // w edycji bryły prawdziwej krawędzi nie usuwamy — bryła przestałaby być zamknięta
+    if (s && this.app.editSolid === s.id) { if (!this.warned) { this.warned = true; this.app.toast?.('Tej krawędzi nie da się usunąć bez otwarcia bryły. Gumka w edycji bryły usuwa linie dzielące ściany.'); } return; }
+    begin();
+    const ids = new Set(grouped);
     removeIds(m, ids);
     ids.forEach(id => this.app.selection.delete(id));
-    this.app.changed();
+    this.hover = null; this.app.changed();
+  }
+  draw(c, v) {
+    const h = this.hover; if (!h || !h.a) return;
+    drawSeg(c, v, h.a, h.b, '#c2452d', { width: 3 });
   }
 }
 
