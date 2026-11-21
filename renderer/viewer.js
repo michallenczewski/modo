@@ -2,7 +2,7 @@
 // i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
 
 import * as THREE from './vendor/three.module.js';
-import { triangulate, edges as shapeEdges, bounds, V } from './model.js';
+import { triangulate, edges as shapeEdges, bounds, onTopOf, V } from './model.js';
 import { sunPosition, sunVector } from './sun.js';
 
 /* ---------- style rysunku ---------- */
@@ -226,7 +226,14 @@ export class Viewer {
       this.modelGroup.add(mesh); this.meshes.push(mesh);
       if (st.lines) {
         const col = sel ? hex3('#3f5f99') : null;
-        for (const e of shapeEdges(s)) edgeList.push({ ...e, col });
+        for (const e of shapeEdges(s)) {
+          // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
+          if (s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
+            const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
+            if (this.model.shapes.some(t => t !== s && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
+          }
+          edgeList.push({ ...e, col });
+        }
       }
     }
     if (st.lines) for (const l of this.model.lines) {

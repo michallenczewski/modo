@@ -91,6 +91,19 @@ export function edges(s) {
   return out;
 }
 
+// czy punkt leży na górnej ścianie bryły t (do styku brył postawionych jedna na drugiej)
+export function onTopOf(p, t) {
+  if (t.h === 0) return false;
+  const top = at(t, 0, 0, t.h), d = V.sub(p, top);
+  if (Math.abs(V.dot(d, t.n)) > 1e-4) return false;
+  const x = V.dot(d, t.u), y = V.dot(d, t.v), P = t.pts;
+  let inside = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    if ((P[i][1] > y) !== (P[j][1] > y) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) inside = !inside;
+  }
+  return inside;
+}
+
 export function vertices(s) {
   const v = s.pts.map(p => at(s, p[0], p[1], 0));
   if (s.h > 0) for (const p of s.pts) v.push(at(s, p[0], p[1], s.h));
