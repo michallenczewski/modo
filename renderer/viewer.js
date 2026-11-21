@@ -595,8 +595,8 @@ export class Viewer {
     cam.position.lerp(target, k);
     this.needs = true;
   }
-  zoomExtents() {
-    const b = this.model && bounds(this.model, this.underlayBounds);
+  zoomExtents(only) {
+    const b = this.model && (only?.length ? bounds(this.model, null, only) : bounds(this.model, this.underlayBounds));
     const cam = this.cam;
     const center = b ? new THREE.Vector3(...b.center) : new THREE.Vector3(0, 0, 0);
     const r = b ? b.radius : 15;

@@ -193,7 +193,8 @@ export function faceFromLoop(model, loop) {
   return makeShape(model, { o, u, v }, pts, 0);
 }
 
-export function bounds(model, extra) {
+export function bounds(model, extra, only) {
+  if (only) { const ids = new Set(only); model = { shapes: model.shapes.filter(s => ids.has(s.id)), lines: model.lines.filter(l => ids.has('l' + l.id)) }; extra = null; }
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   const add = p => { for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; } };
   for (const s of model.shapes) if (!s.hidden) vertices(s).forEach(add);

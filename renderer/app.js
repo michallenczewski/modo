@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { pickEntity, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -229,7 +229,7 @@ view.addEventListener('pointerdown', e => {
   const [x, y] = xy(e);
   if (e.button === 1 || e.button === 2) {
     e.preventDefault();
-    nav = { mode: e.button === 2 || e.shiftKey ? 'pan' : 'orbit', last: { x, y }, pivot: viewer.pivotAt(x, y) };
+    nav = { mode: e.button === 2 || e.shiftKey ? 'pan' : 'orbit', last: { x, y }, pivot: viewer.pivotAt(x, y), btn: e.button, moved: 0 };
     view.setPointerCapture(e.pointerId); view.classList.add('c-grabbing');
     return;
   }
@@ -238,7 +238,7 @@ view.addEventListener('pointerdown', e => {
 view.addEventListener('pointermove', e => {
   const [x, y] = xy(e);
   if (nav) {
-    const dx = x - nav.last.x, dy = y - nav.last.y; nav.last = { x, y };
+    const dx = x - nav.last.x, dy = y - nav.last.y; nav.last = { x, y }; nav.moved += Math.abs(dx) + Math.abs(dy);
     if (nav.mode === 'orbit' && !e.shiftKey) viewer.orbit(dx, dy, nav.pivot); else viewer.pan(dx, dy, nav.pivot);
     tool.move(e, x, y); viewer.redraw();
     return;
@@ -247,7 +247,11 @@ view.addEventListener('pointermove', e => {
 });
 view.addEventListener('pointerup', e => {
   const [x, y] = xy(e);
-  if (nav) { nav = null; view.classList.remove('c-grabbing'); return; }
+  if (nav) {
+    const click = nav.btn === 2 && nav.moved < 4; nav = null; view.classList.remove('c-grabbing');
+    if (click) openContext(x, y, e.clientX, e.clientY);   // prawy klik bez przeciągania: menu podręczne
+    return;
+  }
   if (e.button === 0) { tool.up(e, x, y); app.refresh(); }
 });
 view.addEventListener('dblclick', e => { const [x, y] = xy(e); tool.dbl(e, x, y); app.refresh(); });
@@ -696,6 +700,42 @@ function renderKeys() {
     }
     box.append(col);
   }
+}
+
+/* ---------- menu podręczne (prawy klik) ---------- */
+function openContext(x, y, cx, cy) {
+  closePops();
+  const id = pickEntity(app, x, y);
+  // prawy klik w niezaznaczony element zaznacza go (jak w SketchUpie)
+  if (id != null && !app.selection.has(id) && (!app.editing || app.inEditing(id))) {
+    if (app.editSolid != null && id !== app.editSolid) app.exitSolid();
+    app.selection.clear(); app.expand(id).forEach(i => app.selection.add(i)); app.selectionChanged();
+  }
+  const sel = [...app.selection], groups = selectedGroups();
+  const solids = sel.filter(i => typeof i === 'number').map(i => app.model.shapes.find(s => s.id === i)).filter(s => s && isSolid(s));
+  const items = [];
+  if (sel.length) {
+    if (app.panel) items.push(['info', 'Informacje o elemencie'], null);
+    if (groups.length === 1) items.push(['editGroup', groups[0].kind === 'comp' ? 'Edytuj komponent' : 'Edytuj grupę']);
+    items.push(['group', 'Utwórz grupę'], ['comp', 'Utwórz komponent']);
+    if (groups.length) items.push(['explode', 'Rozbij']);
+    if (groups.some(g => g.kind === 'comp')) items.push(['unique', 'Zrób unikalny']);
+    items.push(null);
+    if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? 'Bryła zwykła (nie wycina)' : 'Bryła wycinająca']);
+    if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', 'Suma brył'], ['solidIntersect', 'Część wspólna'], ['solidSubtract', 'Odejmij od pierwszej'], ['solidTrim', 'Przytnij pierwszą']);
+    items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
+  } else {
+    if (app.editing || app.editSolid != null) items.push(['exitEdit', 'Zakończ edycję'], null);
+    items.push(['selectAll', 'Zaznacz wszystko'], ['unhideAll', 'Pokaż ukryte'], ['extents', 'Pokaż cały model'], null, ['clearGuides', 'Usuń wszystkie prowadnice']);
+  }
+  while (items.length && !items[items.length - 1]) items.pop();
+  const m = $('#ctxMenu');
+  const k = a => { const c = keysFor(a, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  m.innerHTML = items.filter((it, i) => it || (i && items[i - 1])).map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${k(i[0])}</button>` : '<div class="msep"></div>').join('');
+  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); const a = b.dataset.a; a === 'exitEdit' ? (app.editSolid != null ? app.exitSolid() : app.exitGroup()) : a === 'zoomSel' ? viewer.zoomExtents([...app.selection]) : run(a); app.refresh(); }));
+  m.hidden = false;
+  m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, cx) + 'px';
+  m.style.top = Math.min(window.innerHeight - m.offsetHeight - 8, cy) + 'px';
 }
 
 /* ---------- menu pliku ---------- */

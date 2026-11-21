@@ -70,25 +70,50 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Kliknij bryłę albo linię, żeby ją zaznaczyć; <kbd>⇧</kbd> dodaje. Dwuklik w grupę albo komponent — edycja w środku. <kbd>Spacja</kbd> grupuje zaznaczenie.'; }
+  hint() { return 'Kliknij bryłę albo linię, żeby ją zaznaczyć; <kbd>⇧</kbd> dodaje. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. Dwuklik w grupę — edycja w środku. Prawy klik — menu.'; }
   pickAny(x, y) { return pickEntity(this.app, x, y); }
   move(e, x, y) {
+    if (this.drag(x, y)) return;
     const id = this.pickAny(x, y);
     if (id !== this.hoverId) {
       this.hoverId = id;
       hoverShape(this.app, x, y, id);
     }
   }
-  down(e, x, y) {
-    const id = this.pickAny(x, y), sel = this.app.selection;
-    // klik poza edytowaną grupą kończy jej edycję
+  reset() { this.box = null; }
+  // przycisk w dół zapamiętuje miejsce; przeciągnięcie rysuje ramkę (także zaczęte na bryle), zwykły klik zaznacza przy puszczeniu
+  down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y, add: e.shiftKey, id: this.pickAny(x, y) }; }
+  click(id, shift) {
+    const sel = this.app.selection;
     if (this.app.editSolid != null && id !== this.app.editSolid) this.app.exitSolid();
     while (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
     const ids = id == null ? [] : this.app.expand(id);
-    if (id == null) { if (!e.shiftKey) sel.clear(); }
-    else if (e.shiftKey) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
+    if (id == null) { if (!shift) sel.clear(); }
+    else if (shift) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
     else { sel.clear(); ids.forEach(i => sel.add(i)); }
     this.app.selectionChanged();
+  }
+  drag(x, y) { if (this.box) { this.box.x1 = x; this.box.y1 = y; return true; } return false; }
+  up(e, x, y) {
+    const b = this.box; if (!b) return; this.box = null;
+    const sel = this.app.selection;
+    if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.add);
+    // od lewej do prawej: tylko to, co w całości w ramce; od prawej do lewej: wszystko, czego ramka dotyka
+    const window_ = b.x1 >= b.x0, hits = boxSelect(this.app, b, window_);
+    if (!b.add) sel.clear();
+    hits.forEach(i => sel.add(i));
+    this.app.selectionChanged();
+  }
+  draw(c) {
+    const b = this.box; if (!b || Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return;
+    const crossing = b.x1 < b.x0, dark = this.app.viewer.dark;
+    c.save();
+    c.fillStyle = dark ? 'rgba(150,170,210,0.10)' : 'rgba(63,95,153,0.06)';
+    c.strokeStyle = dark ? '#9fb4dc' : '#3f5f99'; c.lineWidth = 1;
+    if (crossing) c.setLineDash([5, 4]);
+    const x = Math.min(b.x0, b.x1) + 0.5, y = Math.min(b.y0, b.y1) + 0.5, w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0);
+    c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h);
+    c.restore();
   }
   // dwuklik w grupę albo komponent: edycja w środku
   dbl(e, x, y) {
@@ -376,6 +401,46 @@ export { shapeEdges };
 
 /* ---------- wspólne: co jest pod kursorem ---------- */
 // zwraca id bryły (liczba), 'l<id>' dla linii albo 'g<id>' dla prowadnicy
+// zaznaczenie ramką: elementy w bieżącym kontekście (edytowana grupa albo cały model); grupa liczy się jako całość
+export function boxSelect(app, b, window_) {
+  const v = app.viewer, m = app.model;
+  const X0 = Math.min(b.x0, b.x1), X1 = Math.max(b.x0, b.x1), Y0 = Math.min(b.y0, b.y1), Y1 = Math.max(b.y0, b.y1);
+  const inR = P => P.x >= X0 && P.x <= X1 && P.y >= Y0 && P.y <= Y1;
+  const segHits = (A, B) => {
+    if (inR(A) || inR(B)) return true;
+    // przecięcie odcinka z bokami ramki
+    const cr = (p, q, r, s) => { const d = (q.x - p.x) * (s.y - r.y) - (q.y - p.y) * (s.x - r.x); if (Math.abs(d) < 1e-9) return false; const t = ((r.x - p.x) * (s.y - r.y) - (r.y - p.y) * (s.x - r.x)) / d, u = ((r.x - p.x) * (q.y - p.y) - (r.y - p.y) * (q.x - p.x)) / d; return t >= 0 && t <= 1 && u >= 0 && u <= 1; };
+    const c = [{ x: X0, y: Y0 }, { x: X1, y: Y0 }, { x: X1, y: Y1 }, { x: X0, y: Y1 }];
+    for (let i = 0; i < 4; i++) if (cr(A, B, c[i], c[(i + 1) % 4])) return true;
+    return false;
+  };
+  // dla każdego elementu: [punkty ekranowe, odcinki]
+  const test = segs => {
+    const S = segs.map(([a, b]) => [v.toScreen(a), v.toScreen(b)]);
+    if (S.some(([A, B]) => A.behind || B.behind)) return window_ ? false : S.some(([A, B]) => !A.behind && !B.behind && segHits(A, B));
+    return window_ ? S.every(([A, B]) => inR(A) && inR(B)) : S.some(([A, B]) => segHits(A, B));
+  };
+  const ctx = id => app.editing == null || app.inEditing(id);
+  const res = new Map();   // id → wynik
+  for (const s of m.shapes) {
+    if (s.hidden || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
+    res.set(s.id, test(shapeEdges(s).map(e => [e.a, e.b])));
+  }
+  for (const l of m.lines) {
+    if (l.hidden || app.editSolid != null || !ctx('l' + l.id)) continue;
+    res.set('l' + l.id, test([[l.a, l.b]]));
+  }
+  const out = new Set();
+  for (const [id, ok] of res) {
+    const all = app.expand(id);
+    if (all.length > 1) {
+      const vals = all.map(i => res.get(i)).filter(x => x !== undefined);
+      if (window_ ? vals.length && vals.every(Boolean) : vals.some(Boolean)) all.forEach(i => out.add(i));
+    } else if (ok) out.add(id);
+  }
+  return [...out];
+}
+
 export function pickEntity(app, x, y) {
   const v = app.viewer, m = app.model;
   const segDist = (a, b) => {
