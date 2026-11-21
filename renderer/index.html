@@ -65,6 +65,12 @@
   </div>
   <div class="row"><span class="lbl w60">Kąt</span><input type="range" id="fovRange" min="15" max="100" step="1" class="grow"><span class="fld num w62" id="fovLbl"></span></div>
   <div class="lbl note">Kąt widzenia w pionie; w milimetrach — ogniskowa dla klatki 36 × 24 mm. W perspektywie dwupunktowej przeciąganie w pionie przesuwa obiektyw, a piony zostają pionowe.</div>
+  <div id="secRow" hidden>
+    <div class="hr"></div>
+    <div class="row"><span class="ttl grow">Przekrój</span></div>
+    <div class="row"><span class="grow">Przekrój włączony</span><input type="checkbox" class="tg" id="secOn" role="switch" aria-label="Przekrój włączony"></div>
+    <div class="row"><span class="grow">Pokaż płaszczyzny</span><input type="checkbox" class="tg" id="secPlanes" role="switch" aria-label="Pokaż płaszczyzny przekroju"></div>
+  </div>
   <div class="hr"></div>
   <div class="row"><span class="ttl grow">Sceny</span><button class="tb soft" id="sceneAdd">Dodaj scenę</button></div>
   <div id="sceneList" class="scenes"></div>

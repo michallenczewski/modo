@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { pickEntity, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { pickEntity, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -39,6 +39,7 @@ const IC = {
   rrect: '<path d="M2.5 9.5 8.5 3.5l5 5-6 6z"/>',
   polygon: '<path d="M8 2.2 13.5 6.2l-2.1 6.5H4.6L2.5 6.2z"/>',
   carc: '<path d="M13.5 8A5.5 5.5 0 0 0 4.1 4.1"/><circle cx="8" cy="8" r=".8"/><path d="M8 8 13.5 8" stroke-dasharray="1.2 1.6"/>',
+  section: '<path d="M3 3.5h10v9H3z" stroke-dasharray="0"/><path d="M1.5 8h13"/><path d="M5 8l-1.2 2.2M8 8l-1.2 2.2M11 8l-1.2 2.2"/>',
   dim: '<path d="M2.5 5v7M13.5 5v7M2.5 9.5h11"/><path d="M4 11l-1.4-1.4M13.4 9.6 12 8"/>',
   text: '<path d="M3.5 4h9M8 4v8.5"/>',
   protractor: '<path d="M2.5 12.5h11"/><path d="M2.5 12.5A5.5 5.5 0 0 1 13.5 12.5"/><path d="M8 12.5 11.5 5" stroke-dasharray="1.4 1.6"/>',
@@ -155,7 +156,7 @@ function makeUnique() {
 /* ---------- narzędzia ---------- */
 const tools = {
   select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), circle: new CircleTool(app), arc: new ArcTool(app),
-  dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
+  section: new SectionTool(app), dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
@@ -166,7 +167,7 @@ const TOOL_NAME = { tape: 'Taśma i prowadnice', protractor: 'Kątomierz', dim: 
 const FAMILIES = { rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'] };
 const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
-const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['dim', 'Wymiar'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
+const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['dim', 'Wymiar'], ['section', 'Przekrój'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -211,7 +212,7 @@ function setTool(id) {
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  $('#view').className = ['dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
@@ -369,7 +370,7 @@ function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': setTool(act); break;
     case 'hideRest': hideRest(); break;
     case 'hideSimilar': hideSimilar(); break;
     case 'hideSel': hideSel(); break;
@@ -377,6 +378,9 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'sectionToggle': sectionToggle(); break;
+    case 'sectionPlanes': viewer.showSectPlanes = !viewer.showSectPlanes; viewer.redraw(); renderViewPop(); toast(viewer.showSectPlanes ? 'Płaszczyzny przekroju widoczne' : 'Płaszczyzny przekroju ukryte'); break;
+    case 'sectionFlip': { const q = selectedSections()[0]; if (q) { app.checkpoint(); q.n = q.n.map(x => -x); app.changed(); } break; }
     case 'viewIso': case 'viewTop': case 'viewFront': case 'viewRight': case 'viewBack': case 'viewLeft': viewer.setView(act.slice(4).toLowerCase()); renderViewChip(); renderViewPop(); break;
     case 'twoPoint': viewer.setTwoPoint(!viewer.twoPoint); toast(viewer.twoPoint ? 'Perspektywa dwupunktowa' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'views': openPop('#viewPop', $('#viewBtn')); break;
@@ -536,6 +540,20 @@ document.addEventListener('pointerdown', e => {
   if (!e.target.closest('#view')) closePops();
 });
 
+/* ---------- przekroje ---------- */
+const selectedSections = () => (app.model.sections || []).filter(q => app.selection.has('s' + q.id));
+function sectionToggle() {
+  const all = app.model.sections || [];
+  if (!all.length) return toast('Nie ma jeszcze przekroju — narysuj go narzędziem Przekrój.');
+  const sel = selectedSections()[0], active = all.find(q => q.on);
+  app.checkpoint();
+  if (sel) { const on = !sel.on; all.forEach(q => q.on = false); sel.on = on; }
+  else if (active) active.on = false;
+  else { const q = all[all.length - 1]; q.on = true; }
+  app.changed(); renderViewPop();
+  toast(all.some(q => q.on) ? 'Przekrój włączony' : 'Przekrój wyłączony');
+}
+
 /* ---------- widok, kamera, sceny ---------- */
 const VIEWS = [['viewIso', 'Izometria'], ['viewTop', 'Góra'], ['viewFront', 'Przód'], ['viewRight', 'Prawy'], ['viewBack', 'Tył'], ['viewLeft', 'Lewy']];
 app.scenes = []; app.scene = -1;
@@ -550,6 +568,9 @@ function renderViewPop() {
   document.querySelectorAll('#projSeg button').forEach(b => b.classList.toggle('on', b.dataset.proj === proj));
   const f = $('#fovRange'); f.value = Math.round(viewer.cam.fov); f.disabled = viewer.ortho; setRangeFill(f);
   $('#fovLbl').textContent = viewer.ortho ? '—' : Math.round(viewer.cam.fov) + '° · ' + mmOf(viewer.cam.fov) + ' mm';
+  const secs = app.model.sections || [];
+  $('#secRow').hidden = !secs.length;
+  $('#secOn').checked = secs.some(q => q.on); $('#secPlanes').checked = viewer.showSectPlanes;
   const L = $('#sceneList');
   L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num" title="Pokaż scenę">${i + 1}</button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="Nazwa sceny"><button class="ib" data-u title="Zapisz bieżący widok w tej scenie"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="Usuń scenę"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
   L.querySelectorAll('.scene').forEach(row => {
@@ -570,7 +591,9 @@ document.querySelectorAll('#projSeg button').forEach(b => b.addEventListener('cl
 }));
 $('#fovRange').addEventListener('input', e => { viewer.setFov(+e.target.value); setRangeFill(e.target); $('#fovLbl').textContent = Math.round(viewer.cam.fov) + '° · ' + mmOf(viewer.cam.fov) + ' mm'; });
 $('#sceneAdd').addEventListener('click', addScene);
-const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, sun: { ...viewer.sunCfg } });
+$('#secOn').addEventListener('change', () => sectionToggle());
+$('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
+const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
 function addScene() {
   app.scenes.push({ name: 'Scena ' + (app.scenes.length + 1), ...captureScene() });
   app.scene = app.scenes.length - 1; app.markDirty();
@@ -583,6 +606,7 @@ function showScene(i) {
   viewer.setCamera(sc.camera);
   if (sc.style && STYLES[sc.style]) setStyle(sc.style);
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
+  if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
 }
 function goScene(d) {
@@ -837,7 +861,10 @@ function openContext(x, y, cx, cy) {
   const sel = [...app.selection], groups = selectedGroups();
   const solids = sel.filter(i => typeof i === 'number').map(i => app.model.shapes.find(s => s.id === i)).filter(s => s && isSolid(s));
   const items = [];
-  if (sel.length) {
+  const secSel = selectedSections();
+  if (secSel.length && secSel.length === sel.length) {
+    items.push(['sectionToggle', secSel[0].on ? 'Wyłącz przekrój' : 'Włącz ten przekrój'], ['sectionFlip', 'Odwróć kierunek'], ['sectionPlanes', viewer.showSectPlanes ? 'Ukryj płaszczyzny przekrojów' : 'Pokaż płaszczyzny przekrojów'], null, ['delete', 'Usuń']);
+  } else if (sel.length) {
     if (app.panel) items.push(['info', 'Informacje o elemencie'], null);
     if (groups.length === 1) items.push(['editGroup', groups[0].kind === 'comp' ? 'Edytuj komponent' : 'Edytuj grupę']);
     items.push(['group', 'Utwórz grupę'], ['comp', 'Utwórz komponent']);

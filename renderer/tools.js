@@ -454,6 +454,12 @@ export function pickEntity(app, x, y) {
   };
   const an = pickAnnotation(m, p => v.toScreen(p), x, y);
   if (an) return an;
+  // obrys płaszczyzny przekroju
+  if (v.showSectPlanes) for (const q of m.sections || []) {
+    if (q.hidden) continue;
+    const C = v.sectionCorners(q).map(p => v.toScreen(p)); if (C.some(c => c.behind)) continue;
+    for (let i = 0; i < 4; i++) { const A = C[i], B = C[(i + 1) % 4], dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2)); if (Math.hypot(A.x + dx * t - x, A.y + dy * t - y) < 5) return 's' + q.id; }
+  }
   let best = null, bd = 6;
   for (const l of m.lines) { if (l.hidden) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
   if (best) return best;
@@ -792,6 +798,53 @@ export class ProtractorTool extends CenterArcTool {
   }
 }
 
+/* ---------- płaszczyzna przekroju ---------- */
+export class SectionTool extends Tool {
+  reset() { this.o = null; this.n = null; this.cur = null; this.depth = 0; }
+  hint() { return !this.o ? 'Najedź na ścianę i kliknij — przekrój stanie równolegle do niej. Strzałki ustawiają przekrój prostopadle do osi: <kbd>→</kbd> czerwonej, <kbd>←</kbd> zielonej, <kbd>↑</kbd> niebieskiej.' : 'Przesuń w głąb i kliknij — albo wpisz głębokość. Zdjęta zostaje strona, w którą wskazują strzałki.'; }
+  vcb() { return { label: 'Głębokość', value: this.o ? fmtLength(this.depth) : '' }; }
+  normalAt(s) {
+    if (this.app.lockAxis) return AXES[this.app.lockAxis];
+    if (s.face) { const sh = this.model.shapes.find(q => q.id === s.face.shapeId), f = sh && faceByKey(sh, s.face.key); if (f) return f.normal; }
+    // bez ściany: pionowy przekrój zwrócony do kamery
+    const f = this.v.getCamera().f; const h = [-f[0], -f[1], 0];
+    return V.len(h) > 1e-6 ? (Math.abs(h[0]) > Math.abs(h[1]) ? [Math.sign(h[0]), 0, 0] : [0, Math.sign(h[1]), 0]) : [0, 0, 1];
+  }
+  move(e, x, y) {
+    if (!this.o) { this.cur = this.app.snapper.find(x, y, { model: this.model }); if (this.cur) this.prevN = this.normalAt(this.cur); return; }
+    // głębokość: najbliższy punkt prostej normalnej do promienia kursora
+    const r = this.v.ray(x, y), d0 = r.direction.toArray(), o0 = r.origin.toArray(), n = this.n;
+    const w = V.sub(this.o, o0), a = V.dot(n, n), b = V.dot(n, d0), c = V.dot(d0, d0), dd = V.dot(n, w), e2 = V.dot(d0, w), den = a * c - b * b;
+    if (Math.abs(den) < 1e-9) return;
+    this.depth = Math.max(0, -(b * e2 - c * dd) / den);
+    const step = 0.05; if (Math.abs(this.depth - Math.round(this.depth / step) * step) < 4 * this.v.pixelSize(this.o)) this.depth = Math.round(this.depth / step) * step;
+  }
+  down() {
+    if (!this.o) { if (!this.cur) return; this.o = this.cur.p.slice(); this.n = V.norm(this.normalAt(this.cur)); this.depth = 0; return; }
+    this.create(this.depth);
+  }
+  create(depth) {
+    this.app.checkpoint();
+    for (const q of this.model.sections) q.on = false;
+    const q = { id: this.model.next++, o: V.sub(this.o, V.mul(this.n, depth)), n: this.n, on: true };
+    this.model.sections.push(q);
+    this.app.changed(); this.reset(); this.app.lockAxis = null;
+    this.app.toast?.('Przekrój włączony. Przesuń go narzędziem W albo wyłącz w okienku Widok.');
+  }
+  value(str) { const L = parseLength(str); if (L == null || !this.o) return false; this.create(Math.abs(L)); return true; }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    const o = this.o ? V.sub(this.o, V.mul(this.n, this.depth)) : s.p, n = this.o ? this.n : this.prevN || [0, 0, 1];
+    const R = 60 * v.pixelSize(o), u = V.norm(Math.abs(n[2]) > 0.9 ? V.cross([1, 0, 0], n) : V.cross([0, 0, 1], n)), w = V.cross(n, u);
+    const Q = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => V.add(o, V.add(V.mul(u, a * R), V.mul(w, b * R))));
+    drawPoly(c, v, Q, '#c0752f', true, { width: 1.4 });
+    drawSeg(c, v, o, V.sub(o, V.mul(n, R * 0.8)), '#c0752f', { width: 1.4 });
+    if (this.o) drawSeg(c, v, this.o, o, INK, { width: 1, dash: [3, 3] });
+    if (!this.o) drawMarker(c, v, s);
+    const P = v.toScreen(o); drawChip(c, P.x, P.y, this.o ? 'Głębokość ' + fmtLength(this.depth) : 'Przekrój');
+  }
+}
+
 /* ---------- łuk dwupunktowy ---------- */
 export class ArcTool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.plane = null; this.cur = null; this.h = 0; }
@@ -870,6 +923,7 @@ function eachTarget(m, targets, fs, fl, fg) {
     fl(A); fl(B); d.a = A.a; d.b = A.b; d.off = V.sub(B.a, A.a);
   }
   for (const t of m.texts || []) if (targets.has('t' + t.id)) { const L = { a: t.p.slice(), b: t.q.slice() }; fl(L); t.p = L.a; t.q = L.b; }
+  for (const q of m.sections || []) if (targets.has('s' + q.id)) { const L = { a: q.o.slice(), b: V.add(q.o, q.n) }; fl(L); q.o = L.a; q.n = V.norm(V.sub(L.b, L.a)); }
 }
 // kopie elementów (nowe id, grupy i komponenty kopiowane w całości); zwraca zbiór id kopii
 const duplicate = (m, targets) => duplicateIds(m, targets);

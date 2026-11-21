@@ -26,9 +26,9 @@ export const V = {
 export const EPS = 1e-6;
 const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
 
-export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], dims: [], texts: [], next: 1 }; }
+export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], dims: [], texts: [], sections: [], next: 1 }; }
 // starsze pliki nie miały prowadnic
-export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.groups ||= []; m.dims ||= []; m.texts ||= []; m.next ||= 1; return m; }
+export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.groups ||= []; m.dims ||= []; m.texts ||= []; m.sections ||= []; m.next ||= 1; return m; }
 // usuwa elementy o podanych id: liczba — bryła, 'l' linia, 'g' prowadnica, 'd' wymiar, 't' opis
 export function removeIds(m, ids) {
   const has = x => ids.has(x);
@@ -37,6 +37,7 @@ export function removeIds(m, ids) {
   m.guides = m.guides.filter(g => !has('g' + g.id));
   m.dims = (m.dims || []).filter(d => !has('d' + d.id));
   m.texts = (m.texts || []).filter(t => !has('t' + t.id));
+  m.sections = (m.sections || []).filter(q => !has('s' + q.id));
 }
 export const cloneModel = m => JSON.parse(JSON.stringify(m));
 

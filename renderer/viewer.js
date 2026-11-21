@@ -24,7 +24,7 @@ export const styleOf = (name, dark) => dark ? { ...STYLES[name], ...DARK[name] }
 
 /* ---------- shader krawędzi ---------- */
 const EDGE_VS = `
-uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar;
+uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar, sectOn; uniform vec4 sect;
 attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul, soft;
 varying float vHalf, vD, vFade; varying vec3 vCol;
 void main(){
@@ -34,6 +34,13 @@ void main(){
   float ta = 0.0, tb = 1.0;
   if (va.z > nz) ta = (nz - va.z) / (vb.z - va.z);
   if (vb.z > nz) tb = (nz - va.z) / (vb.z - va.z);
+  // przekrój: część krawędzi po zdjętej stronie płaszczyzny znika
+  if (sectOn > 0.5) {
+    float fa = dot(sect.xyz, ea) - sect.w, fb = dot(sect.xyz, eb) - sect.w;
+    if (fa > 1e-5 && fb > 1e-5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    if (fa > 1e-5) ta = max(ta, fa / (fa - fb));
+    if (fb > 1e-5) tb = min(tb, fa / (fa - fb));
+  }
   float tt = clamp(t, ta, tb);
   vec4 vp = mix(va, vb, tt), cp = projectionMatrix * vp;
   vec4 pA = projectionMatrix * mix(va, vb, ta), pB = projectionMatrix * mix(va, vb, tb);
@@ -115,6 +122,8 @@ export class Viewer {
     this.ctx = this.overlay.getContext('2d');
 
     const r = this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    r.localClippingEnabled = true;
+    this.clipPlane = new THREE.Plane(); this.showSectPlanes = true; this.sectSegs = [];
     r.setPixelRatio(window.devicePixelRatio || 1);
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.VSMShadowMap;
@@ -159,7 +168,7 @@ export class Viewer {
       uniforms: {
         res: { value: new THREE.Vector2(1, 1) }, px: { value: 1 }, wSil: { value: 2 }, wIn: { value: 1 }, ext: { value: 8 }, wobble: { value: 1 },
         nearZ: { value: 0.05 }, fadeNear: { value: 10 }, fadeFar: { value: 80 }, ink: { value: new THREE.Color() }, inkFar: { value: new THREE.Color() },
-        fade: { value: 0.8 }, opacity: { value: 1 }
+        fade: { value: 0.8 }, opacity: { value: 1 }, sectOn: { value: 0 }, sect: { value: new THREE.Vector4() }
       }
     });
     this.edgeMesh = null;
@@ -303,9 +312,78 @@ export class Viewer {
       this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
       this.scene.add(this.edgeMesh);
     }
+    this.applySection(st);
     this.rebuildGuides();
     this.updateSun();
     this.needs = true;
+  }
+
+  /* ---------- przekrój ---------- */
+  // aktywna płaszczyzna przekroju zdejmuje stronę, w którą wskazuje jej normalna; przecięte bryły dostają wypełnienie (poché)
+  applySection(st) {
+    const sec = (this.model.sections || []).find(q => q.on && !q.hidden);
+    this.section = sec || null;
+    const u = this.edgeMat.uniforms;
+    this.sectSegs = [];
+    if (!sec) { this.ghostGroup.traverse(o => { if (o.material?.clippingPlanes?.length) { o.material.clippingPlanes = []; o.material.needsUpdate = true; } }); u.sectOn.value = 0; for (const m of this.meshes) if (m.material.clippingPlanes?.length) { m.material.clippingPlanes = []; m.material.needsUpdate = true; } return; }
+    const n = V.norm(sec.n), d = V.dot(n, sec.o);
+    u.sectOn.value = 1; u.sect.value.set(n[0], n[1], n[2], d);
+    this.clipPlane.normal.set(-n[0], -n[1], -n[2]); this.clipPlane.constant = d;
+    const planes = [this.clipPlane];
+    this.ghostGroup.traverse(o => { if (o.material) { o.material.clippingPlanes = planes; o.material.needsUpdate = true; } });
+    const poche = new THREE.MeshBasicMaterial({ color: this.dark ? '#8d897f' : '#4f4c45', side: THREE.BackSide, clippingPlanes: planes });
+    for (const m of [...this.meshes]) {
+      m.material.clippingPlanes = planes; m.material.clipShadows = true; m.material.needsUpdate = true;
+      const sh = this.model.shapes.find(q => q.id === m.userData.shapeId);
+      if (!sh || !isSolid(sh) || (sh.alpha ?? 1) < 0.6) continue;
+      const back = new THREE.Mesh(m.geometry, poche); back.userData = { poche: true };
+      this.modelGroup.add(back);
+      // linia przekroju: przecięcie trójkątów z płaszczyzną
+      const P = m.geometry.attributes.position, I = m.geometry.index, cnt = I ? I.count : P.count;
+      const vtx = k => { const i = I ? I.getX(k) : k; return [P.getX(i), P.getY(i), P.getZ(i)]; };
+      for (let k = 0; k + 2 < cnt; k += 3) {
+        const tri = [vtx(k), vtx(k + 1), vtx(k + 2)], f = tri.map(p => V.dot(n, p) - d), pts = [];
+        for (let i = 0; i < 3; i++) {
+          const j = (i + 1) % 3;
+          if ((f[i] > 0) !== (f[j] > 0) && Math.abs(f[i] - f[j]) > 1e-12) pts.push(V.lerp(tri[i], tri[j], f[i] / (f[i] - f[j])));
+        }
+        if (pts.length === 2 && V.dist(pts[0], pts[1]) > 1e-6) this.sectSegs.push(pts);
+      }
+    }
+  }
+  // obrys płaszczyzny przekroju (w oknie): prostokąt wokół modelu
+  sectionCorners(sec) {
+    const b = bounds(this.model) || { center: [0, 0, 0], radius: 5 };
+    const n = V.norm(sec.n), c0 = V.sub(b.center, V.mul(n, V.dot(V.sub(b.center, sec.o), n)));
+    const u = V.norm(Math.abs(n[2]) > 0.9 ? V.cross([1, 0, 0], n) : V.cross([0, 0, 1], n)), v = V.cross(n, u), R = b.radius * 0.75 + 0.5;
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, q]) => V.add(c0, V.add(V.mul(u, a * R), V.mul(v, q * R))));
+  }
+  drawSection(c, proj, scale, onScreen) {
+    if (this.section && this.sectSegs.length) {
+      c.save(); c.strokeStyle = this.st().ink; c.lineWidth = 2.6 * scale; c.lineCap = 'round';
+      c.beginPath();
+      for (const [a, b] of this.sectSegs) { const A = proj(a), B = proj(b); if (A.behind || B.behind) continue; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); }
+      c.stroke(); c.restore();
+    }
+    if (!onScreen || !this.showSectPlanes) return;
+    for (const sec of this.model.sections || []) {
+      if (sec.hidden) continue;
+      const Q = this.sectionCorners(sec).map(proj); if (Q.some(q => q.behind)) continue;
+      const sel = this.selected.has('s' + sec.id);
+      c.save(); c.strokeStyle = sel ? '#3f5f99' : sec.on ? '#c0752f' : (this.dark ? '#77736b' : '#a8a397'); c.lineWidth = sel ? 1.6 : 1.1; c.setLineDash(sec.on ? [] : [6, 4]);
+      c.beginPath(); Q.forEach((q, i) => i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)); c.closePath(); c.stroke();
+      // strzałki w narożnikach: w którą stronę patrzy przekrój
+      const o = this.sectionCorners(sec), L = V.dist(o[0], o[1]) * 0.06;
+      c.setLineDash([]);
+      for (const p of o) {
+        const A = proj(p), B = proj(V.sub(p, V.mul(V.norm(sec.n), L)));
+        if (A.behind || B.behind) continue;
+        c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke();
+        const dx = B.x - A.x, dy = B.y - A.y, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+        c.beginPath(); c.moveTo(B.x - ux * 6 + uy * 3.5, B.y - uy * 6 - ux * 3.5); c.lineTo(B.x, B.y); c.lineTo(B.x - ux * 6 - uy * 3.5, B.y - uy * 6 + ux * 3.5); c.stroke();
+      }
+      c.restore();
+    }
   }
 
   colorFor(s, st, paper) {
@@ -444,6 +522,7 @@ export class Viewer {
   }
   drawOverlay() {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
+    if (this.model) this.drawSection(c, p => this.toScreen(p), 1, true);
     if (this.annotDraw) this.annotDraw(c, p => this.toScreen(p), 1);
     if (this.overlayDraw) this.overlayDraw(c, this);
   }
@@ -478,6 +557,7 @@ export class Viewer {
       const vc = this.vc(), proj = p => { const q = new THREE.Vector3(p[0], p[1], p[2]).project(vc); return { x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H, behind: q.z > 1 }; };
       this.annotDraw(ann.getContext('2d'), proj, W / this.w, { dark, paper: transparent ? null : st.paper });
     }
+    if (this.section) { if (!ann) { ann = document.createElement('canvas'); ann.width = W; ann.height = H; } const vc = this.vc(); this.drawSection(ann.getContext('2d'), p => { const q = new THREE.Vector3(p[0], p[1], p[2]).project(vc); return { x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H, behind: q.z > 1 }; }, W / this.w, false); }
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
     this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
@@ -506,7 +586,9 @@ export class Viewer {
   pick(x, y) {
     const rc = new THREE.Raycaster();
     rc.setFromCamera(new THREE.Vector2((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1), this.vc());
-    const hits = rc.intersectObjects(this.meshes || [], false);
+    let hits = rc.intersectObjects(this.meshes || [], false);
+    // przy przekroju trafienia w zdjętą część się nie liczą
+    if (this.section) { const n = V.norm(this.section.n), d = V.dot(n, this.section.o); hits = hits.filter(h => n[0] * h.point.x + n[1] * h.point.y + n[2] * h.point.z - d <= 1e-6); }
     // ściany w tej samej płaszczyźnie (np. ściana z odsunięcia na dachu bryły): wygrywa płaska, potem nowsza
     if (hits.length > 1) {
       const d0 = hits[0].distance, eps = Math.max(1e-4, d0 * 1e-5);
