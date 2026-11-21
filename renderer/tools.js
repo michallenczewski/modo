@@ -2,8 +2,9 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
+import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges } from './model.js';
 import { AXIS_COLOR, AXES } from './snap.js';
+import { moveMeshPoints } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
 const INK = '#1a1a19', BLUE = '#3f5f99';
@@ -81,6 +82,7 @@ export class SelectTool extends Tool {
   down(e, x, y) {
     const id = this.pickAny(x, y), sel = this.app.selection;
     // klik poza edytowaną grupą kończy jej edycję
+    if (this.app.editSolid != null && id !== this.app.editSolid) this.app.exitSolid();
     while (this.app.editing && (id == null || !this.app.inEditing(id))) this.app.exitGroup();
     const ids = id == null ? [] : this.app.expand(id);
     if (id == null) { if (!e.shiftKey) sel.clear(); }
@@ -93,6 +95,7 @@ export class SelectTool extends Tool {
     const id = this.pickAny(x, y); if (id == null) return;
     const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
     if (g) this.app.enterGroup(g.id);
+    else if (typeof id === 'number') this.app.enterSolid(id);   // bryła: edycja wierzchołków, krawędzi i ścian
   }
 }
 
@@ -117,6 +120,11 @@ export class LineTool extends Tool {
   add(p) {
     if (V.dist(this.anchor, p) < 1e-6) return;
     this.app.checkpoint();
+    // w edycji bryły linia po jej ścianie dzieli ścianę (jak w SketchUpie)
+    if (this.app.editSolid != null) {
+      const sh = this.model.shapes.find(q => q.id === this.app.editSolid);
+      if (sh && splitByLine(this.model, sh, this.anchor, p)) { this.chain.push(p); this.anchor = p.slice(); this.app.lockAxis = null; this.app.changed(); return; }
+    }
     const l = { id: this.model.next++, a: this.anchor.slice(), b: p.slice() };
     this.model.lines.push(l);
     this.ids.push(l.id); this.chain.push(p);
@@ -550,9 +558,10 @@ const duplicate = (m, targets) => duplicateIds(m, targets);
 function moveFrames(m, ids, f) { for (const g of groupsWhollyIn(m, ids)) if (g.frame) g.frame = transformFrame(g.frame, f); }
 
 export class MoveTool extends Tool {
-  reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; }
+  reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; this.sub = null; }
   hint() {
     const k = copyKey(this.app);
+    if (this.app.editSolid != null && !this.p0) return 'Edycja bryły: chwyć wierzchołek, krawędź albo ścianę i przesuń. Strzałki blokują oś, wymiar wpiszesz z klawiatury.';
     return this.p0
       ? `Kliknij punkt docelowy albo wpisz odległość. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`
       : `Kliknij punkt, za który chwytasz zaznaczenie (albo bryłę pod kursorem). <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
@@ -562,11 +571,16 @@ export class MoveTool extends Tool {
   move(e, x, y) {
     this.mx = x; this.my = y;
     if (!this.p0) { if (!this.app.selection.size) hoverShape(this.app, x, y); else this.v.setHoverFace(null); this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
-    this.cur = this.app.snapper.find(x, y, { model: this.start, anchor: this.p0, lockAxis: this.app.lockAxis, excludeSet: this.copy ? null : this.targets });
+    this.cur = this.app.snapper.find(x, y, { model: this.start, anchor: this.p0, lockAxis: this.app.lockAxis, excludeSet: this.copy || this.sub ? null : this.targets });
     if (this.cur) this.apply(V.sub(this.cur.p, this.p0));
   }
   apply(d, count = 1, copy = this.copy) {
     const m = cloneModel(this.start);
+    if (this.sub) {
+      const s = m.shapes.find(q => q.id === this.sub.id);
+      if (s) { toMesh(s, facesOf); moveMeshPoints(s, this.sub.pts, d); }
+      this.d = d; this.count = 1; this.result = new Set(); this.app.setModelLive(m); return;
+    }
     let sel = this.targets;
     if (copy) {
       sel = new Set();
@@ -583,6 +597,9 @@ export class MoveTool extends Tool {
   down(e, x, y) {
     if (!this.cur) return;
     if (!this.p0) {
+      // w edycji bryły: chwytasz wierzchołek, krawędź albo ścianę i ją przesuwasz
+      const sub = this.app.editSolid != null && this.subAt(this.cur);
+      if (sub) { this.sub = sub; this.targets = new Set(); this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0]; this.v.setHoverFace(null); return; }
       const t = targetsAt(this.app, x, y); if (!t) return;
       this.targets = t; this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0];
       this.v.setHoverFace(null);
@@ -590,18 +607,36 @@ export class MoveTool extends Tool {
     }
     this.finish();
   }
+  // co pod kursorem w edytowanej bryle: punkty do przesunięcia
+  subAt(c) {
+    const s = this.model.shapes.find(q => q.id === this.app.editSolid); if (!s) return null;
+    const near = (a, b) => V.dist(a, b) < 1e-5;
+    if (c.type === 'end' && vertices(s).some(v => near(v, c.p))) return { id: s.id, pts: [c.p.slice()], what: 'wierzchołek' };
+    if (c.type === 'mid' || c.type === 'edge') {
+      for (const e of shapeEdges(s)) {
+        const L = V.dist(e.a, e.b), t = V.dot(V.sub(c.p, e.a), V.norm(V.sub(e.b, e.a)));
+        if (t > -1e-6 && t < L + 1e-6 && V.dist(V.add(e.a, V.mul(V.norm(V.sub(e.b, e.a)), t)), c.p) < 1e-4) return { id: s.id, pts: [e.a.slice(), e.b.slice()], what: 'krawędź' };
+      }
+    }
+    if (c.face && c.face.shapeId === s.id) {
+      const f = faceByKey(s, c.face.key); if (!f) return null;
+      const pts = []; for (const p of f.region || [f.verts]) for (const v of p) if (!pts.some(q => near(q, v))) pts.push(v.slice());
+      return { id: s.id, pts, what: 'ściana' };
+    }
+    return null;
+  }
   finish() {
     if (!this.start) return;
     if (V.len(this.d) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
-    this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
-    this.last = { start: this.start, targets: this.targets, d: this.d, copy: this.copy, count: this.count, seq: this.app.opSeq };
+    if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
+    this.last = { start: this.start, targets: this.targets, d: this.d, copy: this.copy, count: this.count, sub: this.sub, seq: this.app.opSeq };
     this.reset();
   }
   redo(d, count) {
     // powtórzenie ostatniej operacji z nowym wymiarem albo liczbą kopii
     if (!this.lastValid() || !this.app.revertLast()) return false;
-    const l = this.last; this.start = l.start; this.targets = l.targets;
+    const l = this.last; this.start = l.start; this.targets = l.targets; this.sub = l.sub;
     this.apply(d, count, l.copy); this.copy = l.copy; this.finish(); this.copy = false; return true;
   }
   value(str) {

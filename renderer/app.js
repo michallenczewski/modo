@@ -72,6 +72,7 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   }
   pruneGroups(m);
   if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();
+  if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
 }
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
 app.commitLive = start => { app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
@@ -85,6 +86,10 @@ app.editing = null;
 app.groupAt = id => topUnder(app.model, id, app.editing);
 app.expand = id => { const g = topUnder(app.model, id, app.editing); return g ? membersOf(app.model, g.id) : [id]; };
 app.inEditing = id => insideGroup(app.model, id, app.editing);
+app.editSolid = null;
+// edycja bryły: wierzchołki, krawędzie i ściany (dwuklik w bryłę)
+app.enterSolid = id => { app.editSolid = id; viewer.editSolid = id; app.selection.clear(); viewer.rebuild(); app.refresh(); renderViewChip(); };
+app.exitSolid = () => { if (app.editSolid == null) return; const id = app.editSolid; app.editSolid = null; viewer.editSolid = null; app.selection.clear(); if (app.model.shapes.some(s => s.id === id)) app.expand(id).forEach(i => app.selection.add(i)); viewer.rebuild(); app.refresh(); renderViewChip(); };
 app.enterGroup = gid => { app.editing = gid; viewer.editGroup = gid; app.selection.clear(); viewer.rebuild(); app.refresh(); renderViewChip(); };
 // wyjście o jeden poziom w górę (jak Esc w SketchUpie)
 app.exitGroup = () => {
@@ -283,6 +288,7 @@ window.addEventListener('keydown', e => {
     if (closePops()) return;
     if (vcbBuf) { vcbBuf = ''; app.refresh(); return; }
     const busy = tool.active || tool.anchor || tool.p0 || tool.c || tool.b || tool.face || tool.p1;
+    if (!busy && app.editSolid != null) { app.exitSolid(); return; }
     if (!busy && app.editing) { app.exitGroup(); return; }
     tool.cancel(); app.lockAxis = null; app.refresh(); return;
   }
@@ -378,7 +384,7 @@ function hideSimilar() {
 function hideSel() { if (!app.selection.size) return; setHidden(id => app.selection.has(id) ? true : undefined); app.selection.clear(); viewer.rebuild(); }
 function unhideAll() { if (!hiddenCount()) return; setHidden(() => false); app.isolated = false; }
 function toggleCut() {
-  const sel = app.model.shapes.filter(s => app.selection.has(s.id) && s.h > 0);
+  const sel = app.model.shapes.filter(s => app.selection.has(s.id) && (s.kind === 'mesh' || s.h > 0));
   if (!sel.length) return toast('Zaznacz bryłę, która ma wycinać (albo przestać wycinać).');
   app.checkpoint();
   const on = !sel.every(s => s.op === 'cut');
@@ -390,8 +396,9 @@ function renderViewChip() {
   b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
   $('#orthoChip').hidden = !viewer.ortho;
   const ed = app.editing && app.model.groups.find(g => g.id === app.editing), eb = $('#editChip');
-  eb.hidden = !ed;
-  if (ed) {
+  eb.hidden = !ed && app.editSolid == null;
+  if (app.editSolid != null) eb.textContent = 'Edytujesz bryłę — wierzchołki, krawędzie, ściany · wyjdź';
+  if (ed && app.editSolid == null) {
     const depth = chainOf(app.model, ed.id).length;
     eb.textContent = (ed.kind === 'comp' ? `Edytujesz komponent (${instancesOf(app.model, ed.def).length} wyst.)` : 'Edytujesz grupę') + (depth > 1 ? ` · poziom ${depth}` : '') + ' · wyjdź';
   }
@@ -687,7 +694,7 @@ function serialize() {
 function load(text, name, path) {
   const d = JSON.parse(text);
   if (d.app !== 'Modo') throw new Error('To nie jest plik Modo');
-  app.editing = null; viewer.editGroup = null;
+  app.editing = null; viewer.editGroup = null; app.editSolid = null; viewer.editSolid = null;
   app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
@@ -742,7 +749,7 @@ function toast(text, action) {
 
 app.toast = (t, a) => toast(t, a);
 $('#hiddenChip').addEventListener('click', () => unhideAll());
-$('#editChip').addEventListener('click', () => app.exitGroup());
+$('#editChip').addEventListener('click', () => app.editSolid != null ? app.exitSolid() : app.exitGroup());
 $('#orthoChip').addEventListener('click', () => run('persp'));
 
 /* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */

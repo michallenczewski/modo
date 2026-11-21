@@ -2,7 +2,8 @@
 // i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
 
 import * as THREE from './vendor/three.module.js';
-import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, V } from './model.js';
+import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, isSolid, V } from './model.js';
+import { triangulatePoly, isMesh } from './mesh.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
 
@@ -243,7 +244,7 @@ export class Viewer {
     const edgeList = [];
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
     this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
-    const cutters = this.model.shapes.filter(s => s.op === 'cut' && !s.hidden && s.h > 0).map(s => ({ s, box: boxOf(s) }));
+    const cutters = this.model.shapes.filter(s => s.op === 'cut' && !s.hidden && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
     const polysOf = s => {
       const out = [];
       for (const f of triangulate(s)) for (const t of f.tris) {
@@ -255,7 +256,7 @@ export class Viewer {
     this.rebuildGhosts(cutters.map(c => c.s));
     for (const s of this.model.shapes) {
       if (s.hidden || s.op === 'cut') continue;
-      const cut = s.h > 0 ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
+      const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
       const pos = [], nor = [], keys = [];
       for (const f of triangulate(s)) {
@@ -282,7 +283,7 @@ export class Viewer {
         const col = sel ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
         for (const e of shapeEdges(s)) {
           // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
-          if (s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
+          if (!isMesh(s) && s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
             const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
             if (this.model.shapes.some(t => t !== s && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
           }
@@ -314,7 +315,7 @@ export class Viewer {
     return base;
   }
   // przy edycji grupy reszta modelu jest przygaszona
-  dimmed(s) { return this.editGroup != null && !(this.editSet && this.editSet.has(s.g)); }
+  dimmed(s) { if (this.editSolid != null) return s.id !== this.editSolid; return this.editGroup != null && !(this.editSet && this.editSet.has(s.g)); }
   // materiał ściany: kolor, przezroczystość (szkło)
   matFor(s, st, paper, flat) {
     const a = s.alpha ?? 1, glass = a < 0.999;
@@ -374,9 +375,8 @@ export class Viewer {
   setHoverFace(verts) {
     for (const c of [...this.previewGroup.children]) { c.geometry.dispose(); this.previewGroup.remove(c); }
     if (verts) {
-      const pts = verts.map(p => new THREE.Vector3(...p));
-      const idx = []; for (let i = 1; i < pts.length - 1; i++) idx.push(0, i, i + 1);
-      const g = new THREE.BufferGeometry().setFromPoints(pts); g.setIndex(idx);
+      const pts = []; for (const t of triangulatePoly(verts)) for (const p of t) pts.push(new THREE.Vector3(...p));
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x6b86b5, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
       m.renderOrder = 3;
       this.previewGroup.add(m);
@@ -450,8 +450,8 @@ export class Viewer {
   // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
   async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false } = {}) {
     // w eksporcie bez zaznaczenia i bez przygaszenia przy edycji grupy
-    const keepSel = [...this.selected], keepEdit = this.editGroup;
-    this.selected.clear(); this.editGroup = null;
+    const keepSel = [...this.selected], keepEdit = this.editGroup, keepSolid = this.editSolid;
+    this.selected.clear(); this.editGroup = null; this.editSolid = null;
     const keepDark = this.dark; this.dark = dark; this.rebuild();
     const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides; this.ghostGroup.visible = false;
     const r = this.renderer, st = this.st();
@@ -472,7 +472,7 @@ export class Viewer {
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
     this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
-    keepSel.forEach(i => this.selected.add(i)); this.editGroup = keepEdit; this.dark = keepDark; this.rebuild();
+    keepSel.forEach(i => this.selected.add(i)); this.editGroup = keepEdit; this.editSolid = keepSolid; this.dark = keepDark; this.rebuild();
     this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
     this.needs = true;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;

@@ -8,6 +8,7 @@
 // Wszystkie wymiary w metrach, oś Z w górę.
 
 import { ShapeUtils, Vector2 } from './vendor/three.module.js';
+import { isMesh, toMesh, meshEdges, meshVertices, meshTriangles, pushPullMesh, transformMesh, newell, regionOf, regionLoops } from './mesh.js';
 
 export const V = {
   add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
@@ -39,6 +40,7 @@ export const at = (s, a, b, c = 0) => [
 
 // porządek: h ≥ 0 i wielokąt przeciwnie do wskazówek zegara
 export function normalizeShape(s) {
+  if (isMesh(s)) return s;
   if (s.h < 0) { s.o = V.add(s.o, V.mul(s.n, s.h)); s.h = -s.h; }
   if (area2(s.pts) < 0) s.pts = s.pts.slice().reverse();
   if (s.h < 1e-7) s.h = 0;
@@ -54,6 +56,7 @@ export function makeShape(model, plane, pts, h = 0, color = null) {
 /* ---------- ściany i krawędzie bryły ---------- */
 // klucze ścian: 'top', 'bottom' (dla płaskiej: 'face'), 'side:i' — bok nad krawędzią i → i+1
 export function faces(s) {
+  if (isMesh(s)) return s.polys.map((p, i) => ({ key: 'p:' + i, normal: newell(p), verts: p }));
   const n = s.pts.length, out = [];
   const bot = s.pts.map(p => at(s, p[0], p[1], 0));
   if (s.h === 0) { out.push({ key: 'face', normal: s.n.slice(), verts: bot, poly: s.pts }); return out; }
@@ -71,10 +74,19 @@ export function sideNormal(s, i) {
   const e = V.norm(V.add(V.mul(s.u, q[0] - p[0]), V.mul(s.v, q[1] - p[1])));
   return V.norm(V.cross(e, s.n));
 }
-export function faceByKey(s, key) { return faces(s).find(f => f.key === key) || null; }
+export function faceByKey(s, key) {
+  if (isMesh(s)) {
+    // ściana bryły dowolnej to cały obszar w jednej płaszczyźnie — zwracamy jej obrys
+    const i = +String(key).split(':')[1]; if (!s.polys[i]) return null;
+    const idx = regionOf(s, i), loops = idx.length > 1 ? regionLoops(s, idx) : [s.polys[i]];
+    return { key, normal: newell(s.polys[i]), verts: loops.length === 1 ? loops[0] : s.polys[i], region: idx.map(j => s.polys[j]) };
+  }
+  return faces(s).find(f => f.key === key) || null;
+}
 
 // krawędzie z normalnymi przyległych ścian (do grubości konturu sylwetki)
 export function edges(s) {
+  if (isMesh(s)) return meshEdges(s);
   const n = s.pts.length, out = [];
   const bot = s.pts.map(p => at(s, p[0], p[1], 0));
   if (s.h === 0) {
@@ -96,7 +108,7 @@ export function edges(s) {
 
 // czy punkt leży na górnej ścianie bryły t (do styku brył postawionych jedna na drugiej)
 export function onTopOf(p, t) {
-  if (t.h === 0) return false;
+  if (isMesh(t) || t.h === 0) return false;
   const top = at(t, 0, 0, t.h), d = V.sub(p, top);
   if (Math.abs(V.dot(d, t.n)) > 1e-4) return false;
   const x = V.dot(d, t.u), y = V.dot(d, t.v), P = t.pts;
@@ -108,6 +120,7 @@ export function onTopOf(p, t) {
 }
 
 export function vertices(s) {
+  if (isMesh(s)) return meshVertices(s);
   const v = s.pts.map(p => at(s, p[0], p[1], 0));
   if (s.h > 0) for (const p of s.pts) v.push(at(s, p[0], p[1], s.h));
   return v;
@@ -115,6 +128,7 @@ export function vertices(s) {
 
 // trójkąty ścian do siatki: [{ key, normal, tris: [[a,b,c],...] }]
 export function triangulate(s) {
+  if (isMesh(s)) return meshTriangles(s);
   return faces(s).map(f => {
     if (f.poly) {
       const contour = f.poly.map(p => new Vector2(p[0], p[1]));
@@ -133,6 +147,7 @@ const isect2 = (p, d, q, e) => { const den = d[0] * e[1] - d[1] * e[0]; if (Math
 
 // push/pull ściany o odległość d wzdłuż jej zewnętrznej normalnej; zmienia bryłę w miejscu
 export function pushPull(s, key, d) {
+  if (isMesh(s)) return pushPullMesh(s, +key.split(':')[1], d);
   if (key === 'top' || key === 'face') { s.h += d; normalizeShape(s); return s; }
   if (key === 'bottom') { s.o = V.add(s.o, V.mul(s.n, -d)); s.h += d; normalizeShape(s); return s; }
   const i = +key.split(':')[1], n = s.pts.length, j = (i + 1) % n;
@@ -148,24 +163,16 @@ export function pushPull(s, key, d) {
   return s;
 }
 
-// nowa bryła wyciągnięta ze ściany (push/pull z Ctrl / ⌥)
+// nowa bryła wyciągnięta ze ściany (push/pull z Ctrl / ⌥) — działa dla każdej ściany, także bryły dowolnej
 export function extrudeFace(model, s, key, d) {
   const f = faceByKey(s, key); if (!f) return null;
-  if (f.poly) {
-    const top = key === 'top' || key === 'face';
-    const plane = top ? { o: at(s, 0, 0, s.h), u: s.u, v: s.v } : { o: s.o, u: s.v, v: s.u };
-    const pts = top ? s.pts : s.pts.map(p => [p[1], p[0]]);
-    const ns = makeShape(model, plane, pts, d, s.color);
-    if (s.soft) ns.soft = true;
-    return ns;
-  }
-  const [a, b, , dTop] = f.verts;
-  const u = V.norm(V.sub(b, a)), up = V.sub(dTop, a), hgt = V.len(up), v = V.norm(up);
-  // n = u × v ma wskazywać na zewnątrz bryły
-  const flip = V.dot(V.cross(u, v), f.normal) < 0;
-  const w = V.dist(a, b);
-  const plane = flip ? { o: b, u: V.mul(u, -1), v } : { o: a, u, v };
-  return makeShape(model, plane, [[0, 0], [w, 0], [w, hgt], [0, hgt]], d, s.color);
+  const fp = facePlane(f);
+  let a = 0; for (let i = 0; i < fp.pts.length; i++) { const p = fp.pts[i], q = fp.pts[(i + 1) % fp.pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  const pts = a < 0 ? fp.pts.slice().reverse() : fp.pts;
+  const ns = makeShape(model, { o: fp.o, u: fp.u, v: fp.v }, pts, d, s.color);
+  if (s.soft) ns.soft = true;
+  if (s.alpha != null) ns.alpha = s.alpha;
+  return ns;
 }
 
 // zamknięta pętla punktów leżących w jednej płaszczyźnie → płaska ściana
@@ -203,7 +210,7 @@ export function circlePts(r, n = CIRCLE_SEGMENTS, a0 = 0) {
   return pts;
 }
 
-export function translateShape(s, d) { s.o = V.add(s.o, d); return s; }
+export function translateShape(s, d) { if (isMesh(s)) return transformMesh(s, p => V.add(p, d)); s.o = V.add(s.o, d); return s; }
 export function translateLine(l, d) { l.a = V.add(l.a, d); l.b = V.add(l.b, d); return l; }
 export function translateGuide(g, d) { g.o = V.add(g.o, d); return g; }
 
@@ -213,7 +220,7 @@ export function rotVec(v, k, t) {
   return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c)));
 }
 const rotPt = (p, c, k, t) => V.add(c, rotVec(V.sub(p, c), k, t));
-export function rotateShape(s, c, k, t) { s.o = rotPt(s.o, c, k, t); s.u = rotVec(s.u, k, t); s.v = rotVec(s.v, k, t); s.n = rotVec(s.n, k, t); return s; }
+export function rotateShape(s, c, k, t) { if (isMesh(s)) return transformMesh(s, p => rotPt(p, c, k, t)); s.o = rotPt(s.o, c, k, t); s.u = rotVec(s.u, k, t); s.v = rotVec(s.v, k, t); s.n = rotVec(s.n, k, t); return s; }
 export function rotateLine(l, c, k, t) { l.a = rotPt(l.a, c, k, t); l.b = rotPt(l.b, c, k, t); return l; }
 export function rotateGuide(g, c, k, t) { g.o = rotPt(g.o, c, k, t); g.d = rotVec(g.d, k, t); return g; }
 
@@ -309,6 +316,7 @@ function signature(s) {
   return out;
 }
 export function similar(a, b) {
+  if (isMesh(a) || isMesh(b)) { if (!isMesh(a) || !isMesh(b) || a.polys.length !== b.polys.length || (a.color || '') !== (b.color || '')) return false; const sz = s => s.polys.map(p => p.length).sort().join(','); const ar = s => Math.round(s.polys.reduce((x, p) => x + p.length, 0)); return sz(a) === sz(b) && ar(a) === ar(b) && Math.abs(meshAreaOf(a) - meshAreaOf(b)) < 1e-3; }
   if (a.pts.length !== b.pts.length || Math.abs(a.h - b.h) > 1e-4 || (a.op || '') !== (b.op || '') || (a.color || '') !== (b.color || '')) return false;
   const A = signature(a), B = signature(b), n = A.length;
   for (let k = 0; k < n; k++) { let ok = true; for (let i = 0; i < n && ok; i++) ok = A[i] === B[(i + k) % n]; if (ok) return true; }
@@ -319,6 +327,7 @@ export function similar(a, b) {
 // k — współczynnik; axis — null (jednolicie) albo jednostkowy wektor osi. Zwraca false, gdy bryły nie da się tak przeskalować
 // (oś ani prostopadła, ani równoległa do jej podstawy — wtedy bryła przestałaby być prostym wyciągnięciem).
 export function scaleShape(s, c, k, axis) {
+  if (isMesh(s)) { transformMesh(s, p => scalePoint(p, c, k, axis)); return true; }
   if (!axis) {
     s.o = V.add(c, V.mul(V.sub(s.o, c), k)); s.pts = s.pts.map(p => [p[0] * k, p[1] * k]); s.h *= k;
     if (k < 0) { s.u = V.mul(s.u, -1); s.v = V.mul(s.v, -1); s.pts = s.pts.map(p => [-p[0], -p[1]]); }
@@ -404,6 +413,7 @@ export function unmapPoint(F, p) {
 }
 // bryła przekształcona dowolną funkcją punktów (przesunięcie, obrót, skala, przejście między ramami)
 export function transformShape(s, f) {
+  if (isMesh(s)) return transformMesh(s, f);
   const base = s.pts.map(p => at(s, p[0], p[1], 0)), o = f(s.o);
   const top = f(at(s, s.pts[0][0], s.pts[0][1], s.h)), b0 = f(base[0]);
   let u = V.norm(V.sub(f(V.add(s.o, s.u)), o)), v = V.sub(f(V.add(s.o, s.v)), o);
@@ -467,3 +477,48 @@ export function pruneGroups(m) {
   m.groups = m.groups.filter(g => used.has(g.id));
   for (const g of m.groups) if (g.p != null && !m.groups.some(q => q.id === g.p)) delete g.p;
 }
+
+import { meshArea as meshAreaOf } from './mesh.js';
+export { toMesh };
+
+/* ---------- dzielenie ścian linią ---------- */
+export const isSolid = s => isMesh(s) || s.h > 0;
+// płaska ściana przecięta cięciwą a–b → dwie płaskie ściany
+function splitFlat(model, s, a, b) {
+  const P = s.pts, n = P.length, to2 = p => { const d = V.sub(p, s.o); return [V.dot(d, s.u), V.dot(d, s.v)]; };
+  if (Math.abs(V.dot(V.sub(a, s.o), s.n)) > 1e-5 || Math.abs(V.dot(V.sub(b, s.o), s.n)) > 1e-5) return false;
+  const A = to2(a), B = to2(b);
+  const onEdge = q => { for (let i = 0; i < n; i++) { const p = P[i], r = P[(i + 1) % n], L = Math.hypot(r[0] - p[0], r[1] - p[1]); if (L < 1e-9) continue; const t = ((q[0] - p[0]) * (r[0] - p[0]) + (q[1] - p[1]) * (r[1] - p[1])) / (L * L); const x = p[0] + (r[0] - p[0]) * t, y = p[1] + (r[1] - p[1]) * t; if (t > -1e-7 && t < 1 + 1e-7 && Math.hypot(x - q[0], y - q[1]) < 1e-5) return { i, t }; } return null; };
+  const ea = onEdge(A), eb = onEdge(B); if (!ea || !eb) return false;
+  const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+  if (insideDistance(P, M) <= 1e-6) return false;
+  // obwód z wstawionymi punktami a i b
+  const ring = []; let ia = -1, ib = -1;
+  for (let i = 0; i < n; i++) {
+    ring.push(P[i]);
+    const ins = [[ea, A, 'a'], [eb, B, 'b']].filter(([e]) => e.i === i).sort((x, y) => x[0].t - y[0].t);
+    for (const [e, q, k] of ins) { if (e.t < 1e-7 && k) { if (k === 'a') ia = ring.length - 1; else ib = ring.length - 1; continue; } if (e.t > 1 - 1e-7) continue; ring.push(q); if (k === 'a') ia = ring.length - 1; else ib = ring.length - 1; }
+  }
+  if (ia < 0) ia = ring.findIndex(q => Math.hypot(q[0] - A[0], q[1] - A[1]) < 1e-5);
+  if (ib < 0) ib = ring.findIndex(q => Math.hypot(q[0] - B[0], q[1] - B[1]) < 1e-5);
+  if (ia < 0 || ib < 0 || ia === ib) return false;
+  const walk = (from, to) => { const out = []; for (let k = from; ; k = (k + 1) % ring.length) { out.push(ring[k]); if (k === to) break; } return out; };
+  const p1 = walk(ia, ib), p2 = walk(ib, ia);
+  if (p1.length < 3 || p2.length < 3) return false;
+  s.pts = p1;
+  const c = makeShape(model, { o: s.o, u: s.u, v: s.v }, p2, 0, s.color);
+  for (const k of ['g', 'tag', 'alpha', 'soft']) if (s[k] != null) c[k] = s[k];
+  normalizeShape(s);
+  return true;
+}
+// linia a–b na ścianie bryły s: dzieli ścianę (bryła staje się dowolna); zwraca true, gdy linia została „zużyta”
+export function splitByLine(model, s, a, b) {
+  if (!isMesh(s) && s.h === 0) return splitFlat(model, s, a, b);
+  const test = JSON.parse(JSON.stringify(s));
+  toMesh(test, faces);
+  if (!splitMeshFn(test, a, b)) return false;
+  for (const k of Object.keys(s)) delete s[k];
+  Object.assign(s, test);
+  return true;
+}
+import { splitMesh as splitMeshFn } from './mesh.js';

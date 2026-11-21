@@ -78,6 +78,16 @@ export function subtract(aPolys, bPolys) {
   a.invert(); a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert(); a.build(b.all()); a.invert();
   return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
 }
+export function union(aPolys, bPolys) {
+  const a = new Node(mk(aPolys)), b = new Node(mk(bPolys));
+  a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert(); a.build(b.all());
+  return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
+}
+export function intersect(aPolys, bPolys) {
+  const a = new Node(mk(aPolys)), b = new Node(mk(bPolys));
+  a.invert(); b.clipTo(a); b.invert(); a.clipTo(b); b.clipTo(a); a.build(b.all()); a.invert();
+  return a.all().map(p => ({ vs: p.vs, shared: p.shared, n: p.plane.n, w: p.plane.w }));
+}
 // odejmowanie kilku brył po kolei
 export function subtractAll(aPolys, cutters) {
   let cur = aPolys;
