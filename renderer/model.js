@@ -26,9 +26,9 @@ export const V = {
 export const EPS = 1e-6;
 const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
 
-export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], dims: [], texts: [], sections: [], next: 1 }; }
+export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], dims: [], texts: [], sections: [], tags: [], next: 1 }; }
 // starsze pliki nie miały prowadnic
-export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.groups ||= []; m.dims ||= []; m.texts ||= []; m.sections ||= []; m.next ||= 1; return m; }
+export function fixModel(m) { m.shapes ||= []; m.lines ||= []; m.guides ||= []; m.groups ||= []; m.dims ||= []; m.texts ||= []; m.sections ||= []; m.tags ||= []; m.next ||= 1; return m; }
 // usuwa elementy o podanych id: liczba — bryła, 'l' linia, 'g' prowadnica, 'd' wymiar, 't' opis
 export function removeIds(m, ids) {
   const has = x => ids.has(x);
@@ -40,6 +40,15 @@ export function removeIds(m, ids) {
   m.sections = (m.sections || []).filter(q => !has('s' + q.id));
 }
 export const cloneModel = m => JSON.parse(JSON.stringify(m));
+// element niewidoczny: ukryty sam albo leży na wyłączonej warstwie (własnej albo którejś z grup, w których jest)
+export function isHidden(m, e) {
+  if (e.hidden) return true;
+  const tags = m.tags; if (!tags || !tags.length) return false;
+  const off = id => id != null && tags.some(t => t.id === id && t.hidden);
+  if (off(e.tag)) return true;
+  if (e.g != null) for (const g of chainOf(m, e.g)) if (off(g.tag)) return true;
+  return false;
+}
 
 // punkt (a, b, c) w układzie bryły → świat
 export const at = (s, a, b, c = 0) => [
@@ -207,8 +216,8 @@ export function bounds(model, extra, only) {
   if (only) { const ids = new Set(only); model = { shapes: model.shapes.filter(s => ids.has(s.id)), lines: model.lines.filter(l => ids.has('l' + l.id)) }; extra = null; }
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   const add = p => { for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; } };
-  for (const s of model.shapes) if (!s.hidden) vertices(s).forEach(add);
-  for (const l of model.lines) if (!l.hidden) { add(l.a); add(l.b); }
+  for (const s of model.shapes) if (!isHidden(model, s)) vertices(s).forEach(add);
+  for (const l of model.lines) if (!isHidden(model, l)) { add(l.a); add(l.b); }
   if (extra) extra.forEach(add);
   if (lo[0] === Infinity) return null;
   return { lo, hi, center: V.lerp(lo, hi, 0.5), radius: Math.max(V.dist(lo, hi) / 2, 1) };
@@ -364,7 +373,7 @@ export function hostFace(model, s) {
   let cx = 0, cy = 0; for (const p of s.pts) { cx += p[0]; cy += p[1]; }
   const c = at(s, cx / s.pts.length, cy / s.pts.length, 0);
   for (const t of model.shapes) {
-    if (t === s || t.h === 0 || t.op === 'cut' || t.hidden) continue;
+    if (t === s || t.h === 0 || t.op === 'cut' || isHidden(model, t)) continue;
     for (const f of faces(t)) {
       if (Math.abs(Math.abs(V.dot(f.normal, s.n)) - 1) > 1e-4 || Math.abs(V.dot(V.sub(c, f.verts[0]), f.normal)) > 1e-4) continue;
       const fp = facePlane(f);

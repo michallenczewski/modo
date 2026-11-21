@@ -9,7 +9,9 @@ import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
 import { exportObj } from './export.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
-import { faces as facesOfShape, isSolid, removeIds } from './model.js';
+import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds } from './model.js';
+import { meshVolume, meshArea } from './mesh.js';
+import { fmtNum, fmtLength } from './units.js';
 import { drawAnnotations } from './annot.js';
 import { UNITS, getUnit, setUnit } from './units.js';
 
@@ -378,6 +380,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
     case 'sectionToggle': sectionToggle(); break;
     case 'sectionPlanes': viewer.showSectPlanes = !viewer.showSectPlanes; viewer.redraw(); renderViewPop(); toast(viewer.showSectPlanes ? 'Płaszczyzny przekroju widoczne' : 'Płaszczyzny przekroju ukryte'); break;
     case 'sectionFlip': { const q = selectedSections()[0]; if (q) { app.checkpoint(); q.n = q.n.map(x => -x); app.changed(); } break; }
@@ -422,6 +425,8 @@ function setHidden(fn) {
   app.checkpoint();
   for (const s of app.model.shapes) { const h = fn(s.id, s); if (h !== undefined) s.hidden = h || undefined; }
   for (const l of app.model.lines) { const h = fn('l' + l.id, l); if (h !== undefined) l.hidden = h || undefined; }
+  for (const d of app.model.dims) { const h = fn('d' + d.id, d); if (h !== undefined) d.hidden = h || undefined; }
+  for (const t of app.model.texts) { const h = fn('t' + t.id, t); if (h !== undefined) t.hidden = h || undefined; }
   for (const id of [...app.selection]) { const s = typeof id === 'number' ? app.model.shapes.find(q => q.id === id) : app.model.lines.find(q => 'l' + q.id === id); if (!s || s.hidden) app.selection.delete(id); }
   app.changed(); renderViewChip();
 }
@@ -450,6 +455,7 @@ function toggleCut() {
   app.changed(); toast(on ? 'Bryła wycina z brył, które przecina' : 'Zwykła bryła');
 }
 function renderViewChip() {
+  renderPanel();
   const n = hiddenCount(), b = $('#hiddenChip');
   b.hidden = !n; b.textContent = 'Ukryte: ' + n + ' · pokaż';
   $('#orthoChip').hidden = !viewer.ortho && !viewer.twoPoint; $('#orthoChip').textContent = viewer.ortho ? 'Rzut równoległy' : 'Perspektywa dwupunktowa';
@@ -539,6 +545,159 @@ document.addEventListener('pointerdown', e => {
   if (e.target.closest('.pop, .menu, header button, #tools button')) return;
   if (!e.target.closest('#view')) closePops();
 });
+
+/* ---------- panel boczny: element, warstwy, struktura ---------- */
+app.panel = false; app.treeClosed = new Set();
+const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const EYE = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/></svg>';
+const EYE_OFF = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2.5l11 11M6.6 4A6.3 6.3 0 0 1 8 3.8c4 0 6.2 4.2 6.2 4.2a11 11 0 0 1-1.8 2.3M10.6 11.6A5.8 5.8 0 0 1 8 12.2C4 12.2 1.8 8 1.8 8a11 11 0 0 1 2.4-2.8"/></svg>';
+const XS = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+function togglePanel(v) {
+  app.panel = v ?? !app.panel;
+  document.body.classList.toggle('panel', app.panel); $('#panel').hidden = !app.panel; $('#panelBtn').classList.toggle('on', app.panel);
+  try { localStorage.setItem('modo.panel', app.panel ? '1' : ''); } catch (e) {}
+  renderPanel();
+}
+$('#panelBtn').addEventListener('click', () => togglePanel());
+const groupName = g => g.name || (g.kind === 'comp' ? 'Komponent ' + g.def.slice(1) : 'Grupa ' + g.id);
+const solidsIn = ids => ids.filter(i => typeof i === 'number').map(i => app.model.shapes.find(s => s.id === i)).filter(s => s && isSolid(s) && s.op !== 'cut');
+const meshCopy = s => meshOf(JSON.parse(JSON.stringify(s)), facesOfShape);
+const fmtA = a => a.toFixed(2).replace('.', ',') + ' m²', fmtV = v => v.toFixed(2).replace('.', ',') + ' m³';
+// elementy „na wierzchu” zaznaczenia: grupy w całości i elementy luzem (do nadawania warstwy)
+function selectionTops() {
+  const groups = selectedGroups(), inG = new Set(groups.flatMap(g => membersOf(app.model, g.id)));
+  const m = app.model, loose = [];
+  for (const id of app.selection) {
+    if (inG.has(id)) continue;
+    const e = typeof id === 'number' ? m.shapes.find(s => s.id === id) : id[0] === 'l' ? m.lines.find(l => 'l' + l.id === id) : id[0] === 'd' ? m.dims.find(d => 'd' + d.id === id) : id[0] === 't' ? m.texts.find(t => 't' + t.id === id) : null;
+    if (e) loose.push(e);
+  }
+  return [...groups, ...loose];
+}
+function renderPanel() {
+  if (!app.panel) return;
+  renderInfo(); renderTags(); renderTree();
+}
+function infoRow(label, value) { return `<div class="row"><span class="lbl w70">${label}</span><span class="val num">${value}</span></div>`; }
+function renderInfo() {
+  const m = app.model, sel = [...app.selection], B = $('#infoBody');
+  const tagSelect = cur => `<div class="row"><span class="lbl w70">Warstwa</span><select class="fld grow" id="infTag"><option value="">bez warstwy</option>${m.tags.map(t => `<option value="${t.id}"${t.id === cur ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
+  const size = ids => { const b = bounds(m, null, ids); return b ? infoRow('Wymiary', `${fmtNum(b.hi[0] - b.lo[0])} × ${fmtNum(b.hi[1] - b.lo[1])} × ${fmtLength(b.hi[2] - b.lo[2])}`) : ''; };
+  const vol = ss => { let v = 0, a = 0; for (const s of ss) { const q = meshCopy(s); v += Math.abs(meshVolume(q)); a += meshArea(q); } return ss.length ? infoRow('Pole ścian', fmtA(a)) + infoRow('Objętość', fmtV(v)) : ''; };
+  let html = '';
+  if (!sel.length) {
+    const solids = m.shapes.filter(s => isSolid(s) && s.op !== 'cut');
+    html = `<div class="muted">Nic nie zaznaczono. Kliknij element, żeby zobaczyć jego wymiary, pole i objętość.</div>`
+      + infoRow('Bryły', solids.length) + infoRow('Grupy', m.groups.filter(g => g.kind !== 'comp').length) + infoRow('Komponenty', new Set(m.groups.filter(g => g.kind === 'comp').map(g => g.def)).size + ' rodz. · ' + m.groups.filter(g => g.kind === 'comp').length + ' wyst.')
+      + vol(solids);
+  } else {
+    const groups = selectedGroups(), tops = selectionTops();
+    const one = tops.length === 1 ? tops[0] : null;
+    if (one && groups.length === 1) {
+      const g = groups[0], ids = membersOf(m, g.id);
+      const n = g.kind === 'comp' ? m.groups.filter(q => q.def === g.def && q.kind === 'comp').length : 0;
+      html = `<div class="row"><span class="lbl w70">Nazwa</span><input class="fld grow" id="infName" value="${esc(groupName(g))}"></div>`
+        + infoRow('Rodzaj', g.kind === 'comp' ? 'komponent, ' + n + ' wyst.' : 'grupa')
+        + tagSelect(g.tag) + size(ids) + vol(solidsIn(ids));
+    } else if (one && typeof sel[0] === 'number' && sel.length === 1) {
+      const s = one;
+      html = `<div class="row"><span class="lbl w70">Nazwa</span><input class="fld grow" id="infName" value="${esc(s.name || '')}" placeholder="${isSolid(s) ? 'Bryła' : 'Ściana'} ${s.id}"></div>`
+        + infoRow('Rodzaj', s.op === 'cut' ? 'bryła wycinająca' : isSolid(s) ? 'bryła' : 'ściana') + tagSelect(s.tag) + size([s.id])
+        + (isSolid(s) ? vol([s]) : infoRow('Pole', fmtA(facesOfShape(s).reduce((a, f) => a + Math.abs(polyAreaOf(f.verts)), 0) / (facesOfShape(s).length > 1 ? 2 : 1))));
+    } else if (one && sel[0][0] === 'l') {
+      html = infoRow('Rodzaj', 'linia') + tagSelect(one.tag) + infoRow('Długość', fmtLength(V3.dist(one.a, one.b)));
+    } else if (one && sel[0][0] === 'd') {
+      html = infoRow('Rodzaj', 'wymiar') + infoRow('Zmierzone', fmtLength(V3.dist(one.a, one.b))) + `<div class="row"><span class="lbl w70">Tekst</span><input class="fld grow" id="infDimText" value="${esc(one.text || '')}" placeholder="zmierzony"></div>` + tagSelect(one.tag);
+    } else if (one && sel[0][0] === 't') {
+      html = infoRow('Rodzaj', 'opis') + `<textarea class="fld" id="infText">${esc(one.text)}</textarea>` + tagSelect(one.tag);
+    } else if (sel.length === 1 && sel[0][0] === 's') {
+      const q = m.sections.find(q => 's' + q.id === sel[0]);
+      html = infoRow('Rodzaj', 'płaszczyzna przekroju') + infoRow('Stan', q?.on ? 'włączony' : 'wyłączony');
+    } else {
+      html = infoRow('Zaznaczono', tops.length + (tops.length === 1 ? ' element' : tops.length < 5 ? ' elementy' : ' elementów')) + tagSelect(tops.every(e => e.tag === tops[0]?.tag) ? tops[0]?.tag : undefined) + size(sel) + vol(solidsIn(sel));
+    }
+  }
+  B.innerHTML = html;
+  const nm = $('#infName');
+  if (nm) {
+    nm.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') nm.blur(); });
+    nm.addEventListener('change', () => { const t = selectionTops()[0]; if (!t) return; app.checkpoint(); const v = nm.value.trim(); if (t.kind === 'comp') { for (const g of m.groups) if (g.def === t.def) g.name = v || undefined; } else t.name = v || undefined; app.markDirty(); renderTree(); });
+  }
+  const tg = $('#infTag');
+  if (tg) tg.addEventListener('change', () => { app.checkpoint(); const v = tg.value ? +tg.value : undefined; for (const e of selectionTops()) e.tag = v; app.changed(); });
+  const dt = $('#infDimText');
+  if (dt) { dt.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') dt.blur(); }); dt.addEventListener('change', () => { const d = selectionTops()[0]; app.checkpoint(); d.text = dt.value.trim() || undefined; app.changed(); }); }
+  const tx = $('#infText');
+  if (tx) { tx.addEventListener('keydown', e => e.stopPropagation()); tx.addEventListener('change', () => { const t = selectionTops()[0]; if (!tx.value.trim()) return; app.checkpoint(); t.text = tx.value.replace(/\s+$/, ''); app.changed(); }); }
+}
+const polyAreaOf = P => { let x = 0, y = 0, z = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]); } return Math.hypot(x, y, z) / 2; };
+const V3 = { dist: (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) };
+function tagCount(id) { const m = app.model; return [...m.shapes, ...m.lines, ...m.groups, ...m.dims, ...m.texts].filter(e => e.tag === id).length; }
+function renderTags() {
+  const m = app.model, L = $('#tagList');
+  L.innerHTML = m.tags.length ? m.tags.map(t => `<div class="tagrow${t.hidden ? ' off' : ''}" data-id="${t.id}"><button class="ib" data-eye title="${t.hidden ? 'Pokaż' : 'Ukryj'} warstwę">${t.hidden ? EYE_OFF : EYE}</button><input class="fld" value="${esc(t.name)}" aria-label="Nazwa warstwy"><span class="cnt num">${tagCount(t.id) || ''}</span><button class="ib" data-del title="Usuń warstwę (elementy zostają, bez warstwy)">${XS}</button></div>`).join('')
+    : '<div class="muted">Warstwy porządkują model (np. istniejące, projektowane, otoczenie). Element dostaje warstwę w sekcji Element.</div>';
+  L.querySelectorAll('.tagrow').forEach(r => {
+    const t = m.tags.find(q => q.id === +r.dataset.id), inp = r.querySelector('input');
+    r.querySelector('[data-eye]').addEventListener('click', () => {
+      t.hidden = !t.hidden || undefined;
+      for (const id of [...app.selection]) { const e = typeof id === 'number' ? m.shapes.find(q => q.id === id) : id[0] === 'l' ? m.lines.find(q => 'l' + q.id === id) : id[0] === 'd' ? m.dims.find(q => 'd' + q.id === id) : id[0] === 't' ? m.texts.find(q => 't' + q.id === id) : null; if (e && isHidden(m, e)) app.selection.delete(id); }
+      viewer.setHoverFace(null); app.markDirty(); viewer.setModel(m); app.refresh(); renderPanel();
+    });
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); });
+    inp.addEventListener('change', () => { t.name = inp.value.trim() || t.name; app.markDirty(); renderPanel(); });
+    r.querySelector('[data-del]').addEventListener('click', () => {
+      app.checkpoint();
+      for (const e of [...m.shapes, ...m.lines, ...m.groups, ...m.dims, ...m.texts]) if (e.tag === t.id) delete e.tag;
+      m.tags = m.tags.filter(q => q !== t); app.changed();
+    });
+  });
+}
+$('#tagAdd').addEventListener('click', () => {
+  const m = app.model; app.checkpoint();
+  const t = { id: m.next++, name: 'Warstwa ' + (m.tags.length + 1) };
+  m.tags.push(t);
+  // nowa warstwa od razu dla zaznaczenia
+  const tops = selectionTops(); for (const e of tops) e.tag = t.id;
+  app.changed();
+  if (tops.length) toast('Zaznaczone elementy są na warstwie „' + t.name + '”.');
+  setTimeout(() => { const i = $(`.tagrow[data-id="${t.id}"] input`); if (i) { i.focus(); i.select(); } });
+});
+function renderTree() {
+  const m = app.model, T = $('#tree');
+  const roots = m.groups.filter(g => g.p == null);
+  if (!roots.length) { T.innerHTML = '<div class="muted">Tu pojawią się grupy i komponenty (Spacja, ' + prettyCombo('Mod+Space', isMac) + ').</div>'; return; }
+  const selG = new Set(selectedGroups().map(g => g.id));
+  const rows = [];
+  const walk = (g, depth) => {
+    const kids = m.groups.filter(q => q.p === g.id), closed = app.treeClosed.has(g.id);
+    const mem = membersOf(m, g.id), hid = mem.length && mem.every(i => { const e = typeof i === 'number' ? m.shapes.find(s => s.id === i) : m.lines.find(l => 'l' + l.id === i); return e && isHidden(m, e); });
+    const ico = g.kind === 'comp' ? '<path d="M8 2.5 13.5 8 8 13.5 2.5 8z"/>' : '<rect x="3" y="3" width="10" height="10" rx="1.5"/>';
+    rows.push(`<div class="tnode${selG.has(g.id) ? ' sel' : ''}${app.editing === g.id ? ' edit' : ''}${hid ? ' hid' : ''}" data-id="${g.id}" style="padding-left:${depth * 14}px"><span class="arr">${kids.length ? (closed ? '▸' : '▾') : ''}</span><svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${ico}</svg><span class="nm">${esc(groupName(g))}</span><button class="ib" title="${hid ? 'Pokaż' : 'Ukryj'}">${hid ? EYE_OFF : EYE}</button></div>`);
+    if (!closed) for (const k of kids) walk(k, depth + 1);
+  };
+  for (const g of roots) walk(g, 0);
+  const loose = m.shapes.filter(s => s.g == null && isSolid(s)).length;
+  if (loose) rows.push(`<div class="muted" style="padding:4px 0 0 20px">${loose} ${loose === 1 ? 'bryła' : loose < 5 ? 'bryły' : 'brył'} poza grupami</div>`);
+  T.innerHTML = rows.join('');
+  T.querySelectorAll('.tnode').forEach(r => {
+    const g = m.groups.find(q => q.id === +r.dataset.id);
+    r.querySelector('.arr').addEventListener('click', e => { e.stopPropagation(); app.treeClosed.has(g.id) ? app.treeClosed.delete(g.id) : app.treeClosed.add(g.id); renderTree(); });
+    r.querySelector('.ib').addEventListener('click', e => {
+      e.stopPropagation();
+      const mem = new Set(membersOf(m, g.id)), hide = !r.classList.contains('hid');
+      setHidden(id => mem.has(id) ? hide : undefined);
+    });
+    r.addEventListener('click', () => {
+      // zaznaczenie grupy: najpierw wejście do jej rodzica (albo wyjście do całego modelu)
+      if (app.editSolid != null) app.exitSolid();
+      if (app.editing !== g.p) { if (g.p == null) { while (app.editing) app.exitGroup(); } else app.enterGroup(g.p); }
+      app.selection.clear(); membersOf(m, g.id).forEach(i => app.selection.add(i)); app.selectionChanged();
+    });
+    r.addEventListener('dblclick', () => app.enterGroup(g.id));
+  });
+}
+try { if (localStorage.getItem('modo.panel')) setTimeout(() => togglePanel(true)); } catch (e) {}
 
 /* ---------- przekroje ---------- */
 const selectedSections = () => (app.model.sections || []).filter(q => app.selection.has('s' + q.id));
@@ -865,7 +1024,7 @@ function openContext(x, y, cx, cy) {
   if (secSel.length && secSel.length === sel.length) {
     items.push(['sectionToggle', secSel[0].on ? 'Wyłącz przekrój' : 'Włącz ten przekrój'], ['sectionFlip', 'Odwróć kierunek'], ['sectionPlanes', viewer.showSectPlanes ? 'Ukryj płaszczyzny przekrojów' : 'Pokaż płaszczyzny przekrojów'], null, ['delete', 'Usuń']);
   } else if (sel.length) {
-    if (app.panel) items.push(['info', 'Informacje o elemencie'], null);
+    items.push(['info', 'Informacje o elemencie'], null);
     if (groups.length === 1) items.push(['editGroup', groups[0].kind === 'comp' ? 'Edytuj komponent' : 'Edytuj grupę']);
     items.push(['group', 'Utwórz grupę'], ['comp', 'Utwórz komponent']);
     if (groups.length) items.push(['explode', 'Rozbij']);

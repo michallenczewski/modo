@@ -1,7 +1,7 @@
 // Przyklejanie kursora (inferencje jak w SketchUpie): końce i środki krawędzi, krawędzie, ściany, ziemia,
 // osie od punktu początkowego, wyrównanie „od punktu” do niedawno wskazanych punktów, blokada osi strzałkami.
 
-import { vertices, edges, V } from './model.js';
+import { vertices, edges, V, isHidden } from './model.js';
 
 export const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 export const AXIS_COLOR = { x: '#c0533f', y: '#4f8a46', z: '#3f63a8' };
@@ -72,11 +72,11 @@ export class Snapper {
     const segs = [];
     if (model) {
       for (const s of model.shapes) {
-        if (s.hidden || s.id === opts.exclude || (ex && ex.has(s.id))) continue;
+        if (isHidden(model, s) || s.id === opts.exclude || (ex && ex.has(s.id))) continue;
         for (const p of vertices(s)) tryPt(p, 'end');
         for (const e of edges(s)) { tryPt(V.lerp(e.a, e.b, 0.5), 'mid', V.norm(V.sub(e.b, e.a))); segs.push([e.a, e.b]); }
       }
-      for (const l of model.lines) { if (l.hidden || (ex && ex.has('l' + l.id))) continue; tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid', V.norm(V.sub(l.b, l.a))); segs.push([l.a, l.b]); }
+      for (const l of model.lines) { if (isHidden(model, l) || (ex && ex.has('l' + l.id))) continue; tryPt(l.a, 'end'); tryPt(l.b, 'end'); tryPt(V.lerp(l.a, l.b, 0.5), 'mid', V.norm(V.sub(l.b, l.a))); segs.push([l.a, l.b]); }
       // prowadnice: przyklejanie do nich i do ich przecięć z innymi prowadnicami i krawędziami
       const gs = (model.guides || []).filter(g => !(ex && ex.has('g' + g.id))).map(g => [V.sub(g.o, V.mul(g.d, 400)), V.add(g.o, V.mul(g.d, 400)), g]);
       const nModel = segs.length;

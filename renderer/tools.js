@@ -2,7 +2,7 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds } from './model.js';
+import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
 import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { moveMeshPoints } from './mesh.js';
@@ -425,11 +425,11 @@ export function boxSelect(app, b, window_) {
   const ctx = id => app.editing == null || app.inEditing(id);
   const res = new Map();   // id → wynik
   for (const s of m.shapes) {
-    if (s.hidden || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
+    if (isHidden(m, s) || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
     res.set(s.id, test(shapeEdges(s).map(e => [e.a, e.b])));
   }
   for (const l of m.lines) {
-    if (l.hidden || app.editSolid != null || !ctx('l' + l.id)) continue;
+    if (isHidden(m, l) || app.editSolid != null || !ctx('l' + l.id)) continue;
     res.set('l' + l.id, test([[l.a, l.b]]));
   }
   const out = new Set();
@@ -461,11 +461,11 @@ export function pickEntity(app, x, y) {
     for (let i = 0; i < 4; i++) { const A = C[i], B = C[(i + 1) % 4], dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2)); if (Math.hypot(A.x + dx * t - x, A.y + dy * t - y) < 5) return 's' + q.id; }
   }
   let best = null, bd = 6;
-  for (const l of m.lines) { if (l.hidden) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
+  for (const l of m.lines) { if (isHidden(m, l)) continue; const d = segDist(l.a, l.b); if (d < bd) { bd = d; best = 'l' + l.id; } }
   if (best) return best;
   // wycięcia: wybierane po przerywanym obrysie
   for (const s of m.shapes) {
-    if (s.op !== 'cut' || s.hidden) continue;
+    if (s.op !== 'cut' || isHidden(m, s)) continue;
     for (const e of shapeEdges(s)) { const d = segDist(e.a, e.b); if (d < bd) { bd = d; best = s.id; } }
   }
   if (best != null) return best;

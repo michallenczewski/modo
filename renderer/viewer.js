@@ -2,7 +2,7 @@
 // i szkicowe krawędzie rysowane własnym shaderem (przedłużenia za narożniki, drżenie, grubszy kontur, zanikanie w głębi).
 
 import * as THREE from './vendor/three.module.js';
-import { triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, isSolid, V } from './model.js';
+import { isHidden, triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, isSolid, V } from './model.js';
 import { triangulatePoly, isMesh } from './mesh.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
@@ -254,7 +254,7 @@ export class Viewer {
     const edgeList = [];
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
     this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
-    const cutters = this.model.shapes.filter(s => s.op === 'cut' && !s.hidden && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
+    const cutters = this.model.shapes.filter(s => s.op === 'cut' && !isHidden(this.model, s) && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
     const polysOf = s => {
       const out = [];
       for (const f of triangulate(s)) for (const t of f.tris) {
@@ -265,7 +265,7 @@ export class Viewer {
     };
     this.rebuildGhosts(cutters.map(c => c.s));
     for (const s of this.model.shapes) {
-      if (s.hidden || s.op === 'cut') continue;
+      if (isHidden(this.model, s) || s.op === 'cut') continue;
       const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
       const pos = [], nor = [], keys = [];
@@ -302,7 +302,7 @@ export class Viewer {
       }
     }
     if (st.lines) for (const l of this.model.lines) {
-      if (l.hidden) continue;
+      if (isHidden(this.model, l)) continue;
       const sel = this.selected.has('l' + l.id);
       edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
     }

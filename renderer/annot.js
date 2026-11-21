@@ -2,7 +2,7 @@
 // Wymiar: { id, a, b, off } — punkty mierzone i wektor odsunięcia linii wymiarowej.
 // Opis:   { id, p, q, text } — punkt wskazany (strzałka odnośnika) i miejsce tekstu; p === q to opis bez odnośnika.
 
-import { V } from './model.js';
+import { V, isHidden } from './model.js';
 import { fmtLength } from './units.js';
 
 // prostokąty tekstów na ekranie (do trafiania kursorem) — poza modelem, żeby nie trafiały do pliku
@@ -17,7 +17,7 @@ export function drawAnnotations(c, project, model, { scale = 1, dark = false, pa
   c.save();
   c.lineCap = 'round'; c.lineJoin = 'round';
   for (const d of model.dims || []) {
-    if (d.hidden || !visible(d)) continue;
+    if (isHidden(model, d) || !visible(d)) continue;
     const col = selected && selected.has('d' + d.id) ? sel : ink;
     const A = project(d.a), B = project(d.b), A2 = project(V.add(d.a, d.off)), B2 = project(V.add(d.b, d.off));
     if (A.behind || B.behind || A2.behind || B2.behind) continue;
@@ -49,7 +49,7 @@ export function drawAnnotations(c, project, model, { scale = 1, dark = false, pa
     c.restore();
   }
   for (const t of model.texts || []) {
-    if (t.hidden || !visible(t)) continue;
+    if (isHidden(model, t) || !visible(t)) continue;
     const col = selected && selected.has('t' + t.id) ? sel : ink;
     const P = project(t.p), Q = project(t.q);
     if (P.behind || Q.behind) continue;
@@ -79,13 +79,13 @@ export function pickAnnotation(model, project, x, y) {
   const segD = (A, B) => { const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2)); return Math.hypot(A.x + dx * t - x, A.y + dy * t - y); };
   let best = null, bd = 6;
   for (const t of model.texts || []) {
-    if (t.hidden) continue;
+    if (isHidden(model, t)) continue;
     const b = BOX.get(t); if (b && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return 't' + t.id;
     const P = project(t.p), Q = project(t.q); if (P.behind || Q.behind) continue;
     const d = segD(P, Q); if (d < bd) { bd = d; best = 't' + t.id; }
   }
   for (const d of model.dims || []) {
-    if (d.hidden) continue;
+    if (isHidden(model, d)) continue;
     const A2 = project(V.add(d.a, d.off)), B2 = project(V.add(d.b, d.off)); if (A2.behind || B2.behind) continue;
     // linia wymiarowa razem z tekstem nad nią
     const k = segD(A2, B2), mx = (A2.x + B2.x) / 2, my = (A2.y + B2.y) / 2;

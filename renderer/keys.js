@@ -58,6 +58,7 @@ export const ACTIONS = [
   { group: 'Widok', id: 'sceneAdd', name: 'Dodaj scenę', keys: [] },
   { group: 'Widok', id: 'scenePrev', name: 'Poprzednia scena', keys: ['PageUp'] },
   { group: 'Widok', id: 'sceneNext', name: 'Następna scena', keys: ['PageDown'] },
+  { group: 'Widok', id: 'panel', name: 'Panel: element, warstwy, struktura', keys: ['I'] },
   { group: 'Widok', id: 'orbit', name: 'Orbita', keys: ['O'] },
   { group: 'Widok', id: 'pan', name: 'Przesuń widok', keys: ['P'] },
   { group: 'Widok', id: 'zoom', name: 'Powiększ (przeciąganiem)', keys: [] },

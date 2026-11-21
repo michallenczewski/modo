@@ -2,7 +2,7 @@
 // (ścieżka grup i komponentów + nazwa bryły), wycięcia są już odjęte, materiał niesie kolor i krycie.
 // Oś Y w górę, jak oczekują importery OBJ (3ds Max przy domyślnym „Flip ZY-axis” obróci model z powrotem).
 
-import { triangulate, boxOf, boxesTouch, isSolid, chainOf, V } from './model.js';
+import { isHidden, triangulate, boxOf, boxesTouch, isSolid, chainOf, V } from './model.js';
 import { subtractAll } from './csg.js';
 import { DEFAULT_COLOR } from './viewer.js';
 
@@ -18,7 +18,7 @@ export function exportObj(model, baseName = 'Modo') {
     if (!mats.has(key)) mats.set(key, { name: 'Modo_' + c.slice(1) + (a < 0.999 ? '_a' + Math.round(a * 100) : ''), c, a });
     return mats.get(key).name;
   };
-  const cutters = model.shapes.filter(s => s.op === 'cut' && !s.hidden && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
+  const cutters = model.shapes.filter(s => s.op === 'cut' && !isHidden(model, s) && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
   const polysOf = s => {
     const out = [];
     for (const f of triangulate(s)) for (const t of f.tris) { const g = V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0])); out.push({ vs: V.dot(g, f.normal) < 0 ? [t[0], t[2], t[1]] : t, shared: null }); }
@@ -27,7 +27,7 @@ export function exportObj(model, baseName = 'Modo') {
   let vi = 1, ni = 1, count = 0;
   const names = new Map();
   for (const s of model.shapes) {
-    if (s.hidden || s.op === 'cut') continue;
+    if (isHidden(model, s) || s.op === 'cut') continue;
     // ściany: zwykle wielokąty bryły; gdy przecina ją wycięcie — wynik CSG
     let faces;
     const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
