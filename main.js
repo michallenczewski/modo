@@ -226,6 +226,8 @@ async function updInstall() {
 }
 ipcMain.handle('update-get', () => ({ ...upd, current: app.getVersion() }));
 ipcMain.handle('update-check', () => updCheck());
+// sprawdzanie przy starcie (z opóźnieniem, żeby nie spowalniać otwierania) i potem co sześć godzin
+app.whenReady().then(() => { setTimeout(updCheck, 4000); setInterval(updCheck, 6 * 3600 * 1000); });
 ipcMain.handle('update-install', () => updInstall());
 
 /* ---------- start ---------- */
