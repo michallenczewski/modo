@@ -31,6 +31,19 @@ export function triangulatePoly(p) {
     return V.dot(g, n) < 0 ? [tri[0], tri[2], tri[1]] : tri;
   });
 }
+// ściana z otworami → trójkąty (zwrot jak w obrysie zewnętrznym)
+export function triangulateHoles(outer, holes) {
+  const n = newell(outer), { u, v } = basis(n);
+  const to2 = q => new Vector2(V.dot(q, u), V.dot(q, v));
+  const all = [...outer, ...holes.flat()];
+  let c = outer.map(to2), hs = holes.map(h => h.map(to2));
+  const idx = ShapeUtils.triangulateShape(c, hs);
+  return idx.map(t => {
+    const tri = t.map(i => all[i]);
+    const g = V.cross(V.sub(tri[1], tri[0]), V.sub(tri[2], tri[0]));
+    return V.dot(g, n) < 0 ? [tri[0], tri[2], tri[1]] : tri;
+  }).filter(t => V.len(V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0]))) > 1e-10);
+}
 // punkt w wielokącie (punkt leży w jego płaszczyźnie)
 export function inPoly(p, poly, n = newell(poly)) {
   const { u, v } = basis(n), x = V.dot(p, u), y = V.dot(p, v);
@@ -73,6 +86,12 @@ export function meshEdges(s) {
     const mid = V.lerp(a, b, 0.5), f = s.polys.find(p => Math.abs(V.dot(newell(p), V.sub(mid, p[0]))) < 1e-5);
     const n = f ? newell(f) : [0, 0, 1];
     edges.push({ a, b, n1: n, n2: n });
+  }
+  if (s.softs && s.softs.length) {
+    const K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);
+    const key = (p, q) => { const x = K(p), y = K(q); return x < y ? x + '|' + y : y + '|' + x; };
+    const set = new Set(s.softs.map(([p, q]) => key(p, q)));
+    for (const e of edges) if (e.n2 && set.has(key(e.a, e.b))) e.soft = true;
   }
   edgeCache.set(s.polys, { marks: s.marks, edges });
   return edges;
@@ -292,6 +311,7 @@ export function transformMesh(s, f) {
   const v0 = meshVolume(s);
   s.polys = s.polys.map(p => p.map(f));
   s.marks = (s.marks || []).map(([a, b]) => [f(a), f(b)]);
+  if (s.softs) s.softs = s.softs.map(([a, b]) => [f(a), f(b)]);
   if (Math.sign(meshVolume(s)) !== Math.sign(v0)) s.polys = s.polys.map(p => p.slice().reverse());   // odbicie lustrzane
   return s;
 }

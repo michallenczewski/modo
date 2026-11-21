@@ -14,6 +14,7 @@
     async saveFile(p, text, suggested) { download(new Blob([text], { type: 'application/json' }), (suggested || 'Szkic') + '.modo'); return { path: null, name: suggested || 'Szkic' }; },
     async savePng(buf, suggested) { download(new Blob([buf], { type: 'image/png' }), (suggested || 'Modo') + '.png'); return (suggested || 'Modo') + '.png'; },
     async saveObj(obj, mtl, suggested) { const n = suggested || 'Modo'; download(new Blob([obj.replace(/^mtllib .*$/m, 'mtllib ' + n + '.mtl')], { type: 'text/plain' }), n + '.obj'); setTimeout(() => download(new Blob([mtl], { type: 'text/plain' }), n + '.mtl'), 300); return n + '.obj'; },
+    async pickBinary(ext) { const f = await pick([].concat(ext).map(x => '.' + x).join(',')); return f ? { path: null, name: f.name, data: new Uint8Array(await f.arrayBuffer()) } : null; },
     async pickUnderlay() {
       const f = await pick('.dxf,.dwg'); if (!f) return null;
       if (/\.dwg$/i.test(f.name)) return { name: f.name, error: 'W przeglądarce DWG nie da się zamienić — użyj programu albo pliku DXF', code: 'WEB' };

@@ -1,0 +1,123 @@
+/**
+ * Storage for edges' D307 display-flag byte, keyed by edge id.
+ *
+ * The payload is a SINGLE BYTE per edge (base 0x06, plus 0x01 hidden,
+ * 0x08 soft, 0x10 smooth), which a `Map<number, number>` stores at roughly
+ * 30 bytes per entry - about 23x the data itself, once V8's boxed-number
+ * and hash-bucket overhead is counted. On a large model that is tens of
+ * megabytes spent on a value that fits in a `Uint8Array` slot.
+ *
+ * Backed by a `Uint8Array` indexed by `id - baseId`, grown geometrically.
+ * Edge ids are not dense in real files (~39% across this repository's
+ * fixtures), so the array is sized to the observed id SPAN rather than the
+ * edge count - still far smaller than the Map it replaces, because one
+ * slot costs one byte instead of a whole hash entry.
+ *
+ * Semantics match the `Map` exactly, including the distinction the legacy
+ * (pre-2021 MFC) reader relies on: it only records an edge when its flags
+ * are non-zero, so an id that was never written must read back as 0 and
+ * report `has() === false`. A separate presence bitmap keeps that
+ * observable difference intact rather than conflating "absent" with
+ * "stored zero".
+ */
+export class EdgeFlagStore {
+    constructor() {
+        /** Flag byte per slot; index is `id - baseId`. */
+        this.flags = new Uint8Array(0);
+        /** One bit per slot recording whether that id was ever written. */
+        this.present = new Uint8Array(0);
+        /** Id that maps to slot 0. Set on first write. */
+        this.baseId = 0;
+        this.initialized = false;
+        this.count = 0;
+        /** Highest slot ever handed out; slots above it hold nothing. */
+        this.highSlot = 0;
+    }
+    /** Number of ids actually stored. */
+    get size() {
+        return this.count;
+    }
+    slotFor(id) {
+        return id - this.baseId;
+    }
+    /** Grow (and, for an id below `baseId`, shift) so `id` has a slot. */
+    ensureSlot(id) {
+        if (!this.initialized) {
+            this.baseId = id;
+            this.flags = new Uint8Array(64);
+            this.present = new Uint8Array(8);
+            this.initialized = true;
+            return 0;
+        }
+        if (id < this.baseId) {
+            // An id below the current base: re-base, shifting existing data up.
+            //
+            // Size from the span actually in USE, not from the current capacity,
+            // and leave headroom below the new id proportional to that span. Ids
+            // often arrive in descending order; sizing from capacity and always
+            // doubling made every such write double the array, so ~24 descending
+            // ids reached 512 MB and V8 aborted the process
+            // (`change_in_bytes < kMaxReasonableBytes`). With headroom, a
+            // descending run re-bases O(log n) times and memory stays
+            // proportional to the id span.
+            const used = this.highSlot + 1;
+            const gap = this.baseId - id;
+            const headroom = Math.max(64, used);
+            const shift = gap + headroom;
+            const nextLength = shift + used;
+            const nextFlags = new Uint8Array(nextLength);
+            nextFlags.set(this.flags.subarray(0, used), shift);
+            const nextPresent = new Uint8Array(Math.ceil(nextLength / 8));
+            // Re-stamp presence bit by bit: the bitmap is not byte-aligned to the
+            // shift, so it cannot simply be block-copied.
+            for (let slot = 0; slot < used; slot++) {
+                if ((this.present[slot >> 3] & (1 << (slot & 7))) !== 0) {
+                    const moved = slot + shift;
+                    nextPresent[moved >> 3] |= 1 << (moved & 7);
+                }
+            }
+            this.flags = nextFlags;
+            this.present = nextPresent;
+            this.baseId -= shift;
+            this.highSlot += shift;
+            return headroom;
+        }
+        const slot = this.slotFor(id);
+        if (slot >= this.flags.length) {
+            const nextLength = Math.max(slot + 1, this.flags.length * 2);
+            const nextFlags = new Uint8Array(nextLength);
+            nextFlags.set(this.flags);
+            this.flags = nextFlags;
+            const nextPresent = new Uint8Array(Math.ceil(nextLength / 8));
+            nextPresent.set(this.present);
+            this.present = nextPresent;
+        }
+        if (slot > this.highSlot)
+            this.highSlot = slot;
+        return slot;
+    }
+    set(id, flags) {
+        const slot = this.ensureSlot(id);
+        if ((this.present[slot >> 3] & (1 << (slot & 7))) === 0) {
+            this.present[slot >> 3] |= 1 << (slot & 7);
+            this.count++;
+        }
+        this.flags[slot] = flags & 0xff;
+    }
+    /** The stored byte, or `undefined` when the id was never written -
+     * matching `Map.prototype.get`, so callers' `?? 0` fallbacks behave
+     * exactly as before. */
+    get(id) {
+        if (!this.initialized)
+            return undefined;
+        const slot = this.slotFor(id);
+        if (slot < 0 || slot >= this.flags.length)
+            return undefined;
+        if ((this.present[slot >> 3] & (1 << (slot & 7))) === 0)
+            return undefined;
+        return this.flags[slot];
+    }
+    has(id) {
+        return this.get(id) !== undefined;
+    }
+}

@@ -172,6 +172,14 @@ function dwgToDxf(file) {
     });
   });
 }
+// wybór pliku do importu (np. .skp): zwraca jego zawartość
+ipcMain.handle('pick-binary', async (e, ext, label) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, { filters: [{ name: label || 'Plik', extensions: [].concat(ext) }], properties: ['openFile'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  try { return { path: r.filePaths[0], name: path.basename(r.filePaths[0]), data: new Uint8Array(await fsp.readFile(r.filePaths[0])) }; }
+  catch (err) { return { name: path.basename(r.filePaths[0]), error: err.message }; }
+});
 ipcMain.handle('underlay-pick', async (e, p) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!p) {

@@ -111,12 +111,44 @@ const inConvex = (poly, p, n) => {
   }
   return true;
 };
+// siatka przestrzenna: przy dużych bryłach (np. import ze SketchUpa) sąsiadów szukamy tylko w pobliskich komórkach
+function spatialIndex(polys, VS) {
+  if (polys.length < 150) return { near: () => polys, vertsOn: () => VS };
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const v of VS) for (let k = 0; k < 3; k++) { if (v[k] < lo[k]) lo[k] = v[k]; if (v[k] > hi[k]) hi[k] = v[k]; }
+  const res = Math.max(4, Math.min(48, Math.round(Math.cbrt(polys.length))));
+  const cs = [0, 1, 2].map(k => Math.max((hi[k] - lo[k]) / res, 1e-3));
+  const ci = (x, k) => Math.max(0, Math.min(res - 1, Math.floor((x - lo[k]) / cs[k])));
+  const key = (i, j, k) => (i * 64 + j) * 64 + k;
+  const pc = new Map(), vc = new Map(), big = [];
+  const push = (m, k, x) => { let l = m.get(k); if (!l) m.set(k, l = []); l.push(x); };
+  for (const P of polys) {
+    const a = [Infinity, Infinity, Infinity], b = [-Infinity, -Infinity, -Infinity];
+    for (const v of P.vs) for (let k = 0; k < 3; k++) { if (v[k] < a[k]) a[k] = v[k]; if (v[k] > b[k]) b[k] = v[k]; }
+    const i0 = ci(a[0] - 1e-3, 0), i1 = ci(b[0] + 1e-3, 0), j0 = ci(a[1] - 1e-3, 1), j1 = ci(b[1] + 1e-3, 1), k0 = ci(a[2] - 1e-3, 2), k1 = ci(b[2] + 1e-3, 2);
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) * (k1 - k0 + 1) > 64) { big.push(P); continue; }
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (let k = k0; k <= k1; k++) push(pc, key(i, j, k), P);
+  }
+  for (const v of VS) push(vc, key(ci(v[0], 0), ci(v[1], 1), ci(v[2], 2)), v);
+  const none = [];
+  return {
+    near: p => { const l = pc.get(key(ci(p[0], 0), ci(p[1], 1), ci(p[2], 2))) || none; return big.length ? (l.length ? l.concat(big) : big) : l; },
+    vertsOn: (a, b) => {
+      const i0 = ci(Math.min(a[0], b[0]) - 1e-4, 0), i1 = ci(Math.max(a[0], b[0]) + 1e-4, 0), j0 = ci(Math.min(a[1], b[1]) - 1e-4, 1), j1 = ci(Math.max(a[1], b[1]) + 1e-4, 1), k0 = ci(Math.min(a[2], b[2]) - 1e-4, 2), k1 = ci(Math.max(a[2], b[2]) + 1e-4, 2);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) * (k1 - k0 + 1) > 512) return VS;
+      const out = [];
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (let k = k0; k <= k1; k++) { const l = vc.get(key(i, j, k)); if (l) for (const v of l) out.push(v); }
+      return out;
+    }
+  };
+}
 export function resultEdges(polys) {
   const coplanar = (p, q) => V.dot(p.n, q.n) > 1 - 1e-6 && Math.abs(p.w - q.w) < 1e-5;
   const R = v => v.map(x => Math.round(x * 1e4)).join(',');
   // wszystkie wierzchołki — krawędzie dzielimy w miejscach, gdzie leży na nich cudzy wierzchołek (złącza T)
   const verts = new Map(); for (const P of polys) for (const v of P.vs) verts.set(R(v), v);
   const VS = [...verts.values()];
+  const ix = spatialIndex(polys, VS);
   const pieces = [], seen = new Set();
   for (const P of polys) {
     for (let i = 0; i < P.vs.length; i++) {
@@ -124,7 +156,7 @@ export function resultEdges(polys) {
       const L = V.dist(a, b); if (L < 1e-6) continue;
       const e = V.mul(V.sub(b, a), 1 / L);
       const ts = [0, 1];
-      for (const v of VS) {
+      for (const v of ix.vertsOn(a, b)) {
         const t = V.dot(V.sub(v, a), e) / L; if (t <= 1e-6 || t >= 1 - 1e-6) continue;
         if (V.dist(V.add(a, V.mul(e, t * L)), v) < 1e-5) ts.push(t);
       }
@@ -135,11 +167,11 @@ export function resultEdges(polys) {
         const p = V.add(a, V.mul(e, ts[k] * L)), q = V.add(a, V.mul(e, ts[k + 1] * L));
         const key = R(p) < R(q) ? R(p) + '|' + R(q) : R(q) + '|' + R(p);
         const mid = V.lerp(p, q, 0.5), probe = V.add(mid, V.mul(out2, 2e-4));
-        if (polys.some(Q => Q !== P && coplanar(P, Q) && inConvex(Q, probe, Q.n))) continue;   // szew w jednej płaszczyźnie
+        if (ix.near(probe).some(Q => Q !== P && coplanar(P, Q) && inConvex(Q, probe, Q.n))) continue;   // szew w jednej płaszczyźnie
         if (seen.has(key)) continue;
         seen.add(key);
         let n2 = null, soft = false;
-        for (const Q of polys) {
+        for (const Q of ix.near(mid)) {
           if (Q === P || coplanar(P, Q) || Math.abs(V.dot(Q.n, mid) - Q.w) > 1e-5) continue;
           const inward = V.cross(Q.n, e);
           if (inConvex(Q, V.add(mid, V.mul(inward, 2e-4)), Q.n) || inConvex(Q, V.sub(mid, V.mul(inward, 2e-4)), Q.n)) {

@@ -383,6 +383,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'importSkp': importSkp(); break;
     case 'library': openPop('#libPop', $('#libBtn')); break;
     case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
     case 'sectionToggle': sectionToggle(); break;
@@ -1133,7 +1134,7 @@ function openContext(x, y, cx, cy) {
 $('#fileBtn').addEventListener('click', () => {
   const m = $('#menu'); const was = !m.hidden; closePops(); if (was) return;
   const k = id => prettyCombo(keysFor(id, app.keys.over)[0] || '', isMac);
-  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], ['obj', 'Eksport OBJ (3ds Max)…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
+  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['importSkp', 'Importuj SketchUp (.skp)…'], ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], ['obj', 'Eksport OBJ (3ds Max)…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
   m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('');
   m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); b.dataset.a === 'newWindow' ? api.newWindow() : run(b.dataset.a); }));
   m.hidden = false;
@@ -1195,6 +1196,35 @@ async function saveObj() {
     if (p) toast('Zapisano OBJ: ' + r.count + ' obiektów (metry, oś Y w górę)', api.web ? null : ['Pokaż', () => api.showInFolder(p)]);
   } catch (err) { toast('Nie udało się zapisać OBJ: ' + err.message); }
 }
+/* ---------- import ze SketchUpa ---------- */
+async function importSkp(file) {
+  const r = file || await api.pickBinary('skp', 'Model SketchUp');
+  if (!r) return;
+  if (r.error) return toast('Nie udało się otworzyć pliku: ' + r.error);
+  toast('Czytam ' + r.name + '…');
+  await new Promise(res => setTimeout(res, 30));   // żeby komunikat zdążył się pokazać
+  try {
+    const [{ parseSkp }, { skpToModo }] = await Promise.all([import('./vendor/openskp/index.js'), import('./skp.js')]);
+    const u8 = r.data, skp = parseSkp(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
+    if (app.editSolid != null) app.exitSolid();
+    while (app.editing) app.exitGroup();
+    const m = app.model, before = cloneModel(m);
+    const out = skpToModo(skp, () => m.next++, r.name.replace(/\.skp$/i, ''));
+    if (!out.shapes.length && !out.lines.length) return toast('W tym pliku nie znalazłem żadnej geometrii.');
+    app.undo.push(before); app.redo = []; app.opSeq++;
+    m.shapes.push(...out.shapes); m.lines.push(...out.lines); m.groups.push(...out.groups);
+    for (const t of out.tags) { const old = m.tags.find(q => q.name === t.name); if (old) { for (const g of out.groups) if (g.tag === t.id) g.tag = old.id; } else m.tags.push(t); }
+    app.scenes.push(...out.scenes);
+    app.changed();
+    app.selection.clear(); membersOf(m, out.groups[0].id).forEach(i => app.selection.add(i));
+    setTool('select'); app.selectionChanged();
+    const empty = before.shapes.length + before.lines.length === 0;
+    viewer.zoomExtents(empty ? null : [...app.selection]);
+    const n = out.stats.faces;
+    toast(`Zaimportowano ${r.name}: ${out.shapes.length} brył, ${n} ścian, ${out.stats.instances} grup i komponentów` + (n > 60000 ? '. To duży model — praca może być wolniejsza.' : '.'));
+  } catch (err) { console.error(err); toast('Nie udało się odczytać pliku SketchUpa: ' + (err && err.message || err)); }
+}
+app.importSkp = importSkp;
 api.onSaveThenClose(async () => { if (await saveSketch(false)) api.closeNow(); });
 
 /* ---------- aktualizacje ---------- */
