@@ -110,6 +110,16 @@ ipcMain.handle('png-save', async (e, buf, suggested) => {
   await fsp.writeFile(r.filePath, Buffer.from(buf));
   return r.filePath;
 });
+// OBJ z materiałami: plik .mtl o tej samej nazwie obok
+ipcMain.handle('obj-save', async (e, obj, mtl, suggested) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showSaveDialog(win, { filters: [{ name: 'Model OBJ', extensions: ['obj'] }], defaultPath: (suggested || 'Modo') + '.obj' });
+  if (r.canceled || !r.filePath) return null;
+  const base = r.filePath.replace(/\.obj$/i, '');
+  await fsp.writeFile(base + '.mtl', mtl, 'utf8');
+  await fsp.writeFile(base + '.obj', obj.replace(/^mtllib .*$/m, 'mtllib ' + path.basename(base) + '.mtl'), 'utf8');
+  return base + '.obj';
+});
 ipcMain.handle('show-in-folder', (e, p) => shell.showItemInFolder(p));
 ipcMain.handle('open-external', (e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
 

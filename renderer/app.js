@@ -7,6 +7,9 @@ import { SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleToo
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
+import { exportObj } from './export.js';
+import { booleanMesh, toMesh as meshOf } from './mesh.js';
+import { faces as facesOfShape, isSolid } from './model.js';
 import { UNITS, getUnit, setUnit } from './units.js';
 
 const api = window.api;
@@ -333,6 +336,11 @@ function run(act) {
     case 'unhideAll': unhideAll(); break;
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); break;
     case 'cut': toggleCut(); break;
+    case 'obj': saveObj(); break;
+    case 'solidUnion': solidOp('union'); break;
+    case 'solidIntersect': solidOp('intersect'); break;
+    case 'solidSubtract': solidOp('subtract'); break;
+    case 'solidTrim': solidOp('trim'); break;
     case 'group': makeGroup('group'); break;
     case 'comp': makeGroup('comp'); break;
     case 'explode': explode(); break;
@@ -407,6 +415,25 @@ function renderViewChip() {
   if (sg && sg.length === 1) sc.textContent = sg[0].kind === 'comp' ? 'Komponent · ' + instancesOf(app.model, sg[0].def).length + ' wyst.' : 'Grupa';
 }
 app.renderViewChip = renderViewChip;
+
+/* ---------- narzędzia brył ---------- */
+// kolejność zaznaczania ma znaczenie: pierwsza zaznaczona bryła jest tą, z którą działamy
+function solidOp(op) {
+  const sel = [...app.selection].filter(i => typeof i === 'number').map(id => app.model.shapes.find(s => s.id === id)).filter(s => s && isSolid(s) && s.op !== 'cut');
+  if (sel.length < 2) return toast('Zaznacz co najmniej dwie bryły (kolejność ma znaczenie: pierwsza jest główną).');
+  app.checkpoint();
+  const [a, ...rest] = sel;
+  meshOf(a, facesOfShape);
+  for (const b of rest) {
+    const B = JSON.parse(JSON.stringify(b)); meshOf(B, facesOfShape);
+    booleanMesh(a, B, op === 'trim' ? 'subtract' : op);
+  }
+  if (op !== 'trim') { const ids = new Set(rest.map(b => b.id)); app.model.shapes = app.model.shapes.filter(s => !ids.has(s.id)); }
+  if (!a.polys.length) app.model.shapes = app.model.shapes.filter(s => s !== a);
+  app.selection.clear(); if (a.polys.length) app.selection.add(a.id);
+  app.changed(); app.selectionChanged();
+  toast({ union: 'Połączono bryły', intersect: 'Została część wspólna', subtract: 'Odjęto od pierwszej bryły', trim: 'Przycięto pierwszą bryłę (pozostałe zostały)' }[op]);
+}
 
 function deleteSelection() {
   if (!app.selection.size) return;
@@ -675,7 +702,7 @@ function renderKeys() {
 $('#fileBtn').addEventListener('click', () => {
   const m = $('#menu'); const was = !m.hidden; closePops(); if (was) return;
   const k = id => prettyCombo(keysFor(id, app.keys.over)[0] || '', isMac);
-  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
+  const items = [['new', 'Nowy szkic'], ['open', 'Otwórz…'], null, ['save', 'Zapisz'], ['saveAs', 'Zapisz jako…'], null, ['underlay', 'Podkład DXF / DWG…'], ['png', 'Eksport PNG…'], ['obj', 'Eksport OBJ (3ds Max)…'], null, ['clearGuides', 'Usuń wszystkie prowadnice'], ['theme', 'Wygląd: ' + THEME_NAME[theme]], ['newWindow', 'Nowe okno']];
   m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('');
   m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); b.dataset.a === 'newWindow' ? api.newWindow() : run(b.dataset.a); }));
   m.hidden = false;
@@ -726,6 +753,15 @@ async function saveSketch(as) {
     setFile(r.path, r.name); app.markDirty(false); toast('Zapisano');
     return true;
   } catch (err) { toast('Nie udało się zapisać: ' + err.message); return false; }
+}
+async function saveObj() {
+  const name = app.file.name === 'Bez nazwy' ? 'Modo' : app.file.name;
+  const r = exportObj(app.model, name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^A-Za-z0-9_ -]+/g, '_'));
+  if (!r.count) return toast('Nie ma brył do eksportu.');
+  try {
+    const p = await api.saveObj(r.obj, r.mtl, name);
+    if (p) toast('Zapisano OBJ: ' + r.count + ' obiektów (metry, oś Y w górę)', api.web ? null : ['Pokaż', () => api.showInFolder(p)]);
+  } catch (err) { toast('Nie udało się zapisać OBJ: ' + err.message); }
 }
 api.onSaveThenClose(async () => { if (await saveSketch(false)) api.closeNow(); });
 
@@ -780,3 +816,4 @@ setFile(null, 'Bez nazwy'); app.markDirty(false);
 const startPath = new URLSearchParams(location.search).get('p');
 if (startPath) openSketch(startPath);
 window.modo = app;   // do testów w konsoli
+app.run = run;

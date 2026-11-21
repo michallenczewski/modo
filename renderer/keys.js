@@ -21,6 +21,10 @@ export const ACTIONS = [
   { group: 'Edycja', id: 'scale', name: 'Skaluj', keys: ['R'] },
   { group: 'Edycja', id: 'push', name: 'Wypchnij / wciśnij', keys: ['X'] },
   { group: 'Edycja', id: 'cut', name: 'Bryła wycinająca / zwykła', keys: ['Shift+X'] },
+  { group: 'Bryły', id: 'solidUnion', name: 'Połącz zaznaczone bryły', keys: [] },
+  { group: 'Bryły', id: 'solidIntersect', name: 'Część wspólna', keys: [] },
+  { group: 'Bryły', id: 'solidSubtract', name: 'Odejmij od pierwszej (reszta znika)', keys: [] },
+  { group: 'Bryły', id: 'solidTrim', name: 'Przytnij pierwszą (reszta zostaje)', keys: [] },
   { group: 'Edycja', id: 'eraser', name: 'Gumka', keys: ['S'] },
   { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor bryły)', keys: ['M'] },
   { group: 'Edycja', id: 'delete', name: 'Usuń zaznaczone', keys: ['Delete', 'Backspace'] },
@@ -46,6 +50,7 @@ export const ACTIONS = [
   { group: 'Plik', id: 'save', name: 'Zapisz', keys: ['Mod+S'] },
   { group: 'Plik', id: 'saveAs', name: 'Zapisz jako', keys: ['Mod+Shift+S'] },
   { group: 'Plik', id: 'png', name: 'Eksport PNG', keys: ['Mod+Shift+E'] },
+  { group: 'Plik', id: 'obj', name: 'Eksport OBJ (3ds Max)', keys: ['Mod+Shift+O'] },
   { group: 'Plik', id: 'underlay', name: 'Podkład DXF / DWG', keys: ['Mod+Shift+I'] },
   { group: 'Plik', id: 'keys', name: 'Lista skrótów', keys: ['Shift+Slash'] }
 ];

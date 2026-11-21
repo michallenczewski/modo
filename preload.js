@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   openFile: p => ipcRenderer.invoke('file-open', p || null),
   saveFile: (p, text, suggested) => ipcRenderer.invoke('file-save', p || null, text, suggested),
   savePng: (buf, suggested) => ipcRenderer.invoke('png-save', buf, suggested),
+  saveObj: (obj, mtl, suggested) => ipcRenderer.invoke('obj-save', obj, mtl, suggested),
   pickUnderlay: p => ipcRenderer.invoke('underlay-pick', p || null),
   odaStatus: () => ipcRenderer.invoke('oda-status'),
   odaPick: () => ipcRenderer.invoke('oda-pick'),

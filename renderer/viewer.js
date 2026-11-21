@@ -285,7 +285,7 @@ export class Viewer {
           // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
           if (!isMesh(s) && s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
             const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
-            if (this.model.shapes.some(t => t !== s && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
+            if (this.model.shapes.some(t => t !== s && !isMesh(t) && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
           }
           edgeList.push({ ...e, col });
         }
