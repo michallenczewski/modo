@@ -484,7 +484,7 @@ export function pickEntity(app, x, y) {
   return best;
 }
 export function hoverShape(app, x, y, id = pickEntity(app, x, y)) {
-  const s = typeof id === 'number' && app.model.shapes.find(q => q.id === id);
+  const s = typeof id === 'number' && app.model.shapes.find(q => q.id === id && !q.bill);
   const hit = s && app.viewer.pick(x, y);
   app.viewer.setHoverFace(hit ? faceByKey(s, hit.key)?.verts : null);
 }
@@ -842,6 +842,24 @@ export class SectionTool extends Tool {
     if (this.o) drawSeg(c, v, this.o, o, INK, { width: 1, dash: [3, 3] });
     if (!this.o) drawMarker(c, v, s);
     const P = v.toScreen(o); drawChip(c, P.x, P.y, this.o ? 'Głębokość ' + fmtLength(this.depth) : 'Przekrój');
+  }
+}
+
+/* ---------- wstawianie modelu z biblioteki ---------- */
+export class PlaceTool extends Tool {
+  reset() { this.cur = null; }
+  setItem(item) { this.item = item; this.edges = item.shapes.flatMap(sh => shapeEdges(sh).map(e => [e.a, e.b])).concat((item.lines || []).map(l => [l.a, l.b])); }
+  hint() { return this.item ? `Kliknij, gdzie postawić: <b>${this.item.name}</b>. Model trafia do szkicu jako komponent — kopie (W z ${this.app.isMac ? '⌥' : 'Ctrl'}) zmieniają się razem. <kbd>Esc</kbd> przerywa.` : ''; }
+  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
+  down() { if (!this.cur || !this.item) return; this.app.placeItem(this.item, this.cur.p.slice()); }
+  draw(c, v) {
+    const s = this.cur; if (!s || !this.edges) return;
+    // figury 2D w podglądzie też zwrócone do kamery
+    const f = v.getCamera().f, a = Math.atan2(-f[1], -f[0]) + Math.PI / 2, ca = Math.cos(a), sa = Math.sin(a);
+    const bill = this.item.shapes.length === 1 && this.item.shapes[0].bill;
+    const tr = p => bill ? V.add(s.p, [p[0] * ca - p[1] * sa, p[0] * sa + p[1] * ca, p[2]]) : V.add(s.p, p);
+    for (const [a1, b1] of this.edges) drawSeg(c, v, tr(a1), tr(b1), INK, { width: 1 });
+    drawMarker(c, v, s);
   }
 }
 

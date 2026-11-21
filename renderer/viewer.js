@@ -249,6 +249,8 @@ export class Viewer {
   rebuild({ highlight } = {}) {
     for (const c of [...this.modelGroup.children]) { c.geometry.dispose(); if (c.material.dispose && c.material !== this.edgeMat) c.material.dispose(); this.modelGroup.remove(c); }
     this.meshes = [];
+    for (const b of this.bills || []) { b.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== this.edgeMat) o.material.dispose(); }); this.scene.remove(b.group); }
+    this.bills = [];
     const st = this.st();
     const paper = new THREE.Color(st.paper);
     const edgeList = [];
@@ -266,6 +268,7 @@ export class Viewer {
     this.rebuildGhosts(cutters.map(c => c.s));
     for (const s of this.model.shapes) {
       if (isHidden(this.model, s) || s.op === 'cut') continue;
+      if (s.bill) { this.addBillboard(s, st, paper); continue; }
       const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
       const pos = [], nor = [], keys = [];
@@ -297,7 +300,7 @@ export class Viewer {
             const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
             if (this.model.shapes.some(t => t !== s && !isMesh(t) && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
           }
-          edgeList.push({ ...e, col });
+          edgeList.push(s.soft && isMesh(s) ? { ...e, col, soft: true } : { ...e, col });
         }
       }
     }
@@ -386,6 +389,32 @@ export class Viewer {
     }
   }
 
+  // figura 2D (człowiek, drzewo): płaski obrys obracany wokół pionu tak, żeby zawsze patrzył w kamerę
+  addBillboard(s, st, paper) {
+    const o = s.o, pos = [], nor = [], keys = [];
+    for (const f of triangulate(s)) for (const tri of f.tris) { for (const p of tri) { pos.push(p[0] - o[0], p[1] - o[1], p[2] - o[2]); nor.push(...f.normal); } keys.push(f.key); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, true));
+    mesh.castShadow = true; mesh.receiveShadow = false; mesh.userData = { shapeId: s.id, keys, bill: true };
+    const group = new THREE.Group(); group.position.set(o[0], o[1], o[2]); group.add(mesh);
+    if (st.lines) {
+      const col = this.selected.has(s.id) ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
+      const list = shapeEdges(s).map(e => ({ a: V.sub(e.a, o), b: V.sub(e.b, o), n1: [0, 0, 0], n2: null, col, w: 2.1 }));
+      if (list.length) { const em = new THREE.Mesh(buildEdgeGeometry(list), this.edgeMat); em.frustumCulled = false; em.renderOrder = 2; group.add(em); }
+    }
+    this.scene.add(group); this.meshes.push(mesh);
+    this.bills.push({ group, o, n: s.n });
+  }
+  faceBillboards() {
+    const c = this.cam.position, f = this.cam.getWorldDirection(new THREE.Vector3());
+    for (const b of this.bills || []) {
+      const dx = this.ortho ? -f.x : c.x - b.o[0], dy = this.ortho ? -f.y : c.y - b.o[1];
+      if (Math.hypot(dx, dy) < 1e-6) continue;
+      b.group.rotation.z = Math.atan2(dy, dx) - Math.atan2(b.n[1], b.n[0]);
+      b.group.updateMatrixWorld(true);
+    }
+  }
   colorFor(s, st, paper) {
     const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
     if (s.color) base.lerp(paper, st.tint);
@@ -516,6 +545,7 @@ export class Viewer {
     const st = this.st();
     this.scene.background = new THREE.Color(st.paper);
     this.axes.visible = this.showAxes;
+    this.faceBillboards();
     this.applyStyleUniforms();
     this.renderer.render(this.scene, this.vc());
     this.drawOverlay();

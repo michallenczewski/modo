@@ -17,6 +17,7 @@
   </div>
   <div class="sep"></div>
   <button id="viewBtn" class="ib" aria-haspopup="dialog" aria-label="Widok, kamera i sceny" title="Widok, kamera i sceny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2"/></svg></button>
+  <button id="libBtn" class="ib" aria-haspopup="dialog" aria-label="Biblioteka modeli" title="Biblioteka modeli"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="9" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="2.2" y="9" width="4.8" height="4.8" rx="1"/><circle cx="11.4" cy="11.4" r="2.5"/></svg></button>
   <button id="underBtn" class="ib" aria-label="Podkład DXF / DWG" title="Podkład DXF / DWG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.3 8 11.3l6-3"/><path d="M2 11 8 14l6-3"/></svg></button>
   <button id="themeBtn" class="ib" aria-label="Wygląd: jasny albo ciemny" title="Wygląd: automatyczny / jasny / ciemny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/></svg></button>
   <button id="keysBtn" class="ib" aria-label="Skróty klawiszowe" title="Skróty klawiszowe (?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.5"/><path d="M4.5 6.7h.01M7 6.7h.01M9.5 6.7h.01M12 6.7h.01M5 9.4h6"/></svg></button>
@@ -82,6 +83,15 @@
   <div class="row"><span class="ttl grow">Sceny</span><button class="tb soft" id="sceneAdd">Dodaj scenę</button></div>
   <div id="sceneList" class="scenes"></div>
   <div class="lbl note" id="sceneNote">Scena zapamiętuje widok, styl i słońce. <kbd>PgUp</kbd> <kbd>PgDn</kbd> przełączają sceny.</div>
+</section>
+
+<section id="libPop" class="pop wide" role="dialog" aria-label="Biblioteka modeli" hidden>
+  <div class="row"><span class="ttl grow">Biblioteka</span><span class="lbl">kliknij model, potem miejsce w szkicu</span></div>
+  <div class="libgrid" id="libGrid"></div>
+  <div class="hr"></div>
+  <div class="row"><span class="ttl grow">Moje modele</span><button class="tb soft" id="libSave">Zapisz zaznaczenie</button></div>
+  <div class="libgrid" id="libMine"></div>
+  <div class="lbl note" id="libNote">Zaznacz bryły (albo grupę) i zapisz je tutaj — będą dostępne w każdym szkicu na tym komputerze.</div>
 </section>
 
 <section id="pngPop" class="pop" role="dialog" aria-label="Eksport PNG" hidden>

@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { pickEntity, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -11,6 +11,8 @@ import { exportObj } from './export.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
 import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds } from './model.js';
 import { meshVolume, meshArea } from './mesh.js';
+import { LIBRARY, loadUserLib, saveUserLib } from './lib.js';
+import { translateShape, groupsWhollyIn, edges as edgesOf } from './model.js';
 import { fmtNum, fmtLength } from './units.js';
 import { drawAnnotations } from './annot.js';
 import { UNITS, getUnit, setUnit } from './units.js';
@@ -158,7 +160,7 @@ function makeUnique() {
 /* ---------- narzędzia ---------- */
 const tools = {
   select: new SelectTool(app), line: new LineTool(app), rect: new RectTool(app), circle: new CircleTool(app), arc: new ArcTool(app),
-  section: new SectionTool(app), dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
+  place: new PlaceTool(app), section: new SectionTool(app), dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom')
@@ -214,7 +216,7 @@ function setTool(id) {
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  $('#view').className = ['section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => tool.draw(c, v);
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
@@ -380,6 +382,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? 'Rzut równoległy' : 'Perspektywa'); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'library': openPop('#libPop', $('#libBtn')); break;
     case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
     case 'sectionToggle': sectionToggle(); break;
     case 'sectionPlanes': viewer.showSectPlanes = !viewer.showSectPlanes; viewer.redraw(); renderViewPop(); toast(viewer.showSectPlanes ? 'Płaszczyzny przekroju widoczne' : 'Płaszczyzny przekroju ukryte'); break;
@@ -534,6 +537,7 @@ function openPop(sel, anchor, side) {
   if (sel === '#pngPop') renderPng();
   if (sel === '#underPop') renderUnder();
   if (sel === '#viewPop') renderViewPop();
+  if (sel === '#libPop') renderLib();
 }
 function closePops() {
   let any = false;
@@ -698,6 +702,83 @@ function renderTree() {
   });
 }
 try { if (localStorage.getItem('modo.panel')) setTimeout(() => togglePanel(true)); } catch (e) {}
+
+/* ---------- biblioteka modeli ---------- */
+$('#libBtn').addEventListener('click', () => openPop('#libPop', $('#libBtn')));
+// miniatura: krawędzie w rzucie aksonometrycznym, jako rysunek kreską
+function thumb(item, W = 96, H = 60) {
+  const ca = Math.cos(-0.6), sa = Math.sin(-0.6);
+  const pr = p => { const x = p[0] * ca - p[1] * sa, y = p[0] * sa + p[1] * ca; return [x, -p[2] - y * 0.42]; };
+  const segs = [];
+  const ex = [ca, -sa, 0], ey = [-0.42 * sa, -0.42 * ca, -1], vd = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  for (const sh of item.shapes) for (const e of edgesOf(sh)) {
+    // gładkie bryły (krzew, koła): tylko kontur
+    if ((sh.soft || e.soft) && e.n2 && (dot(e.n1, vd) > 0) === (dot(e.n2, vd) > 0)) continue;
+    segs.push([pr(e.a), pr(e.b)]);
+  }
+  for (const l of item.lines || []) segs.push([pr(l.a), pr(l.b)]);
+  if (!segs.length) return '';
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of segs) for (const [x, y] of s) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const k = Math.min((W - 10) / (x1 - x0 || 1), (H - 8) / (y1 - y0 || 1)), ox = (W - (x1 - x0) * k) / 2 - x0 * k, oy = (H - (y1 - y0) * k) / 2 - y0 * k;
+  const d = segs.map(([a, b]) => `M${(a[0] * k + ox).toFixed(1)} ${(a[1] * k + oy).toFixed(1)}L${(b[0] * k + ox).toFixed(1)} ${(b[1] * k + oy).toFixed(1)}`).join('');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" aria-hidden="true"><path d="${d}"/></svg>`;
+}
+const libCache = new Map();
+const libItem = it => { if (!libCache.has(it.key)) libCache.set(it.key, { ...it.make(), name: it.name, key: it.key }); return libCache.get(it.key); };
+function renderLib() {
+  $('#libGrid').innerHTML = LIBRARY.map(it => `<button class="libitem" data-k="${it.key}">${thumb(libItem(it))}<span>${it.name}</span></button>`).join('');
+  $('#libGrid').querySelectorAll('.libitem').forEach(b => b.addEventListener('click', () => startPlace(libItem(LIBRARY.find(i => i.key === b.dataset.k)))));
+  const mine = loadUserLib();
+  $('#libMine').innerHTML = mine.map((it, i) => `<div class="libitem" role="button" tabindex="0" data-i="${i}">${thumb(it)}<span>${esc(it.name)}</span><button class="del" title="Usuń z biblioteki">${XS}</button></div>`).join('');
+  $('#libNote').hidden = mine.length > 0;
+  $('#libMine').querySelectorAll('.libitem').forEach(b => {
+    const i = +b.dataset.i;
+    b.addEventListener('click', e => { if (e.target.closest('.del')) return; startPlace(mine[i]); });
+    b.querySelector('.del').addEventListener('click', () => { const l = loadUserLib(); l.splice(i, 1); saveUserLib(l); renderLib(); });
+  });
+}
+function startPlace(item) {
+  closePops();
+  if (app.editSolid != null) app.exitSolid();
+  setTool('place'); tools.place.setItem(item); app.refresh();
+}
+// wstawienie: kopie elementów z nowymi numerami, przesunięte do punktu, opakowane w komponent
+app.placeItem = (item, p) => {
+  const m = app.model, data = JSON.parse(JSON.stringify(item));
+  app.checkpoint();
+  const gid = m.next++, gmap = new Map(), smap = new Map();
+  for (const g of data.groups || []) gmap.set(g.id, m.next++);
+  for (const g of data.groups || []) { g.id = gmap.get(g.id); g.p = g.p != null && gmap.has(g.p) ? gmap.get(g.p) : gid; if (g.frame) g.frame.o = g.frame.o.map((x, k) => x + p[k]); if (g.kind === 'comp') g.def = 'd' + g.id + 'x'; m.groups.push(g); }
+  // definicje zagnieżdżonych komponentów: te same w obrębie wstawienia
+  const defs = new Map(); for (const g of data.groups || []) if (g.kind === 'comp') { const k = item.groups.find(q => gmap.get(q.id) === g.id)?.def; if (!defs.has(k)) defs.set(k, g.def); g.def = defs.get(k); }
+  for (const s of data.shapes) { const id = m.next++; smap.set(s.id, id); s.id = id; s.g = s.g != null && gmap.has(s.g) ? gmap.get(s.g) : gid; translateShape(s, p); delete s.tag; m.shapes.push(s); }
+  for (const l of data.lines || []) { l.id = m.next++; l.g = l.g != null && gmap.has(l.g) ? gmap.get(l.g) : gid; l.a = l.a.map((x, k) => x + p[k]); l.b = l.b.map((x, k) => x + p[k]); m.lines.push(l); }
+  m.groups.push({ id: gid, kind: 'comp', def: 'd' + gid, frame: IDENT(p), name: item.name, p: app.editing ?? undefined });
+  app.changed();
+  app.selection.clear(); membersOf(m, gid).forEach(i => app.selection.add(i));
+  setTool('select'); app.selectionChanged();
+};
+$('#libSave').addEventListener('click', () => {
+  const m = app.model, ids = new Set(app.selection);
+  const shapes = m.shapes.filter(s => ids.has(s.id)), lines = m.lines.filter(l => ids.has('l' + l.id));
+  if (!shapes.length && !lines.length) return toast('Zaznacz bryły albo grupę, którą chcesz zapisać w bibliotece.');
+  const b = bounds(m, null, [...ids]), o = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, b.lo[2]], neg = o.map(x => -x);
+  const groups = groupsWhollyIn(m, ids).map(g => JSON.parse(JSON.stringify(g)));
+  const gset = new Set(groups.map(g => g.id));
+  // grupa obejmująca całe zaznaczenie znika — wstawienie i tak tworzy własny komponent
+  const outer = groups.filter(g => g.p == null || !gset.has(g.p));
+  const single = outer.length === 1 && shapes.every(s => s.g != null) ? outer[0] : null;
+  const keep = groups.filter(g => g !== single);
+  for (const g of keep) { if (g.p == null || !gset.has(g.p) || g.p === single?.id) delete g.p; if (g.frame) g.frame.o = g.frame.o.map((x, k) => x + neg[k]); delete g.tag; }
+  const S = shapes.map(s => { const c = JSON.parse(JSON.stringify(s)); translateShape(c, neg); if (c.g == null || !gset.has(c.g) || c.g === single?.id) delete c.g; delete c.hidden; delete c.tag; return c; });
+  const L = lines.map(l => { const c = JSON.parse(JSON.stringify(l)); c.a = c.a.map((x, k) => x + neg[k]); c.b = c.b.map((x, k) => x + neg[k]); if (c.g == null || !gset.has(c.g) || c.g === single?.id) delete c.g; delete c.hidden; delete c.tag; return c; });
+  const name = (single && single.name) || 'Model ' + (loadUserLib().length + 1);
+  const list = loadUserLib(); list.push({ name, shapes: S, lines: L, groups: keep });
+  if (!saveUserLib(list)) return toast('Nie udało się zapisać biblioteki (za mało miejsca).');
+  renderLib(); toast('Zapisano w bibliotece jako „' + name + '”. Nazwę zmienisz w panelu, nadając ją grupie przed zapisem.');
+});
 
 /* ---------- przekroje ---------- */
 const selectedSections = () => (app.model.sections || []).filter(q => app.selection.has('s' + q.id));
