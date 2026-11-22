@@ -19,7 +19,22 @@ export const AXIS_COLOR = { x: '#c0533f', y: '#4f8a46', z: '#3f63a8' };
 export const REF_COLOR = '#b0489e';   // równolegle / prostopadle do krawędzi — magenta, jak w SketchUpie
 export const AXIS_NAME = { x: _t('Na osi czerwonej'), y: _t('Na osi zielonej'), z: _t('Na osi niebieskiej') };
 
-const R_END = 12, R_MID = 10, R_EDGE = 8, R_AXIS = 10;
+const R_END = 16, R_MID = 11, R_EDGE = 8, R_AXIS = 10;
+// odcinek łuku albo okręgu: w którymś końcu przechodzi łagodnie (1°–32°) w następny odcinek. Taki odcinek nie jest odniesieniem
+// (przedłużenie, równolegle, prostopadle) — inaczej każdy z 24 boków okręgu dawałby linię styczną, która łapie kursor.
+const COS_CURVE = Math.cos(32 * Math.PI / 180), COS_STRAIGHT = Math.cos(0.5 * Math.PI / 180);
+function curveSeg(a, b, segs) {
+  const d = V.norm(V.sub(b, a));
+  for (const [p, q] of segs) {
+    let e = null;
+    if (V.dist(p, b) < 1e-6 && V.dist(q, a) > 1e-6) e = V.sub(q, p); else if (V.dist(q, b) < 1e-6 && V.dist(p, a) > 1e-6) e = V.sub(p, q);
+    else if (V.dist(q, a) < 1e-6 && V.dist(p, b) > 1e-6) e = V.sub(q, p); else if (V.dist(p, a) < 1e-6 && V.dist(q, b) > 1e-6) e = V.sub(p, q);
+    if (!e || V.len(e) < 1e-9) continue;
+    const c = V.dot(d, V.norm(e));
+    if (c > COS_CURVE && c < COS_STRAIGHT) return true;
+  }
+  return false;
+}
 
 export class Snapper {
   constructor(viewer) {
@@ -108,7 +123,7 @@ export class Snapper {
     const tryPt = (p, type, dir) => {
       const d = d2(p), r = type === 'mid' ? R_MID : R_END;
       if (d > r) return;
-      const score = d + (type === 'mid' ? 3 : type === 'cross' ? 1 : 0);
+      const score = d + (type === 'mid' ? 6 : type === 'cross' ? 1 : 0);
       if (!best || score < best.score) best = { p, type, score, dir };
     };
     const ex = opts.excludeSet;
@@ -156,7 +171,7 @@ export class Snapper {
     // krawędzie wychodzące z punktu pod kursorem (albo ta, której to środek) też stają się odniesieniem
     if (best && (best.type === 'end' || best.type === 'mid')) {
       let k = 0;
-      for (const [a, b] of segs) { if (k >= 2) break; if (V.dist(a, best.p) < 1e-6 || V.dist(b, best.p) < 1e-6 || V.dist(V.lerp(a, b, 0.5), best.p) < 1e-6) { this.touch(a, b); k++; } }
+      for (const [a, b] of segs) { if (k >= 2) break; if (V.dist(a, best.p) < 1e-6 || V.dist(b, best.p) < 1e-6 || V.dist(V.lerp(a, b, 0.5), best.p) < 1e-6) { if (!curveSeg(a, b, segs)) this.touch(a, b); k++; } }
     }
     if (!best) this.promote();
     const label = { end: _t('Punkt końcowy'), mid: _t('Środek'), cross: _t('Przecięcie') };
@@ -171,7 +186,7 @@ export class Snapper {
         const d = d2(p);
         if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)), a, b };
       }
-      if (eb) this.touch(eb.a, eb.b);
+      if (eb && !curveSeg(eb.a, eb.b, segs)) this.touch(eb.a, eb.b);
       return eb;
     };
     let ebMemo; const eNear = () => ebMemo === undefined ? (ebMemo = edgeNear()) : ebMemo;
@@ -286,7 +301,7 @@ export class Snapper {
 
       // 2b. równolegle albo prostopadle do krawędzi: tej, nad którą był kursor, i tych, które wychodzą z punktu początkowego
       const refs = this.refs.slice();
-      for (const [a, b] of segs) { if (refs.length > 8) break; if (V.dist(a, o) < 1e-6 || V.dist(b, o) < 1e-6) { const L = V.dist(a, b); if (L > 1e-6) refs.push({ a, b, dir: V.mul(V.sub(b, a), 1 / L), own: true }); } }
+      for (const [a, b] of segs) { if (refs.length > 8) break; if ((V.dist(a, o) < 1e-6 || V.dist(b, o) < 1e-6) && !curveSeg(a, b, segs)) { const L = V.dist(a, b); if (L > 1e-6) refs.push({ a, b, dir: V.mul(V.sub(b, a), 1 / L), own: true }); } }
       let rb = null;
       // punkt na krawędzi pod kursorem ma pierwszeństwo przed kierunkiem (i przy okazji ta krawędź staje się odniesieniem)
       for (const r of eNear() ? [] : refs) {

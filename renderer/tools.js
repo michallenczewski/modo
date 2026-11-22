@@ -1874,6 +1874,30 @@ export function edgeAt(app, x, y) {
   return best;
 }
 // znacznik (linia dzieląca ścianę bryły), na którym leży krawędź e
+// Łuk jak w SketchUpie: odcinki okręgu (albo łuku) połączone w wierzchołkach, w których spotykają się tylko dwie krawędzie
+// i kierunek skręca łagodnie (do 32° — 12-kąt to 30°). Przecięcie z inną krawędzią (3 i więcej krawędzi w wierzchołku)
+// albo narożnik prostokąta kończy łuk. Gumka i podświetlenie biorą cały łuk.
+export function curveOf(s, a, b) {
+  const K = p => p.map(x => Math.round(x * 1e5)).join(','), all = shapeEdges(s), at = new Map();
+  for (const e of all) for (const p of [e.a, e.b]) { const k = K(p); if (!at.has(k)) at.set(k, []); at.get(k).push(e); }
+  const key = e => { const x = K(e.a), y = K(e.b); return x < y ? x + '|' + y : y + '|' + x; };
+  const k0 = (() => { const x = K(a), y = K(b); return x < y ? x + '|' + y : y + '|' + x; })();
+  const start = all.find(e => key(e) === k0) || { a, b };
+  const out = [start], seen = new Set([key(start)]);
+  for (const [from, to] of [[start.a, start.b], [start.b, start.a]]) {
+    let p = from, q = to;
+    for (let guard = 0; guard < 10000; guard++) {
+      const list = at.get(K(q)) || [];
+      if (list.length !== 2) break;
+      const nx = list.find(e => key(e) !== key({ a: p, b: q }) && !seen.has(key(e)));
+      if (!nx) break;
+      const r = K(nx.a) === K(q) ? nx.b : nx.a, d1 = V.norm(V.sub(q, p)), d2 = V.norm(V.sub(r, q));
+      if (V.dot(d1, d2) < Math.cos(32 * Math.PI / 180)) break;
+      seen.add(key(nx)); out.push(nx); p = q; q = r;
+    }
+  }
+  return out;
+}
 function markOf(s, e) {
   if (!s.marks || !s.marks.length) return -1;
   const mid = V.lerp(e.a, e.b, 0.5);
@@ -1908,7 +1932,7 @@ export class EraserTool extends Tool {
     }
     const grouped = this.app.expand(h.id);
     // krawędź bryły luzem: znika razem ze ścianami, które się na niej stykają (linia dzieląca ścianę — sama)
-    if (s && grouped.length === 1) { begin(); deleteEdge(m, s, h.edge.a, h.edge.b, true); if (!m.shapes.includes(s)) this.app.selection.delete(s.id); this.hover = null; this.app.changed(); return; }
+    if (s && grouped.length === 1) { begin(); for (const e of curveOf(s, h.edge.a, h.edge.b)) if (m.shapes.includes(s)) deleteEdge(m, s, e.a, e.b, true); if (!m.shapes.includes(s)) this.app.selection.delete(s.id); this.hover = null; this.app.changed(); return; }
     begin();
     const ids = new Set(grouped);
     removeIds(m, ids);
@@ -1917,7 +1941,14 @@ export class EraserTool extends Tool {
   }
   draw(c, v) {
     const h = this.hover; if (!h || !h.a) return;
-    drawSeg(c, v, h.a, h.b, { hide: '#8a857b', soft: '#3f5f99', show: '#4f8a46' }[this.md] || '#c2452d', { width: 3 });
+    const col = { hide: '#8a857b', soft: '#3f5f99', show: '#4f8a46' }[this.md] || '#c2452d';
+    if (h.shape && h.edge && (this.md || 'erase') === 'erase') {
+      const ck = segKey(h.edge.a, h.edge.b) + '#' + h.shape.id + '#' + this.app.opSeq;
+      if (!this.curve || this.curve.k !== ck) this.curve = { k: ck, list: curveOf(h.shape, h.edge.a, h.edge.b) };
+      for (const e of this.curve.list) drawSeg(c, v, e.a, e.b, col, { width: 3 });
+      return;
+    }
+    drawSeg(c, v, h.a, h.b, col, { width: 3 });
   }
 }
 

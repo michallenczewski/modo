@@ -13,7 +13,7 @@ const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
 const { absorb } = await import(R + 'geo.js');
-const { deleteEdge, deleteFace } = await import(R + 'tools.js');
+const { deleteEdge, deleteFace, curveOf } = await import(R + 'tools.js');
 const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
 /* ---------- szkic i kroki ---------- */
@@ -268,6 +268,23 @@ przypadek('gumka na krawędzi okna', 'Gumka na dolnej krawędzi narysowanego okn
 przypadek('gumka między prostokątami', 'Dwa prostokąty na ziemi, gumka na wspólnym boku: jedna ściana 4 × 2.', () => {
   const s = new Szkic().rectXY(0, 0, 0, 2, 2).rectXY(2, 0, 0, 2, 2); s.edit(m => deleteEdge(m, m.shapes.find(q => q.geo), [2, 0, 0], [2, 2, 0], true));
   return { ściany: [s.faces, 1], pole: [s.faceArea([1, 1, 0]), 8] };
+});
+// zgłoszenie Michała: dwa (trzy) przecinające się okręgi, gumką wewnętrzne łuki — zostaje jedna ściana do wypchnięcia.
+// Gumka bierze cały łuk między przecięciami (jak w SketchUpie), więc nie trzeba przeciągać po odcinkach tuż przy obrysie.
+const lukGumka = (s, c, r, inside) => s.edit(m => {
+  const g = m.shapes.find(q => q.geo);
+  const e = meshEdges(g).find(e => { const mid = V.lerp(e.a, e.b, 0.5); return Math.abs(V.dist(mid, c) - r * Math.cos(Math.PI / 24)) < 1e-3 && inside(mid); });
+  if (!e) throw new Error('brak łuku do wymazania');
+  for (const k of curveOf(g, e.a, e.b)) if (m.shapes.includes(g)) deleteEdge(m, g, k.a, k.b, true);
+});
+przypadek('przecinające się okręgi — gumka na łukach', 'Dwa okręgi (r 0,7) na froncie, środki 0,8 od siebie; gumka na obu wewnętrznych łukach: jedna ściana w kształcie sumy, osobna od frontu; wciśnięta o 0,3 robi wnękę.', () => {
+  const s = dom(), A = [2.5, 0, 1.5], B = [3.3, 0, 1.5], r = 0.7;
+  s.circle(A, X, Z, r); s.circle(B, X, Z, r);
+  const f0 = s.faces;
+  lukGumka(s, A, r, p => V.dist(p, B) < r - 1e-3); lukGumka(s, B, r, p => V.dist(p, A) < r - 1e-3);
+  const f1 = s.faces, frontOsobno = s.faceArea([0.5, 0, 0.5], mY) < 18 - 1;
+  s.push([2.9, 0, 1.5], -0.3, mY);
+  return { 'ściany po narysowaniu': [f0, 6 + 3], 'ściany po gumce': [f1, 6 + 1], 'front osobno od okręgów': [frontOsobno, true], otwarte: [s.open, 0], 'dno wnęki': [s.has([2.9, 0.3, 1.5], mY), true], 'dno wnęki pod łukami': [s.has([2.5, 0.3, 1.0], mY), true] };
 });
 przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });
