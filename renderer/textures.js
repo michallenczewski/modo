@@ -1,3 +1,4 @@
+import { _t } from './i18n.js';
 // Materiały z teksturą dla wiaderka. Tekstury są rysowane w kodzie (bez plików graficznych), powtarzalne w obu
 // kierunkach i mają prawdziwą skalę: `size` to szerokość i wysokość jednego powtórzenia w metrach.
 // `avg` to kolor zastępczy (miniatury, eksport OBJ, style bez tekstur).
@@ -15,7 +16,7 @@ function grain(c, W, H, r, n, colors, size = 1.6) {
 
 export const TEXTURES = {
   cegla: {
-    name: 'cegła', avg: '#b06a4c', size: [0.52, 0.3], px: [256, 148],
+    name: _t('cegła'), avg: '#b06a4c', size: [0.52, 0.3], px: [256, 148],
     draw(c, W, H) {
       const r = rng(11), rows = 4, bh = H / rows, bw = W / 2, j = 5;
       c.fillStyle = '#d9d2c4'; c.fillRect(0, 0, W, H);
@@ -53,7 +54,7 @@ export const TEXTURES = {
     }
   },
   plytki: {
-    name: 'płytki', avg: '#d6d3cb', size: [0.6, 0.6], px: [128, 128],
+    name: _t('płytki'), avg: '#d6d3cb', size: [0.6, 0.6], px: [128, 128],
     draw(c, W, H) {
       const r = rng(41); c.fillStyle = '#dad7cf'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 300, ['rgba(255,255,255,.18)', 'rgba(90,88,80,.07)'], 2);
@@ -61,7 +62,7 @@ export const TEXTURES = {
     }
   },
   dachowka: {
-    name: 'dachówka', avg: '#9a4f3c', size: [0.6, 0.66], px: [128, 140],
+    name: _t('dachówka'), avg: '#9a4f3c', size: [0.6, 0.66], px: [128, 140],
     draw(c, W, H) {
       const r = rng(53), rows = 2, cols = 3, rh = H / rows, cw = W / cols;
       c.fillStyle = '#6e3527'; c.fillRect(0, 0, W, H);
@@ -88,7 +89,7 @@ export const TEXTURES = {
     }
   },
   zwir: {
-    name: 'żwir', avg: '#a6a299', size: [1.5, 1.5], px: [256, 256],
+    name: _t('żwir'), avg: '#a6a299', size: [1.5, 1.5], px: [256, 256],
     draw(c, W, H) {
       const r = rng(71); c.fillStyle = '#a8a49b'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 4200, ['rgba(255,255,255,.22)', 'rgba(60,58,52,.22)', 'rgba(150,140,120,.3)'], 3);

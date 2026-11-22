@@ -4,6 +4,7 @@ const on = ch => fn => ipcRenderer.on(ch, (e, ...a) => fn(...a));
 contextBridge.exposeInMainWorld('api', {
   web: false,
   platform: process.platform,
+  setLang: l => ipcRenderer.invoke('set-lang', l),
   openFile: p => ipcRenderer.invoke('file-open', p || null),
   saveFile: (p, text, suggested) => ipcRenderer.invoke('file-save', p || null, text, suggested),
   saveCopy: (text, suggested) => ipcRenderer.invoke('file-save-copy', text, suggested),

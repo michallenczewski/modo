@@ -10,6 +10,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `preload.js` | `window.api` — most do procesu głównego. |
 | `renderer/web-api.js` | To samo `window.api` w wersji przeglądarkowej (pobieranie plików zamiast zapisu na dysk). |
 | `renderer/app.js` | Interfejs: pasek narzędzi, okienka (słońce, PNG, podkład, kolor, skróty), klawiatura, pole wymiarów, cofanie, plik. |
+| `renderer/i18n.js`, `renderer/lang/en.js` | Język interfejsu: `_t('…')` / `_t\`…${x}…\`` zwraca napis po angielsku ze słownika (klucz to napis polski, w szablonach `{0}`, `{1}`…), a bez tłumaczenia — polski. `translateDom()` tłumaczy stałe napisy z `index.html`. Język (`modo.lang` w pamięci przeglądarki) zmienia się przeładowaniem okna; proces główny dostaje go przez `set-lang` i tłumaczy swoje okienka. |
 | `renderer/viewer.js` | Scena three.js: kamera z osią Z w górę, nawigacja, słońce i cienie, szkicowe krawędzie (shader), eksport PNG, podkład. |
 | `renderer/model.js` | Dane modelu i geometria: bryły, ściany, krawędzie, push/pull, ściana z zamkniętego obrysu. |
 | `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |

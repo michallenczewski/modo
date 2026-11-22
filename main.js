@@ -24,7 +24,16 @@ function serveRenderer() {
 
 /* ---------- ustawienia ---------- */
 const settingsFile = () => path.join(app.getPath('userData'), 'ustawienia.json');
-let settings = { bounds: null, maximized: false, recent: [], odaPath: null, geminiKey: null };
+let settings = { bounds: null, maximized: false, recent: [], odaPath: null, geminiKey: null, lang: 'pl' };
+// napisy okienek systemowych po angielsku (język wybiera okno programu, zob. renderer/i18n.js)
+const EN = {
+  'Zapisz': 'Save', 'Nie zapisuj': "Don't Save", 'Anuluj': 'Cancel',
+  'Zapisać zmiany w szkicu?': 'Save changes to the sketch?', 'Jeśli nie zapiszesz, zmiany przepadną.': "If you don't save, your changes will be lost.",
+  'Zapisz kopię jako': 'Save a Copy As', 'Szkic — kopia': 'Sketch — copy', 'Wskaż ODA File Converter': 'Locate ODA File Converter', 'Szkic Modo': 'Modo sketch',
+  'Gemini odpowiedział ': 'Gemini responded ', 'Nie udało się połączyć z Gemini: ': 'Could not connect to Gemini: ',
+  'ODA File Converter nie zamienił pliku': 'ODA File Converter did not convert the file', 'GitHub odpowiedział ': 'GitHub responded ', 'pobieranie nie powiodło się (': 'download failed ('
+};
+const _t = s => (settings.lang === 'en' && EN[s]) || s;
 function loadSettings() { try { Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))); } catch (e) {} }
 function saveSettings() { try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch (e) {} }
 
@@ -58,8 +67,8 @@ function createWindow(openPath) {
     remember(); saveSettings();
     if (!dirty.get(win)) return;
     const r = dialog.showMessageBoxSync(win, {
-      type: 'question', buttons: ['Zapisz', 'Nie zapisuj', 'Anuluj'], defaultId: 0, cancelId: 2,
-      message: 'Zapisać zmiany w szkicu?', detail: 'Jeśli nie zapiszesz, zmiany przepadną.'
+      type: 'question', buttons: [_t('Zapisz'), _t('Nie zapisuj'), _t('Anuluj')], defaultId: 0, cancelId: 2,
+      message: _t('Zapisać zmiany w szkicu?'), detail: _t('Jeśli nie zapiszesz, zmiany przepadną.')
     });
     if (r === 2) { e.preventDefault(); return; }
     if (r === 0) { e.preventDefault(); win.webContents.send('save-then-close'); }
@@ -84,14 +93,15 @@ ipcMain.on('theme', (e, dark) => {
   if (isWin) try { w.setTitleBarOverlay({ color: dark ? '#161616' : '#f7f7f5', symbolColor: dark ? '#c4c4c1' : '#4a4945' }); } catch (err) {}
 });
 ipcMain.handle('platform', () => process.platform);
+ipcMain.handle('set-lang', (e, l) => { if (l === 'en' || l === 'pl') { settings.lang = l; saveSettings(); } return true; });
 
 /* ---------- pliki .modo ---------- */
-const MODO_FILTER = [{ name: 'Szkic Modo', extensions: ['modo'] }];
+const MODO_FILTER = () => [{ name: _t('Szkic Modo'), extensions: ['modo'] }];
 function addRecent(p) { settings.recent = [p, ...(settings.recent || []).filter(x => x !== p)].slice(0, 12); saveSettings(); if (isMac || isWin) app.addRecentDocument(p); }
 ipcMain.handle('file-open', async (e, p) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!p) {
-    const r = await dialog.showOpenDialog(win, { filters: MODO_FILTER, properties: ['openFile'] });
+    const r = await dialog.showOpenDialog(win, { filters: MODO_FILTER(), properties: ['openFile'] });
     if (r.canceled || !r.filePaths[0]) return null;
     p = r.filePaths[0];
   }
@@ -102,7 +112,7 @@ ipcMain.handle('file-open', async (e, p) => {
 ipcMain.handle('file-save', async (e, p, text, suggested) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!p) {
-    const r = await dialog.showSaveDialog(win, { filters: MODO_FILTER, defaultPath: (suggested || 'Szkic') + '.modo' });
+    const r = await dialog.showSaveDialog(win, { filters: MODO_FILTER(), defaultPath: (suggested || 'Szkic') + '.modo' });
     if (r.canceled || !r.filePath) return null;
     p = r.filePath;
   }
@@ -115,7 +125,7 @@ ipcMain.handle('file-save', async (e, p, text, suggested) => {
 // kopia szkicu w innym miejscu — bieżący plik zostaje bez zmian
 ipcMain.handle('file-save-copy', async (e, text, suggested) => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  const r = await dialog.showSaveDialog(win, { title: 'Zapisz kopię jako', filters: MODO_FILTER, defaultPath: (suggested || 'Szkic — kopia') + '.modo' });
+  const r = await dialog.showSaveDialog(win, { title: _t('Zapisz kopię jako'), filters: MODO_FILTER(), defaultPath: (suggested || _t('Szkic — kopia')) + '.modo' });
   if (r.canceled || !r.filePath) return null;
   await fsp.writeFile(r.filePath, text, 'utf8');
   return r.filePath;
@@ -187,9 +197,9 @@ ipcMain.handle('gemini-render', async (e, req) => {
     });
     const text = await r.text();
     let j = null; try { j = JSON.parse(text); } catch (err) {}
-    if (!r.ok) return { error: (j && j.error && j.error.message) || ('Gemini odpowiedział ' + r.status), status: r.status };
+    if (!r.ok) return { error: (j && j.error && j.error.message) || (_t('Gemini odpowiedział ') + r.status), status: r.status };
     return { json: j };
-  } catch (err) { return { error: 'Nie udało się połączyć z Gemini: ' + err.message }; }
+  } catch (err) { return { error: _t('Nie udało się połączyć z Gemini: ') + err.message }; }
 });
 
 // OBJ z materiałami: plik .mtl o tej samej nazwie obok
@@ -228,7 +238,7 @@ function findOda() { return odaCandidates().find(p => { try { return fs.statSync
 ipcMain.handle('oda-status', () => ({ path: findOda() }));
 ipcMain.handle('oda-pick', async e => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  const r = await dialog.showOpenDialog(win, { title: 'Wskaż ODA File Converter', properties: ['openFile'] });
+  const r = await dialog.showOpenDialog(win, { title: _t('Wskaż ODA File Converter'), properties: ['openFile'] });
   if (r.canceled || !r.filePaths[0]) return null;
   let p = r.filePaths[0];
   if (isMac && p.endsWith('.app')) p = path.join(p, 'Contents/MacOS/ODAFileConverter');
@@ -248,7 +258,7 @@ function dwgToDxf(file) {
       const out = path.join(outDir, name.replace(/\.dwg$/i, '.dxf'));
       fs.readFile(out, (err2, data) => {
         try { fs.rmSync(inDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) {}
-        if (err2) reject(new Error('ODA File Converter nie zamienił pliku' + (err ? ': ' + err.message : '')));
+        if (err2) reject(new Error(_t('ODA File Converter nie zamienił pliku') + (err ? ': ' + err.message : '')));
         else resolve(data);
       });
     });
@@ -292,7 +302,7 @@ async function updCheck() {
   if (upd.state === 'downloading') return upd;
   try {
     const r = await net.fetch('https://api.github.com/repos/' + REPO + '/releases/latest', { headers: { 'User-Agent': 'Modo', Accept: 'application/vnd.github+json' } });
-    if (!r.ok) throw new Error('GitHub odpowiedział ' + r.status);
+    if (!r.ok) throw new Error(_t('GitHub odpowiedział ') + r.status);
     const j = await r.json(), v = String(j.tag_name || '').replace(/^v/, '');
     const want = isWin ? /-win-x64\.exe$/ : isMac ? new RegExp('-mac-' + process.arch + '\\.dmg$') : null;
     const a = want && (j.assets || []).find(x => want.test(x.name));
@@ -307,7 +317,7 @@ async function updInstall() {
   upd.state = 'downloading'; upd.got = 0; updTell();
   try {
     const r = await net.fetch(upd.url, { headers: { 'User-Agent': 'Modo' } });
-    if (!r.ok || !r.body) throw new Error('pobieranie nie powiodło się (' + r.status + ')');
+    if (!r.ok || !r.body) throw new Error(_t('pobieranie nie powiodło się (') + r.status + ')');
     const out = fs.createWriteStream(file + '.part'); let last = 0;
     for await (const chunk of r.body) { out.write(chunk); upd.got += chunk.length; if (Date.now() - last > 400) { last = Date.now(); updTell(); } }
     await new Promise((res, rej) => out.end(err => (err ? rej(err) : res())));

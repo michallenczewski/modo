@@ -4,6 +4,7 @@
 
 import { V, normalizeShape, circlePts } from './model.js';
 
+import { _t } from './i18n.js';
 // bryła wyciągnięta z profilu: punkty (a, b) w płaszczyźnie u-v, grubość h wzdłuż u × v
 const prism = (o, u, v, pts, h, extra = {}) => normalizeShape({ o, u, v, n: V.norm(V.cross(u, v)), pts, h, ...extra });
 const X = [1, 0, 0], Y = [0, 1, 0], Z = [0, 0, 1];
@@ -100,14 +101,14 @@ function conifer2d() {
 }
 
 export const LIBRARY = [
-  { key: 'car', name: 'Samochód', make: car },
-  { key: 'van', name: 'Van', make: van },
-  { key: 'person', name: 'Człowiek', make: () => person(false) },
-  { key: 'walker', name: 'Człowiek idący', make: () => person(true) },
-  { key: 'tree', name: 'Drzewo 2D', make: tree2d },
-  { key: 'conifer', name: 'Drzewo iglaste 2D', make: conifer2d },
-  { key: 'bush', name: 'Krzew', make: () => bush() },
-  { key: 'bench', name: 'Ławka', make: bench }
+  { key: 'car', name: _t('Samochód'), make: car },
+  { key: 'van', name: _t('Van'), make: van },
+  { key: 'person', name: _t('Człowiek'), make: () => person(false) },
+  { key: 'walker', name: _t('Człowiek idący'), make: () => person(true) },
+  { key: 'tree', name: _t('Drzewo 2D'), make: tree2d },
+  { key: 'conifer', name: _t('Drzewo iglaste 2D'), make: conifer2d },
+  { key: 'bush', name: _t('Krzew'), make: () => bush() },
+  { key: 'bench', name: _t('Ławka'), make: bench }
 ];
 
 /* ---------- własne modele ---------- */

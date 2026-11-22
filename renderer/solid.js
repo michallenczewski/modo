@@ -4,6 +4,7 @@
 
 import { V } from './model.js';
 
+import { _t } from './i18n.js';
 let M = null;
 export async function initSolid(opts) {
   if (M) return true;
@@ -12,7 +13,7 @@ export async function initSolid(opts) {
     const w = await Module(opts || {});
     w.setup(); M = w;
     return true;
-  } catch (e) { console.warn('Manifold niedostępny, zostaje wbudowany algorytm brył:', e && e.message); return false; }
+  } catch (e) { console.warn(_t('Manifold niedostępny, zostaje wbudowany algorytm brył:'), e && e.message); return false; }
 }
 export const solidReady = () => !!M;
 

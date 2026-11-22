@@ -8,11 +8,12 @@ import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
 import { TEXTURES, textureCanvas } from './textures.js';
 
+import { _t } from './i18n.js';
 /* ---------- style rysunku ---------- */
 export const STYLES = {
-  szkic: { name: 'Szkic', paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 0, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
-  kreska: { name: 'Kreska', paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
-  model: { name: 'Model', paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
+  szkic: { name: _t('Szkic'), paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 0, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
+  kreska: { name: _t('Kreska'), paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
+  model: { name: _t('Model'), paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
 // tryb ciemny: ciemny papier, jasna kreska, przygaszone ściany (kolory jak w ciemnej Gapie)
 const DARK = {

@@ -10,6 +10,7 @@ import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 import { healFaces, mergeTouching } from './stitch.js';
 import { component, facesOfPolys, eraseFaces } from './geo.js';
 
+import { _t } from './i18n.js';
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
 
 /* ---------- rysowanie pomocy na nakładce ---------- */
@@ -76,7 +77,7 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>⇧</kbd> przełącza, <kbd>⌥</kbd> (Mac) albo <kbd>Ctrl</kbd> (Windows) dodaje, oba razem odejmują. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
+  hint() { return _t('Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>⇧</kbd> przełącza, <kbd>⌥</kbd> (Mac) albo <kbd>Ctrl</kbd> (Windows) dodaje, oba razem odejmują. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'); }
   subAt(id, x, y) { return subAt(this.app, id, x, y); }
   // potrójny klik: wszystko połączone — elementy luzem, które mają wspólny punkt (linie połączone końcami, stykające się bryły)
   triple(e, x, y) {
@@ -189,10 +190,10 @@ export class LineTool extends Tool {
   reset() { this.anchor = null; this.chain = []; this.ids = []; this.cur = null; }
   hint() {
     return this.anchor
-      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Kursor łapie kierunek równoległy i prostopadły do krawędzi, nad którą przed chwilą był.  Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.'
-      : 'Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę, linia przez ścianę dzieli ją, a linia dochodząca do krawędzi dzieli krawędź.';
+      ? _t('Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Kursor łapie kierunek równoległy i prostopadły do krawędzi, nad którą przed chwilą był.  Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.')
+      : _t('Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę, linia przez ścianę dzieli ją, a linia dochodząca do krawędzi dzieli krawędź.');
   }
-  vcb() { return { label: 'Długość', value: this.anchor && this.cur ? fmtLength(V.dist(this.anchor, this.cur.p)) : '' }; }
+  vcb() { return { label: _t('Długość'), value: this.anchor && this.cur ? fmtLength(V.dist(this.anchor, this.cur.p)) : '' }; }
   move(e, x, y) {
     this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.anchor, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir, extraPoints: this.chain.length > 2 ? [this.chain[0]] : null });
   }
@@ -239,8 +240,8 @@ export class RectTool extends Tool {
   reset() { this.p0 = null; this.plane = null; this.cur = null; }
   hint() {
     return this.p0
-      ? 'Kliknij przeciwległy narożnik albo wpisz wymiary, np. <kbd>6;4</kbd>, i <kbd>Enter</kbd>. Prostokąt kładzie się na ścianie, nad którą jest kursor (jeśli pierwszy narożnik na niej leży); <kbd>⇧</kbd> zatrzymuje płaszczyznę, strzałki ją wymuszają: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.'
-      : 'Kliknij pierwszy narożnik — na ziemi albo na ścianie bryły. Po przejechaniu kursorem po krawędzi zostaje linia śledzenia; <kbd>⇧</kbd> trzyma na niej kursor.';
+      ? _t('Kliknij przeciwległy narożnik albo wpisz wymiary, np. <kbd>6;4</kbd>, i <kbd>Enter</kbd>. Prostokąt kładzie się na ścianie, nad którą jest kursor (jeśli pierwszy narożnik na niej leży); <kbd>⇧</kbd> zatrzymuje płaszczyznę, strzałki ją wymuszają: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.')
+      : _t('Kliknij pierwszy narożnik — na ziemi albo na ścianie bryły. Po przejechaniu kursorem po krawędzi zostaje linia śledzenia; <kbd>⇧</kbd> trzyma na niej kursor.');
   }
   // płaszczyzna o normalnej n przez pierwszy narożnik; boki prostokąta wzdłuż krawędzi ściany, jeśli jest podana
   setPlane(n, along) {
@@ -268,7 +269,7 @@ export class RectTool extends Tool {
   }
   vcb() {
     const d = this.dims() || (this.lastValid() ? [this.last.a, this.last.b] : null);
-    return { label: 'Wymiary', value: d ? fmtNum(Math.abs(d[0])) + '; ' + fmtLength(Math.abs(d[1])) : '' };
+    return { label: _t('Wymiary'), value: d ? fmtNum(Math.abs(d[0])) + '; ' + fmtLength(Math.abs(d[1])) : '' };
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   move(e, x, y) {
@@ -330,11 +331,11 @@ export class PushTool extends Tool {
   hint() {
     const mod = this.app.isMac ? '⌥' : 'Ctrl';
     return this.active
-      ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
-      : this.picked() ? 'Zaznaczona ściana: kliknij gdziekolwiek i przesuń, żeby ją wypchnąć, albo wpisz odległość po kliknięciu.'
-      : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle zmienia tę bryłę: wyciągnięta staje się jej częścią, wciśnięta wycina w niej otwór albo wnękę. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
+      ? _t`Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? _t('<b>włączone: nowa bryła, istniejące krawędzie zostają</b>') : _t('nowa bryła, istniejące krawędzie zostają')}.`
+      : this.picked() ? _t('Zaznaczona ściana: kliknij gdziekolwiek i przesuń, żeby ją wypchnąć, albo wpisz odległość po kliknięciu.')
+      : _t`Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle zmienia tę bryłę: wyciągnięta staje się jej częścią, wciśnięta wycina w niej otwór albo wnękę. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? _t('<b>włączone: nowa bryła</b>') : _t('nowa bryła, krawędzie zostają')}.`;
   }
-  vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
+  vcb() { return { label: _t('Odległość'), value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   shapeOf(id, m = this.model) { return m.shapes.find(s => s.id === id); }
   move(e, x, y) {
@@ -412,7 +413,7 @@ export class PushTool extends Tool {
     if (!this.copy) {
       const s = this.shapeOf(A.shapeId);
       const k = s && !s.geo ? mergeTouching(this.model, s) : 0;
-      if (k) this.app.toast?.(`Bryły się połączyły, bo stykają się ścianami. Osobne zostają bryły w grupach albo wypchnięte z ${this.app.isMac ? '⌥' : 'Ctrl'}.`);
+      if (k) this.app.toast?.(_t`Bryły się połączyły, bo stykają się ścianami. Osobne zostają bryły w grupach albo wypchnięte z ${this.app.isMac ? '⌥' : 'Ctrl'}.`);
     }
     this.app.commitLive(A.start);
     this.app.lastPush = dist;
@@ -464,14 +465,14 @@ export class PushTool extends Tool {
     if (!this.active || !this.cur) return;
     drawMarker(c, v, this.cur.label ? this.cur : null);
     const P = v.toScreen(this.cur.p);
-    const txt = (this.copy ? 'Nowa bryła · ' : '') + (this.cur.label ? this.cur.label + ' · ' : '') + fmtLength(this.dist);
+    const txt = (this.copy ? _t('Nowa bryła · ') : '') + (this.cur.label ? this.cur.label + ' · ' : '') + fmtLength(this.dist);
     drawChip(c, P.x, P.y, txt, this.cur.label ? BLUE : '#4a4945');
   }
 }
 
 /* ---------- wiaderko: kolor bryły ---------- */
 export class PaintTool extends Tool {
-  hint() { return `Kliknij ścianę, żeby nadać jej kolor, materiał i krycie. <kbd>⇧</kbd> + klik maluje wszystkie połączone ściany; grupa maluje się w całości. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor.`; }
+  hint() { return _t`Kliknij ścianę, żeby nadać jej kolor, materiał i krycie. <kbd>⇧</kbd> + klik maluje wszystkie połączone ściany; grupa maluje się w całości. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor.`; }
   move(e, x, y) {
     const hit = this.v.pick(x, y);
     const s = hit && this.model.shapes.find(q => q.id === hit.shapeId);
@@ -514,7 +515,7 @@ export class PaintTool extends Tool {
 /* ---------- nawigacja lewym przyciskiem ---------- */
 export class NavTool extends Tool {
   constructor(app, mode) { super(app); this.mode = mode; }
-  hint() { return { orbit: 'Przeciągnij, żeby obrócić widok.', pan: 'Przeciągnij, żeby przesunąć widok.', zoom: 'Przeciągnij w górę albo w dół, żeby przybliżyć.' }[this.mode]; }
+  hint() { return { orbit: _t('Przeciągnij, żeby obrócić widok.'), pan: _t('Przeciągnij, żeby przesunąć widok.'), zoom: _t('Przeciągnij w górę albo w dół, żeby przybliżyć.') }[this.mode]; }
   down(e, x, y) { this.last = { x, y }; this.pivot = this.v.pivotAt(x, y); this.z0 = { x, y }; }
   move(e, x, y) {
     if (!this.last || !(e.buttons & 1)) return;
@@ -528,7 +529,7 @@ export class NavTool extends Tool {
 
 // powiększanie ramką: zaznaczony prostokąt wypełnia okno
 export class ZoomWinTool extends Tool {
-  hint() { return 'Przeciągnij ramkę wokół miejsca, które ma wypełnić okno. <kbd>Esc</kbd> przerywa.'; }
+  hint() { return _t('Przeciągnij ramkę wokół miejsca, które ma wypełnić okno. <kbd>Esc</kbd> przerywa.'); }
   reset() { this.box = null; }
   down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y }; }
   move(e, x, y) { if (this.box && (e.buttons & 1)) { this.box.x1 = x; this.box.y1 = y; } }
@@ -643,7 +644,7 @@ export function geoComp(app, x, y) {
   if (!s || !looseSolid(app, s.id)) return null;
   const fs = subFaces(s, component(s, +hit.key.split(':')[1])), pts = [];
   for (const q of fs) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p);
-  return { id: s.id, pts, polys: fs.flatMap(q => q.polys), what: 'połączone' };
+  return { id: s.id, pts, polys: fs.flatMap(q => q.polys), what: _t('połączone') };
 }
 // ściany (obszary) wspólnej geometrii jako pozycje zaznaczenia
 export function subFaces(s, idx) { return facesOfPolys(s, idx).map(f => ({ id: s.id, kind: 'face', key: f.key, polys: f.polys, pts: f.pts })); }
@@ -772,9 +773,9 @@ function drawPlus(c, x, y) {
 /* ---------- okrąg ---------- */
 export class CircleTool extends Tool {
   reset() { this.c = null; this.plane = null; this.cur = null; }
-  hint() { return this.c ? 'Przesuń, żeby ustalić promień, i kliknij — albo wpisz promień i <kbd>Enter</kbd>.' : 'Kliknij środek okręgu — na ziemi albo na ścianie. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe. Liczbę boków zmienia wpis np. <kbd>48s</kbd>.'; }
+  hint() { return this.c ? _t('Przesuń, żeby ustalić promień, i kliknij — albo wpisz promień i <kbd>Enter</kbd>.') : _t('Kliknij środek okręgu — na ziemi albo na ścianie. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe. Liczbę boków zmienia wpis np. <kbd>48s</kbd>.'); }
   r() { return this.c && this.cur ? V.dist(this.c, this.cur.p) : 0; }
-  vcb() { return { label: 'Promień', value: this.c ? fmtLength(this.r()) : this.lastValid() ? fmtLength(this.last.r) : '' }; }
+  vcb() { return { label: _t('Promień'), value: this.c ? fmtLength(this.r()) : this.lastValid() ? fmtLength(this.last.r) : '' }; }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   move(e, x, y) { this.cur = this.c ? this.app.snapper.find(x, y, { model: this.model, plane: this.plane }) : this.app.snapper.find(x, y, { model: this.model }); }
   down() {
@@ -795,7 +796,7 @@ export class CircleTool extends Tool {
   value(str) {
     // „32s” ustawia liczbę boków okręgu (jak w SketchUpie); zostaje do zmiany
     const sides = String(str).trim().match(/^(\d+)\s*s$/i);
-    if (sides && this.constructor === CircleTool) { this.app.circleSeg = Math.max(6, Math.min(200, +sides[1])); this.app.toast?.('Okrąg: ' + this.app.circleSeg + ' boków'); this.app.refresh(); return true; }
+    if (sides && this.constructor === CircleTool) { this.app.circleSeg = Math.max(6, Math.min(200, +sides[1])); this.app.toast?.(_t('Okrąg: ') + this.app.circleSeg + _t(' boków')); this.app.refresh(); return true; }
     const r = parseLength(str); if (r == null || r <= 0) return false;
     if (this.c) { this.create(r); return true; }
     if (this.lastValid() && this.app.revertLast()) { const l = this.last; this.c = l.c; this.plane = l.plane; this.create(r, l.a0); return true; }
@@ -809,14 +810,14 @@ export class CircleTool extends Tool {
       drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     }
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? 'Promień ' + fmtLength(this.r()) : s.label);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? _t('Promień ') + fmtLength(this.r()) : s.label);
   }
 }
 
 /* ---------- wielokąt foremny ---------- */
 export class PolygonTool extends CircleTool {
   constructor(app) { super(app); this.sides = 6; }
-  hint() { return this.c ? `Przesuń, żeby ustalić promień (do wierzchołka), i kliknij — albo wpisz promień. Liczba boków: ${this.sides}; wpisz np. <kbd>8s</kbd>, żeby zmienić.` : `Kliknij środek wielokąta (${this.sides} boków; <kbd>8s</kbd> zmienia liczbę). Strzałki ustawiają płaszczyznę.`; }
+  hint() { return this.c ? _t`Przesuń, żeby ustalić promień (do wierzchołka), i kliknij — albo wpisz promień. Liczba boków: ${this.sides}; wpisz np. <kbd>8s</kbd>, żeby zmienić.` : _t`Kliknij środek wielokąta (${this.sides} boków; <kbd>8s</kbd> zmienia liczbę). Strzałki ustawiają płaszczyznę.`; }
   create(r, a0 = this.angle()) {
     if (r < 1e-6) return;
     this.app.checkpoint();
@@ -837,15 +838,15 @@ export class PolygonTool extends CircleTool {
       drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     }
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? this.sides + ' boków · promień ' + fmtLength(this.r()) : s.label);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? this.sides + _t(' boków · promień ') + fmtLength(this.r()) : s.label);
   }
 }
 
 /* ---------- prostokąt obrócony (trzy punkty, w dowolnej płaszczyźnie) ---------- */
 export class RotRectTool extends Tool {
   reset() { this.p0 = null; this.p1 = null; this.cur = null; }
-  hint() { return !this.p0 ? 'Kliknij pierwszy narożnik obróconego prostokąta.' : !this.p1 ? 'Kliknij koniec pierwszego boku albo wpisz jego długość.' : 'Przesuń w bok, żeby ustalić szerokość (także pod kątem, w dowolnej płaszczyźnie), i kliknij — albo wpisz szerokość.'; }
-  vcb() { return { label: this.p1 ? 'Szerokość' : 'Długość', value: this.p1 ? fmtLength(Math.abs(this.w() || 0)) : this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : '' }; }
+  hint() { return !this.p0 ? _t('Kliknij pierwszy narożnik obróconego prostokąta.') : !this.p1 ? _t('Kliknij koniec pierwszego boku albo wpisz jego długość.') : _t('Przesuń w bok, żeby ustalić szerokość (także pod kątem, w dowolnej płaszczyźnie), i kliknij — albo wpisz szerokość.'); }
+  vcb() { return { label: this.p1 ? _t('Szerokość') : _t('Długość'), value: this.p1 ? fmtLength(Math.abs(this.w() || 0)) : this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : '' }; }
   move(e, x, y) {
     this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.p1 || this.p0, lockAxis: this.app.lockAxis, plane: this.p1 && this.plane ? this.plane : null });
   }
@@ -893,10 +894,10 @@ export class CenterArcTool extends Tool {
   constructor(app, pie) { super(app); this.pie = pie; }
   reset() { this.c = null; this.p1 = null; this.plane = null; this.cur = null; this.ang = 0; }
   hint() {
-    const what = this.pie ? 'wycinka koła' : 'łuku';
-    return !this.c ? `Kliknij środek ${what}. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.` : !this.p1 ? 'Kliknij początek (promień i kierunek) albo wpisz promień.' : 'Obróć do końca i kliknij — albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°.';
+    const what = this.pie ? _t('wycinka koła') : _t('łuku');
+    return !this.c ? _t`Kliknij środek ${what}. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.` : !this.p1 ? _t('Kliknij początek (promień i kierunek) albo wpisz promień.') : _t('Obróć do końca i kliknij — albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°.');
   }
-  vcb() { return { label: this.p1 ? 'Kąt' : 'Promień', value: this.p1 ? (Math.round(this.ang * 1800 / Math.PI) / 10 + '°').replace('.', ',') : this.c && this.cur ? fmtLength(V.dist(this.c, this.cur.p)) : '' }; }
+  vcb() { return { label: this.p1 ? _t('Kąt') : _t('Promień'), value: this.p1 ? (Math.round(this.ang * 1800 / Math.PI) / 10 + '°').replace('.', ',') : this.c && this.cur ? fmtLength(V.dist(this.c, this.cur.p)) : '' }; }
   move(e, x, y) {
     if (!this.c) { this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
     this.cur = this.app.snapper.find(x, y, { model: this.model, plane: this.plane, anchor: this.p1 ? null : this.c });
@@ -958,7 +959,7 @@ export class CenterArcTool extends Tool {
     } else if (this.c) drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p1 ? null : s);
     const Q = v.toScreen(s.p);
-    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 180 / Math.PI) + '°') : this.c ? 'Promień ' + fmtLength(V.dist(this.c, s.p)) : s.label);
+    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 180 / Math.PI) + '°') : this.c ? _t('Promień ') + fmtLength(V.dist(this.c, s.p)) : s.label);
   }
 }
 
@@ -966,8 +967,8 @@ export class CenterArcTool extends Tool {
 export class DimTool extends Tool {
   reset() { this.a = null; this.b = null; this.cur = null; this.off = null; }
   lockFrom() { return this.b ? null : this.a; }
-  hint() { return !this.a ? 'Kliknij pierwszy punkt wymiaru (koniec, środek, krawędź).' : !this.b ? 'Kliknij drugi punkt.' : 'Odsuń linię wymiarową i kliknij — albo wpisz odsunięcie.'; }
-  vcb() { return { label: this.b ? 'Odsunięcie' : 'Długość', value: this.b && this.off ? fmtLength(V.len(this.off)) : this.a && this.cur ? fmtLength(V.dist(this.a, this.cur.p)) : '' }; }
+  hint() { return !this.a ? _t('Kliknij pierwszy punkt wymiaru (koniec, środek, krawędź).') : !this.b ? _t('Kliknij drugi punkt.') : _t('Odsuń linię wymiarową i kliknij — albo wpisz odsunięcie.'); }
+  vcb() { return { label: this.b ? _t('Odsunięcie') : _t('Długość'), value: this.b && this.off ? fmtLength(V.len(this.off)) : this.a && this.cur ? fmtLength(V.dist(this.a, this.cur.p)) : '' }; }
   move(e, x, y) {
     if (!this.b) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.a, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir }); return; }
     // odsunięcie wzdłuż tej osi (prostopadłej do odcinka), w którą stronę kursor odsuwa się od niego na ekranie
@@ -1014,7 +1015,7 @@ export class DimTool extends Tool {
 /* ---------- opis z odnośnikiem ---------- */
 export class TextTool extends Tool {
   reset() { this.p = null; this.cur = null; }
-  hint() { return !this.p ? 'Kliknij punkt, który opisujesz (albo dwa razy w to samo miejsce — opis bez strzałki).' : 'Kliknij, gdzie ma stać tekst, a potem go wpisz. <kbd>Enter</kbd> kończy, <kbd>⇧</kbd><kbd>Enter</kbd> — nowy wiersz.'; }
+  hint() { return !this.p ? _t('Kliknij punkt, który opisujesz (albo dwa razy w to samo miejsce — opis bez strzałki).') : _t('Kliknij, gdzie ma stać tekst, a potem go wpisz. <kbd>Enter</kbd> kończy, <kbd>⇧</kbd><kbd>Enter</kbd> — nowy wiersz.'); }
   move(e, x, y) { this.cur = this.p ? this.app.snapper.find(x, y, { model: this.model, plane: { o: this.p, n: V.norm(this.v.getCamera().f) } }) : this.app.snapper.find(x, y, { model: this.model }); }
   down() {
     if (!this.cur) return;
@@ -1033,7 +1034,7 @@ export class TextTool extends Tool {
 /* ---------- kątomierz: prowadnica pod kątem ---------- */
 export class ProtractorTool extends CenterArcTool {
   constructor(app) { super(app, false); }
-  hint() { return !this.c ? 'Kliknij wierzchołek kąta. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.' : !this.p1 ? 'Kliknij punkt na ramieniu odniesienia (np. na krawędzi).' : 'Obróć i kliknij — albo wpisz kąt w stopniach. Powstanie prowadnica pod tym kątem.'; }
+  hint() { return !this.c ? _t('Kliknij wierzchołek kąta. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.') : !this.p1 ? _t('Kliknij punkt na ramieniu odniesienia (np. na krawędzi).') : _t('Obróć i kliknij — albo wpisz kąt w stopniach. Powstanie prowadnica pod tym kątem.'); }
   create() {
     const a = toPlane(this.plane, this.p1), a0 = Math.atan2(a[1], a[0]) + this.ang;
     const d = V.norm(V.add(V.mul(this.plane.u, Math.cos(a0)), V.mul(this.plane.v, Math.sin(a0))));
@@ -1061,8 +1062,8 @@ export class ProtractorTool extends CenterArcTool {
 /* ---------- płaszczyzna przekroju ---------- */
 export class SectionTool extends Tool {
   reset() { this.o = null; this.n = null; this.cur = null; this.depth = 0; }
-  hint() { return !this.o ? 'Najedź na ścianę i kliknij — przekrój stanie równolegle do niej. Strzałki ustawiają przekrój prostopadle do osi: <kbd>→</kbd> czerwonej, <kbd>←</kbd> zielonej, <kbd>↑</kbd> niebieskiej.' : 'Przesuń w głąb i kliknij — albo wpisz głębokość. Zdjęta zostaje strona, w którą wskazują strzałki.'; }
-  vcb() { return { label: 'Głębokość', value: this.o ? fmtLength(this.depth) : '' }; }
+  hint() { return !this.o ? _t('Najedź na ścianę i kliknij — przekrój stanie równolegle do niej. Strzałki ustawiają przekrój prostopadle do osi: <kbd>→</kbd> czerwonej, <kbd>←</kbd> zielonej, <kbd>↑</kbd> niebieskiej.') : _t('Przesuń w głąb i kliknij — albo wpisz głębokość. Zdjęta zostaje strona, w którą wskazują strzałki.'); }
+  vcb() { return { label: _t('Głębokość'), value: this.o ? fmtLength(this.depth) : '' }; }
   normalAt(s) {
     if (this.app.lockAxis) return AXES[this.app.lockAxis];
     if (s.face) { const sh = this.model.shapes.find(q => q.id === s.face.shapeId), f = sh && faceByKey(sh, s.face.key); if (f) return f.normal; }
@@ -1089,7 +1090,7 @@ export class SectionTool extends Tool {
     const q = { id: this.model.next++, o: V.sub(this.o, V.mul(this.n, depth)), n: this.n, on: true };
     this.model.sections.push(q);
     this.app.changed(); this.reset(); this.app.lockAxis = null;
-    this.app.toast?.('Przekrój włączony. Przesuń go narzędziem W albo wyłącz w okienku Widok.');
+    this.app.toast?.(_t('Przekrój włączony. Przesuń go narzędziem W albo wyłącz w okienku Widok.'));
   }
   value(str) { const L = parseLength(str); if (L == null || !this.o) return false; this.create(Math.abs(L)); return true; }
   draw(c, v) {
@@ -1101,7 +1102,7 @@ export class SectionTool extends Tool {
     drawSeg(c, v, o, V.sub(o, V.mul(n, R * 0.8)), '#c0752f', { width: 1.4 });
     if (this.o) drawSeg(c, v, this.o, o, INK, { width: 1, dash: [3, 3] });
     if (!this.o) drawMarker(c, v, s);
-    const P = v.toScreen(o); drawChip(c, P.x, P.y, this.o ? 'Głębokość ' + fmtLength(this.depth) : 'Przekrój');
+    const P = v.toScreen(o); drawChip(c, P.x, P.y, this.o ? _t('Głębokość ') + fmtLength(this.depth) : _t('Przekrój'));
   }
 }
 
@@ -1109,7 +1110,7 @@ export class SectionTool extends Tool {
 export class PlaceTool extends Tool {
   reset() { this.cur = null; }
   setItem(item) { this.item = item; this.edges = item.shapes.flatMap(sh => shapeEdges(sh).map(e => [e.a, e.b])).concat((item.lines || []).map(l => [l.a, l.b])); }
-  hint() { if (this.item && this.item.paste) return 'Kliknij, gdzie wkleić. <kbd>Esc</kbd> przerywa.'; return this.item ? `Kliknij, gdzie postawić: <b>${this.item.name}</b>. Model trafia do szkicu jako komponent — kopie (W z ${this.app.isMac ? '⌥' : 'Ctrl'}) zmieniają się razem. <kbd>Esc</kbd> przerywa.` : ''; }
+  hint() { if (this.item && this.item.paste) return _t('Kliknij, gdzie wkleić. <kbd>Esc</kbd> przerywa.'); return this.item ? _t`Kliknij, gdzie postawić: <b>${this.item.name}</b>. Model trafia do szkicu jako komponent — kopie (W z ${this.app.isMac ? '⌥' : 'Ctrl'}) zmieniają się razem. <kbd>Esc</kbd> przerywa.` : ''; }
   move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
   down() { if (!this.cur || !this.item) return; this.app.placeItem(this.item, this.cur.p.slice()); }
   draw(c, v) {
@@ -1127,9 +1128,9 @@ export class PlaceTool extends Tool {
 export class ArcTool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.plane = null; this.cur = null; this.h = 0; }
   hint() {
-    return !this.p1 ? 'Kliknij początek łuku.' : !this.p2 ? 'Kliknij koniec łuku albo wpisz długość cięciwy.' : 'Przesuń, żeby wygiąć łuk, i kliknij — albo wpisz wysokość wygięcia. Łuk przyciąga do półokręgu i do styczności z linią, od której zaczyna.';
+    return !this.p1 ? _t('Kliknij początek łuku.') : !this.p2 ? _t('Kliknij koniec łuku albo wpisz długość cięciwy.') : _t('Przesuń, żeby wygiąć łuk, i kliknij — albo wpisz wysokość wygięcia. Łuk przyciąga do półokręgu i do styczności z linią, od której zaczyna.');
   }
-  vcb() { return { label: this.p2 ? 'Wygięcie' : 'Długość', value: this.p2 ? fmtLength(Math.abs(this.h)) : this.p1 && this.cur ? fmtLength(V.dist(this.p1, this.cur.p)) : '' }; }
+  vcb() { return { label: this.p2 ? _t('Wygięcie') : _t('Długość'), value: this.p2 ? fmtLength(Math.abs(this.h)) : this.p1 && this.cur ? fmtLength(V.dist(this.p1, this.cur.p)) : '' }; }
   move(e, x, y) {
     if (!this.p1) { this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
     this.cur = this.app.snapper.find(x, y, { model: this.model, plane: this.plane });
@@ -1199,7 +1200,7 @@ export class ArcTool extends Tool {
     else if (this.p1) drawSeg(c, v, this.p1, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p2 ? null : s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? 'Półokrąg · ' : this.tan ? 'Styczny · ' : '') + 'wygięcie ' + fmtLength(Math.abs(this.h)) : s.label);
+    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? _t('Półokrąg · ') : this.tan ? _t('Styczny · ') : '') + _t('wygięcie ') + fmtLength(Math.abs(this.h)) : s.label);
   }
 }
 function rotVec3(v, k, t) { const c = Math.cos(t), s = Math.sin(t); return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c))); }
@@ -1207,7 +1208,7 @@ function rotVec3(v, k, t) { const c = Math.cos(t), s = Math.sin(t); return V.add
 /* ---------- łuk przez trzy punkty ---------- */
 export class Arc3Tool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.cur = null; }
-  hint() { return !this.p1 ? 'Kliknij początek łuku.' : !this.p2 ? 'Kliknij punkt, przez który łuk ma przejść.' : 'Kliknij koniec łuku.'; }
+  hint() { return !this.p1 ? _t('Kliknij początek łuku.') : !this.p2 ? _t('Kliknij punkt, przez który łuk ma przejść.') : _t('Kliknij koniec łuku.'); }
   move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
   // okrąg przez trzy punkty w przestrzeni, od p1 przez p2 do p3
   points(p3) {
@@ -1246,7 +1247,7 @@ export class Arc3Tool extends Tool {
 /* ---------- linia odręczna ---------- */
 export class FreehandTool extends Tool {
   reset() { this.pts = null; this.plane = null; this.cur = null; }
-  hint() { return 'Przeciągnij, żeby narysować linię odręczną — na ziemi albo na ścianie, od której zaczynasz. Skończ w punkcie początkowym, żeby zamknąć obrys w ścianę.'; }
+  hint() { return _t('Przeciągnij, żeby narysować linię odręczną — na ziemi albo na ścianie, od której zaczynasz. Skończ w punkcie początkowym, żeby zamknąć obrys w ścianę.'); }
   move(e, x, y) {
     if (!this.pts) { this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
     if (!(e.buttons & 1)) return;
@@ -1284,8 +1285,8 @@ function setEye(app, str) {
   return true;
 }
 export class LookTool extends Tool {
-  hint() { return 'Przeciągnij, żeby rozejrzeć się z miejsca, w którym stoi kamera. Wpisz wysokość oczu i <kbd>Enter</kbd>, żeby ją zmienić.'; }
-  vcb() { return { label: 'Wysokość oczu', value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
+  hint() { return _t('Przeciągnij, żeby rozejrzeć się z miejsca, w którym stoi kamera. Wpisz wysokość oczu i <kbd>Enter</kbd>, żeby ją zmienić.'); }
+  vcb() { return { label: _t('Wysokość oczu'), value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
   value(str) { return setEye(this.app, str); }
   down(e, x, y) { this.last = { x, y }; }
   move(e, x, y) { if (!this.last || !(e.buttons & 1)) return; this.v.look(x - this.last.x, y - this.last.y); this.last = { x, y }; }
@@ -1295,8 +1296,8 @@ export class LookTool extends Tool {
 // w bok skręcasz; im dalej, tym szybciej. Z Shiftem ruch jest w pionie i w bok.
 export class WalkTool extends Tool {
   reset() { this.o = null; cancelAnimationFrame(this.raf); this.raf = 0; }
-  hint() { return 'Przytrzymaj przycisk i odsuń kursor od krzyżyka: w górę — naprzód, w dół — w tył, w bok — obrót; im dalej, tym szybciej. <kbd>⇧</kbd> — w górę, w dół i bokiem. Wpisz wysokość oczu i <kbd>Enter</kbd>.'; }
-  vcb() { return { label: 'Wysokość oczu', value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
+  hint() { return _t('Przytrzymaj przycisk i odsuń kursor od krzyżyka: w górę — naprzód, w dół — w tył, w bok — obrót; im dalej, tym szybciej. <kbd>⇧</kbd> — w górę, w dół i bokiem. Wpisz wysokość oczu i <kbd>Enter</kbd>.'); }
+  vcb() { return { label: _t('Wysokość oczu'), value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
   value(str) { return setEye(this.app, str); }
   down(e, x, y) {
     if (this.v.ortho) this.v.toggleOrtho();
@@ -1322,8 +1323,8 @@ export class WalkTool extends Tool {
 // Ustaw kamerę: klik stawia ją nad wskazanym punktem na wysokości oczu; przeciągnięcie — w pierwszym punkcie, patrzy na drugi.
 export class CamPosTool extends Tool {
   reset() { this.p = null; this.cur = null; this.at = null; }
-  hint() { return 'Kliknij miejsce, w którym ma stanąć kamera (na wysokości oczu) — albo przeciągnij od miejsca kamery do punktu, na który ma patrzeć. Wpisz wysokość oczu i <kbd>Enter</kbd>.'; }
-  vcb() { return { label: 'Wysokość oczu', value: fmtEye(this.app) }; }
+  hint() { return _t('Kliknij miejsce, w którym ma stanąć kamera (na wysokości oczu) — albo przeciągnij od miejsca kamery do punktu, na który ma patrzeć. Wpisz wysokość oczu i <kbd>Enter</kbd>.'); }
+  vcb() { return { label: _t('Wysokość oczu'), value: fmtEye(this.app) }; }
   value(str) { const h = parseLength(str); if (h == null || h <= 0) return false; this.app.eyeH = h; return true; }
   move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
   down(e, x, y) { if (this.cur) { this.p = this.cur.p.slice(); this.at = { x, y }; } }
@@ -1337,7 +1338,7 @@ export class CamPosTool extends Tool {
     const s = this.cur; if (!s) return;
     if (this.p) drawSeg(c, v, this.p, s.p, INK, { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.p ? 'Patrz tutaj' : 'Oczy ' + fmtEye(this.app) + ' nad tym punktem');
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.p ? _t('Patrz tutaj') : _t('Oczy ') + fmtEye(this.app) + ' nad tym punktem');
   }
 }
 
@@ -1369,11 +1370,11 @@ export class MoveTool extends Tool {
   reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; this.sub = null; this.hov = null; }
   hint() {
     const k = copyKey(this.app);
-    if (this.app.editSolid != null && !this.p0) return 'Edycja bryły: chwyć wierzchołek, krawędź albo ścianę i przesuń. Strzałki blokują oś, wymiar wpiszesz z klawiatury.';
-    if (this.app.sub.length && !this.app.selection.size && !this.p0) return 'Kliknij punkt, za który chwytasz zaznaczoną ścianę albo krawędź — przesunie się tylko ona, a bryła się odkształci.';
-    if (this.p0) return `Kliknij punkt docelowy albo wpisz odległość. Strzałki blokują oś, a przytrzymany <kbd>⇧</kbd> — bieżący kierunek${this.app.lockDir ? ' (<b>zablokowany</b>)' : ''}. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`;
-    if (this.app.selection.size) return `Kliknij punkt, za który chwytasz zaznaczenie. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
-    return `Bez zaznaczenia chwytasz to, co pod kursorem: wierzchołek, krawędź albo ścianę bryły (bryła się odkształca), linię albo całą grupę. Żeby przesunąć całość, zaznacz ją najpierw dwuklikiem albo zrób z niej grupę. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    if (this.app.editSolid != null && !this.p0) return _t('Edycja bryły: chwyć wierzchołek, krawędź albo ścianę i przesuń. Strzałki blokują oś, wymiar wpiszesz z klawiatury.');
+    if (this.app.sub.length && !this.app.selection.size && !this.p0) return _t('Kliknij punkt, za który chwytasz zaznaczoną ścianę albo krawędź — przesunie się tylko ona, a bryła się odkształci.');
+    if (this.p0) return _t`Kliknij punkt docelowy albo wpisz odległość. Strzałki blokują oś, a przytrzymany <kbd>⇧</kbd> — bieżący kierunek${this.app.lockDir ? _t(' (<b>zablokowany</b>)') : ''}. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: kopia</b>') : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`;
+    if (this.app.selection.size) return _t`Kliknij punkt, za który chwytasz zaznaczenie. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: kopia</b>') : 'kopia'}.`;
+    return _t`Bez zaznaczenia chwytasz to, co pod kursorem: wierzchołek, krawędź albo ścianę bryły (bryła się odkształca), linię albo całą grupę. Żeby przesunąć całość, zaznacz ją najpierw dwuklikiem albo zrób z niej grupę. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: kopia</b>') : 'kopia'}.`;
   }
   lockFrom() { return this.p0; }
   // bez zaznaczenia: wierzchołek, krawędź albo ściana bryły luzem pod kursorem (jak w SketchUpie)
@@ -1387,7 +1388,7 @@ export class MoveTool extends Tool {
     return sub;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Odległość', value: this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : this.lastValid() ? fmtLength(V.len(this.last.d)) : '' }; }
+  vcb() { return { label: _t('Odległość'), value: this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : this.lastValid() ? fmtLength(V.len(this.last.d)) : '' }; }
   move(e, x, y) {
     this.mx = x; this.my = y;
     if (!this.p0) {
@@ -1448,17 +1449,17 @@ export class MoveTool extends Tool {
   subAt(c) {
     const s = this.model.shapes.find(q => q.id === this.app.editSolid); if (!s) return null;
     const near = (a, b) => V.dist(a, b) < 1e-5;
-    if (c.type === 'end' && vertices(s).some(v => near(v, c.p))) return { id: s.id, pts: [c.p.slice()], what: 'wierzchołek' };
+    if (c.type === 'end' && vertices(s).some(v => near(v, c.p))) return { id: s.id, pts: [c.p.slice()], what: _t('wierzchołek') };
     if (c.type === 'mid' || c.type === 'edge') {
       for (const e of shapeEdges(s)) {
         const L = V.dist(e.a, e.b), t = V.dot(V.sub(c.p, e.a), V.norm(V.sub(e.b, e.a)));
-        if (t > -1e-6 && t < L + 1e-6 && V.dist(V.add(e.a, V.mul(V.norm(V.sub(e.b, e.a)), t)), c.p) < 1e-4) return { id: s.id, pts: [e.a.slice(), e.b.slice()], what: 'krawędź' };
+        if (t > -1e-6 && t < L + 1e-6 && V.dist(V.add(e.a, V.mul(V.norm(V.sub(e.b, e.a)), t)), c.p) < 1e-4) return { id: s.id, pts: [e.a.slice(), e.b.slice()], what: _t('krawędź') };
       }
     }
     if (c.face && c.face.shapeId === s.id) {
       const f = faceByKey(s, c.face.key); if (!f) return null;
       const pts = []; for (const p of f.region || [f.verts]) for (const v of p) if (!pts.some(q => near(q, v))) pts.push(v.slice());
-      return { id: s.id, pts, what: 'ściana' };
+      return { id: s.id, pts, what: _t('ściana') };
     }
     return null;
   }
@@ -1494,7 +1495,7 @@ export class MoveTool extends Tool {
     if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || (s.locked ? '#a05fb0' : INK), { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? { vertex: 'Wierzchołek', edge: 'Krawędź', face: 'Ściana' }[h.kind] : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
+    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? { vertex: _t('Wierzchołek'), edge: _t('Krawędź'), face: _t('Ściana') }[h.kind] : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
   }
 }
 
@@ -1503,13 +1504,13 @@ export class RotateTool extends Tool {
   reset() { this.c = null; this.n = null; this.ref = null; this.targets = null; this.start = null; this.cur = null; this.ang = 0; this.lockN = null; this.freeN = null; this.sub = null; this.downAt = null; this.axisDrag = false; }
   hint() {
     const k = copyKey(this.app);
-    if (!this.c) return `${this.app.sub.length && !this.app.selection.size ? 'Obracasz zaznaczoną ścianę albo krawędź (bryła się skręci). ' : ''}Kliknij środek obrotu (na ziemi albo na ścianie). Kątomierz układa się na ścianie pod kursorem — przytrzymaj <kbd>⇧</kbd>, żeby zablokować jego płaszczyznę${this.lockN ? ' (<b>zablokowana</b>)' : ''}. Przeciągnij od środka, żeby wyznaczyć własną oś obrotu. Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
-    if (this.axisDrag) return 'Puść przycisk, gdy linia pokazuje oś obrotu.';
-    if (!this.ref) return 'Kliknij punkt, od którego liczysz kąt.';
-    return `Obróć i kliknij albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}; po kopii <kbd>x6</kbd> robi szyk.`;
+    if (!this.c) return _t`${this.app.sub.length && !this.app.selection.size ? _t('Obracasz zaznaczoną ścianę albo krawędź (bryła się skręci). ') : ''}Kliknij środek obrotu (na ziemi albo na ścianie). Kątomierz układa się na ścianie pod kursorem — przytrzymaj <kbd>⇧</kbd>, żeby zablokować jego płaszczyznę${this.lockN ? _t(' (<b>zablokowana</b>)') : ''}. Przeciągnij od środka, żeby wyznaczyć własną oś obrotu. Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: kopia</b>') : 'kopia'}.`;
+    if (this.axisDrag) return _t('Puść przycisk, gdy linia pokazuje oś obrotu.');
+    if (!this.ref) return _t('Kliknij punkt, od którego liczysz kąt.');
+    return _t`Obróć i kliknij albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: kopia</b>') : 'kopia'}; po kopii <kbd>x6</kbd> robi szyk.`;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Kąt', value: this.ref ? fmtDeg(this.ang) : this.lastValid() ? fmtDeg(this.last.ang) : '' }; }
+  vcb() { return { label: _t('Kąt'), value: this.ref ? fmtDeg(this.ang) : this.lastValid() ? fmtDeg(this.last.ang) : '' }; }
   move(e, x, y) {
     this.mx = x; this.my = y;
     if (!this.c) {
@@ -1633,7 +1634,7 @@ export class RotateTool extends Tool {
       drawSeg(c, v, ctr, at(0, R * 1.6), INK, { width: 1, dash: [3, 3] });
       drawSeg(c, v, ctr, at(this.ang, R * 1.6), INK, { width: 1.5 });
     } else if (this.c && s && !this.axisDrag) drawSeg(c, v, ctr, s.p, INK, { width: 1, dash: [3, 3] });
-    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : this.axisDrag ? 'Oś obrotu' : s.label); }
+    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : this.axisDrag ? _t('Oś obrotu') : s.label); }
   }
 }
 const fmtDeg = a => (a * 180 / Math.PI).toFixed(1).replace('.', ',') + '°';
@@ -1689,12 +1690,12 @@ function pathSide(pts, p, closed) {
 export class OffsetTool extends Tool {
   reset() { this.face = null; this.path = null; this.cur = null; this.d = 0; }
   hint() {
-    if (this.path) return 'Przesuń na jedną albo drugą stronę linii i kliknij — albo wpisz odległość. Powstaną nowe linie równoległe do zaznaczonych.';
-    if (lineChain(this.app)) return 'Zaznaczone linie: kliknij gdziekolwiek i przesuń, żeby je odsunąć.';
-    return this.face ? 'Przesuń do środka albo na zewnątrz i kliknij — albo wpisz odległość. Powstaje nowa ściana, którą możesz wypchnąć.' : 'Kliknij ścianę, której obrys chcesz odsunąć. Zaznacz wcześniej połączone linie, żeby odsunąć same linie.';
+    if (this.path) return _t('Przesuń na jedną albo drugą stronę linii i kliknij — albo wpisz odległość. Powstaną nowe linie równoległe do zaznaczonych.');
+    if (lineChain(this.app)) return _t('Zaznaczone linie: kliknij gdziekolwiek i przesuń, żeby je odsunąć.');
+    return this.face ? _t('Przesuń do środka albo na zewnątrz i kliknij — albo wpisz odległość. Powstaje nowa ściana, którą możesz wypchnąć.') : _t('Kliknij ścianę, której obrys chcesz odsunąć. Zaznacz wcześniej połączone linie, żeby odsunąć same linie.');
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Odległość', value: this.face || this.path ? fmtLength(Math.abs(this.d)) : this.lastValid() ? fmtLength(Math.abs(this.last.d)) : '' }; }
+  vcb() { return { label: _t('Odległość'), value: this.face || this.path ? fmtLength(Math.abs(this.d)) : this.lastValid() ? fmtLength(Math.abs(this.last.d)) : '' }; }
   createPath(d) {
     const P = this.path; if (Math.abs(d) < 1e-6) return;
     const pts = offsetPath(P.pts, d, P.closed).map(q => fromPlane(P, q));
@@ -1736,7 +1737,7 @@ export class OffsetTool extends Tool {
   }
   create(d) {
     const pts = offsetPolygon(this.face.pts, d);
-    if (!pts || Math.abs(d) < 1e-6) { this.app.toast?.('Tak daleko nie da się odsunąć tego obrysu.'); return; }
+    if (!pts || Math.abs(d) < 1e-6) { this.app.toast?.(_t('Tak daleko nie da się odsunąć tego obrysu.')); return; }
     this.app.checkpoint();
     const s = makeShape(this.model, { o: this.face.o, u: this.face.u, v: this.face.v }, pts, 0, this.color || null);
     if (this.soft) s.soft = true;
@@ -1763,7 +1764,7 @@ export class OffsetTool extends Tool {
     const pts = offsetPolygon(this.face.pts, this.d);
     if (pts) drawPoly(c, v, pts.map(q => fromPlane(this.face, q)), INK, true, { width: 1.6 });
     const P = v.toScreen(this.cur.p);
-    drawChip(c, P.x, P.y, (this.d >= 0 ? 'do środka ' : 'na zewnątrz ') + fmtLength(Math.abs(this.d)));
+    drawChip(c, P.x, P.y, (this.d >= 0 ? _t('do środka ') : _t('na zewnątrz ')) + fmtLength(Math.abs(this.d)));
   }
 }
 
@@ -1771,10 +1772,10 @@ export class OffsetTool extends Tool {
 export class TapeTool extends Tool {
   reset() { this.p0 = null; this.dir = null; this.cur = null; }
   hint() {
-    if (!this.p0) return 'Kliknij krawędź (albo jej środek), żeby poprowadzić równoległą prowadnicę, albo narożnik, żeby zmierzyć odległość. Prowadnice usuwa gumka.';
-    return this.dir ? 'Przesuń i kliknij albo wpisz odległość prowadnicy od krawędzi.' : 'Kliknij drugi punkt pomiaru.';
+    if (!this.p0) return _t('Kliknij krawędź (albo jej środek), żeby poprowadzić równoległą prowadnicę, albo narożnik, żeby zmierzyć odległość. Prowadnice usuwa gumka.');
+    return this.dir ? _t('Przesuń i kliknij albo wpisz odległość prowadnicy od krawędzi.') : _t('Kliknij drugi punkt pomiaru.');
   }
-  vcb() { return { label: this.dir ? 'Odstęp' : 'Długość', value: this.p0 && this.cur ? fmtLength(this.dist()) : this.measured != null ? fmtLength(this.measured) : '' }; }
+  vcb() { return { label: this.dir ? _t('Odstęp') : _t('Długość'), value: this.p0 && this.cur ? fmtLength(this.dist()) : this.measured != null ? fmtLength(this.measured) : '' }; }
   off() { const d = V.sub(this.cur.p, this.p0); return V.sub(d, V.mul(this.dir, V.dot(d, this.dir))); }
   dist() { return this.dir ? V.len(this.off()) : V.dist(this.p0, this.cur.p); }
   move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.dir ? null : this.p0, lockAxis: this.dir ? null : this.app.lockAxis, lockDir: this.dir ? null : this.app.lockDir }); }
@@ -1864,7 +1865,7 @@ export class EraserTool extends Tool {
   reset() { this.hover = null; this.erasing = false; }
   hint() {
     const k = copyKey(this.app);
-    return `Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Linia dzieląca ścianę znika i ściana się scala; krawędź zabiera ściany, które się na niej stykają, razem z krawędziami, które zostałyby po nich luzem. Żeby zostawić sam obrys, zaznacz ścianę i naciśnij <kbd>Delete</kbd>. <kbd>⇧</kbd> — ukryj krawędź, <kbd>${k}</kbd> — wygładź, <kbd>⇧</kbd><kbd>${k}</kbd> — przywróć (przy włączonej ukrytej geometrii).`;
+    return _t`Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Linia dzieląca ścianę znika i ściana się scala; krawędź zabiera ściany, które się na niej stykają, razem z krawędziami, które zostałyby po nich luzem. Żeby zostawić sam obrys, zaznacz ścianę i naciśnij <kbd>Delete</kbd>. <kbd>⇧</kbd> — ukryj krawędź, <kbd>${k}</kbd> — wygładź, <kbd>⇧</kbd><kbd>${k}</kbd> — przywróć (przy włączonej ukrytej geometrii).`;
   }
   mode(e) { const soft = this.app.isMac ? e.altKey : e.ctrlKey; return e.shiftKey && soft ? 'show' : e.shiftKey ? 'hide' : soft ? 'soft' : 'erase'; }
   move(e, x, y) {
@@ -1955,12 +1956,12 @@ export class ScaleTool extends Tool {
   }
   hint() {
     const k = copyKey(this.app);
-    if (this.active) return `Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>; <kbd>-1</kbd> odbija) albo wymiar z jednostką (np. <kbd>6m</kbd>). <kbd>${k}</kbd> — ${this.copy ? '<b>od środka</b>' : 'od środka'}, <kbd>⇧</kbd> — jednolicie.`;
-    if (!this.app.selection.size) return 'Kliknij bryłę, linię albo grupę, którą chcesz skalować.';
-    return `Chwyć uchwyt ramki: narożnik skaluje całość, środek krawędzi — dwa kierunki, środek ściany — jeden kierunek. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: od środka</b>' : 'od środka'}, <kbd>⇧</kbd> — jednolicie.`;
+    if (this.active) return _t`Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>; <kbd>-1</kbd> odbija) albo wymiar z jednostką (np. <kbd>6m</kbd>). <kbd>${k}</kbd> — ${this.copy ? _t('<b>od środka</b>') : _t('od środka')}, <kbd>⇧</kbd> — jednolicie.`;
+    if (!this.app.selection.size) return _t('Kliknij bryłę, linię albo grupę, którą chcesz skalować.');
+    return _t`Chwyć uchwyt ramki: narożnik skaluje całość, środek krawędzi — dwa kierunki, środek ściany — jeden kierunek. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: od środka</b>') : _t('od środka')}, <kbd>⇧</kbd> — jednolicie.`;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Skala', value: this.active ? fmtK(this.k) : this.lastValid() ? fmtK(this.last.k) : '' }; }
+  vcb() { return { label: _t('Skala'), value: this.active ? fmtK(this.k) : this.lastValid() ? fmtK(this.last.k) : '' }; }
   move(e, x, y) {
     this.mx = x; this.my = y; this.shift = e.shiftKey;
     const A = this.active;
@@ -2060,7 +2061,7 @@ export class ScaleTool extends Tool {
       drawSeg(c, v, A.anchor, f(A.pos), INK, { width: 1, dash: [3, 3] });
       dot(A.anchor, RED, 4); dot(f(A.pos), RED, 4.5);
       const P = v.toScreen(f(A.pos));
-      drawChip(c, P.x, P.y, 'Skala ' + fmtK(this.k) + (this.shift && !A.act.every(Boolean) ? ' · jednolicie' : '') + (this.copy ? ' · od środka' : ''));
+      drawChip(c, P.x, P.y, _t('Skala ') + fmtK(this.k) + (this.shift && !A.act.every(Boolean) ? ' · jednolicie' : '') + (this.copy ? _t(' · od środka') : ''));
       return;
     }
     for (const g of this.grips(b)) dot(g.pos, GREEN);
@@ -2068,7 +2069,7 @@ export class ScaleTool extends Tool {
       const anchor = this.copy ? b.c : boxPoint(b, this.hover.sg.map(q => -q));
       dot(anchor, RED, 4); dot(this.hover.pos, RED, 4.5);
       const n = this.hover.act.filter(Boolean).length, P = v.toScreen(this.hover.pos);
-      drawChip(c, P.x, P.y, n === 3 ? 'Cała bryła' : n === 2 ? 'Dwa kierunki' : 'Jeden kierunek');
+      drawChip(c, P.x, P.y, n === 3 ? _t('Cała bryła') : n === 2 ? _t('Dwa kierunki') : _t('Jeden kierunek'));
     }
   }
 }

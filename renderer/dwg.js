@@ -1,3 +1,4 @@
+import { _t } from './i18n.js';
 // Czytanie plików DWG wprost w programie przez LibreDWG (GNU GPL-3, skompilowany do WebAssembly).
 // LibreDWG odczytuje rysunek do bazy encji; tu zamieniamy ją na prosty tekst DXF z tymi encjami, które rozumie
 // nasz czytnik podkładu (dxf.js) — dzięki temu DWG i DXF idą dalej tą samą, sprawdzoną drogą.
@@ -82,7 +83,7 @@ async function viaDatabase(u8) {
   const warn = console.warn, log = console.log; console.warn = console.log = () => {};
   let dwg;
   try { dwg = L.dwg_read_data(buf, mod.Dwg_File_Type.DWG); } finally { console.warn = warn; console.log = log; }
-  if (!dwg) throw new Error('LibreDWG nie odczytał tego pliku');
+  if (!dwg) throw new Error(_t('LibreDWG nie odczytał tego pliku'));
   let db;
   try { db = L.convert(dwg); } finally { try { L.dwg_free(dwg); } catch (e) {} }
   const o = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', String(db.header?.INSUNITS || 0), '0', 'ENDSEC'];
@@ -114,7 +115,7 @@ async function viaDxfWriter(u8) {
   const W = L.wasmInstance;
   W.FS.writeFile('/in.dwg', new Uint8Array(buf));
   const rc = W.dwg_write_dxf('/in.dwg', '/out.dxf');
-  if (rc >= 128 || !W.FS.analyzePath('/out.dxf', false).exists) throw new Error('LibreDWG nie zapisał DXF (kod ' + rc + ')');
+  if (rc >= 128 || !W.FS.analyzePath('/out.dxf', false).exists) throw new Error(_t('LibreDWG nie zapisał DXF (kod ') + rc + ')');
   return new TextDecoder().decode(W.FS.readFile('/out.dxf'));
 }
 
@@ -126,5 +127,5 @@ export async function readDwg(u8, parse) {
     try { const d = parse(await way(u8)); if (d && d.layers && d.layers.length) return d; }
     catch (e) { last = e; }
   }
-  throw new Error('Nie udało się odczytać DWG' + (last && last.message ? ' (' + last.message + ')' : ''));
+  throw new Error(_t('Nie udało się odczytać DWG') + (last && last.message ? ' (' + last.message + ')' : ''));
 }
