@@ -69,8 +69,9 @@ class Tool {
   constructor(app) { this.app = app; }
   get v() { return this.app.viewer; }
   get model() { return this.app.model; }
-  activate() { this.reset(); }
-  deactivate() { this.reset(); this.v.setHoverFace(null); }
+  // tryb kopii (⌥ / Ctrl) nie przechodzi na następne użycie narzędzia — po wybraniu go od nowa jest wyłączony
+  activate() { this.copy = false; this.reset(); }
+  deactivate() { this.copy = false; this.reset(); this.v.setHoverFace(null); }
   reset() {}
   down() {} move() {} up() {} dbl() {}
   key() { return false; }
@@ -458,7 +459,7 @@ export class PushTool extends Tool {
     this.dist = d; this.apply(d); this.finish(d);
   }
   key(e) {
-    if ((this.app.isMac && e.key === 'Alt') || (!this.app.isMac && e.key === 'Control')) {
+    if (isCopyKey(this.app, e)) {
       this.copy = !this.copy;
       if (this.active) this.apply(this.dist || 0);
       this.app.updateHint(); return true;
@@ -784,7 +785,8 @@ function drawPoly(c, v, pts3, color = INK, closed = true, opts) { for (let i = 0
 const parseCount = str => { const m = String(str).trim().match(/^(?:[x*×](\d+)|(\d+)[x*×])$/i); return m ? +(m[1] || m[2]) : null; };
 const parseDivide = str => { const m = String(str).trim().match(/^\/(\d+)$/); return m ? +m[1] : null; };
 const copyKey = app => app.isMac ? '⌥' : 'Ctrl';
-const isCopyKey = (app, e) => (app.isMac && e.key === 'Alt') || (!app.isMac && e.key === 'Control');
+// sam ⌥ (Mac) / Ctrl (Windows), bez innych klawiszy i bez powtórzeń przy przytrzymaniu — ⌘⌥… czy Ctrl+Z nie włączają kopii
+const isCopyKey = (app, e) => !e.repeat && !e.metaKey && !e.shiftKey && (app.isMac ? e.key === 'Alt' && !e.ctrlKey : e.key === 'Control' && !e.altKey);
 
 /* ---------- okrąg ---------- */
 export class CircleTool extends Tool {
