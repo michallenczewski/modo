@@ -65,6 +65,10 @@ export function rebuildPlane(s, n, w) {
 // Płaska ściana (obrys i otwory w 3D). Część, która leży na istniejącej ścianie, nie staje się drugą ścianą — jej krawędzie
 // dzielą tamtą (jak prostokąt narysowany na ścianie w SketchUpie). Reszta jest nową ścianą. Po serii wywołań: finish(s).
 export function addFace(s, outer, holes = [], paint = null) {
+  // punkty nowej ściany, które trafiają w istniejące wierzchołki, biorą ich dokładne współrzędne (bez „pływania” o ułamki)
+  const have = new Map(); for (const p of s.polys) for (const v of p) have.set(VK(v), v);
+  const weld = L => L.map(p => (have.get(VK(p)) || p).slice());
+  outer = weld(outer); holes = holes.map(weld);
   const n = newell(outer), w = V.dot(n, outer[0]);
   const idx = []; s.polys.forEach((p, i) => { if (inPlane(p, n, w)) idx.push(i); });
   const pieces = () => holes.length ? triangulateHoles(outer, holes) : [outer.map(p => p.slice())];

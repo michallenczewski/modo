@@ -13,3 +13,4 @@
 - Pliki .skp importujemy przez OpenSKP (`renderer/skp.js`); to czytnik odtworzony z formatu, bez SDK Trimble — nie dodawaj oficjalnego SDK.
 - Program sam sprawdza nowe wersje w wydaniach GitHuba (`releases/latest`) i szuka pliku `Modo-<wersja>-win-x64.exe` albo `Modo-<wersja>-mac-<arm64|x64>.dmg`. Nie zmieniaj tych nazw.
 - Nowe miejsce, które pomija ukryte elementy, musi korzystać z `isHidden(model, e)` (warstwy i ukrywanie), a nie z samego pola `hidden`.
+- Model jest jak w SketchUpie: wszystko narysowane luzem w jednym kontekście to jedna wspólna geometria (bryła z flagą `geo`, `renderer/geo.js`); obiektem jest tylko grupa albo komponent. Nowe narzędzie nie tworzy trwałych osobnych brył — tworzy bryłę albo płaską ścianę, a `absorb` w `postEdit` zlewa ją z resztą. Zaznaczone ściany leżą w `app.sub`; polecenie działające na obiektach najpierw woła `app.liftSub()`.

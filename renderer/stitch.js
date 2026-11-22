@@ -180,7 +180,7 @@ export function stitch(m, prev, limit = 200) {
     if (flat(s)) [s.pts, ...(s.holes || [])].forEach((L, li) => L.forEach((p, i) => { const q = L[(i + 1) % L.length]; ctx.push({ a: at(s, p[0], p[1], 0), b: at(s, q[0], q[1], 0), face: s, loop: li, fresh: newFace.has(s) }); }));
     else for (const e of shapeEdges(s)) ctx.push({ a: e.a, b: e.b, solid: s });
   }
-  const planes = new Map();
+  const planes = new Map(), usedFull = new Set(), usedPart = new Map();
   const addPlane = (n, o) => { n = canon(V.norm(n)); const w = V.dot(n, o), k = n.map(x => Math.round(x * 1e3)).join(',') + '|' + Math.round(w * 1e3); if (!planes.has(k)) planes.set(k, { n, w }); };
   for (const s of newFace) addPlane(s.n, s.o);
   for (const N of isFresh) {
@@ -197,7 +197,7 @@ export function stitch(m, prev, limit = 200) {
   for (const { n, w } of planes.values()) {
     const on = p => Math.abs(V.dot(n, p) - w) < 1e-4, { u, v } = basis(n), o = V.mul(n, w);
     const to2 = p => { const d = V.sub(p, o); return [V.dot(d, u), V.dot(d, v)]; }, to3 = q => V.add(o, V.add(V.mul(u, q[0]), V.mul(v, q[1])));
-    const segs = ctx.filter(c => on(c.a) && on(c.b) && (!c.line || m.lines.includes(c.line)));
+    const segs = ctx.filter(c => on(c.a) && on(c.b) && (!c.line || m.lines.includes(c.line)));   // (linie zużyte w kroku 2 już nie istnieją)
     if (!segs.some(c => c.fresh) || segs.length > 4000) continue;
     const A = arrange(segs.map(c => ({ a: to2(c.a), b: to2(c.b), src: c })));
     const isNew = e => e.src.some(c => c.fresh), active = new Set();
@@ -283,13 +283,18 @@ export function stitch(m, prev, limit = 200) {
     const used = new Map();
     for (const c of out) if (c.shape || onSolid.includes(c)) for (const e of c.edges) for (const q of e.src) if (q.line) { if (!used.has(q)) used.set(q, new Set()); used.get(q).add(e); }
     // linia tylko częściowo na brzegu ściany (np. przeciągnięta przez całą ścianę i dalej): zostają z niej wolne kawałki
-    const dead = new Set(), rest = [];
+    // (linie znikają dopiero po przejściu wszystkich płaszczyzn: jedna linia bywa brzegiem ścian w dwóch płaszczyznach,
+    //  np. krawędź narożna dachu)
     for (const [q, set] of used) {
-      dead.add(q.line);
-      if (set.size >= A.pieces.get(q)) continue;
-      for (const e of A.all.values()) if (e.src.includes(q) && !set.has(e)) rest.push({ ...q.line, id: m.next++, a: to3(e.a.p), b: to3(e.b.p) });
+      if (set.size >= A.pieces.get(q)) { usedFull.add(q.line); continue; }
+      if (usedPart.has(q.line)) continue;
+      const rest = []; for (const e of A.all.values()) if (e.src.includes(q) && !set.has(e)) rest.push({ ...q.line, a: to3(e.a.p), b: to3(e.b.p) });
+      usedPart.set(q.line, rest);
     }
-    if (dead.size) m.lines = m.lines.filter(l => !dead.has(l)).concat(rest);
+  }
+  if (usedFull.size || usedPart.size) {
+    const rest = []; for (const [l, pieces] of usedPart) if (!usedFull.has(l)) for (const q of pieces) rest.push({ ...q, id: m.next++ });
+    m.lines = m.lines.filter(l => !usedFull.has(l) && !usedPart.has(l)).concat(rest);
   }
   if (doneOn.size) m.lines = m.lines.filter(l => !doneOn.has(l));
   return made || split ? { made, split } : null;

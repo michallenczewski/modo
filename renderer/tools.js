@@ -76,7 +76,7 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Klik zaznacza ścianę albo krawędź bryły, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza całą bryłę, a w grupie — wchodzi do środka. Potrójny klik zaznacza wszystko, co się z nią styka (linie połączone końcami). Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
+  hint() { return 'Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
   subAt(id, x, y) { return subAt(this.app, id, x, y); }
   // potrójny klik: wszystko połączone — elementy luzem, które mają wspólny punkt (linie połączone końcami, stykające się bryły)
   triple(e, x, y) {
@@ -1361,7 +1361,7 @@ export class MoveTool extends Tool {
     if (this.app.sub.length && !this.app.selection.size && !this.p0) return 'Kliknij punkt, za który chwytasz zaznaczoną ścianę albo krawędź — przesunie się tylko ona, a bryła się odkształci.';
     if (this.p0) return `Kliknij punkt docelowy albo wpisz odległość. Strzałki blokują oś, a przytrzymany <kbd>⇧</kbd> — bieżący kierunek${this.app.lockDir ? ' (<b>zablokowany</b>)' : ''}. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`;
     if (this.app.selection.size) return `Kliknij punkt, za który chwytasz zaznaczenie. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
-    return `Bez zaznaczenia chwytasz to, co pod kursorem: wierzchołek, krawędź albo ścianę bryły (bryła się odkształca), linię albo całą grupę. Żeby przesunąć całą bryłę, zaznacz ją najpierw dwuklikiem. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    return `Bez zaznaczenia chwytasz to, co pod kursorem: wierzchołek, krawędź albo ścianę bryły (bryła się odkształca), linię albo całą grupę. Żeby przesunąć całość, zaznacz ją najpierw dwuklikiem albo zrób z niej grupę. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
   }
   lockFrom() { return this.p0; }
   // bez zaznaczenia: wierzchołek, krawędź albo ściana bryły luzem pod kursorem (jak w SketchUpie)

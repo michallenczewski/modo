@@ -25,11 +25,24 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/solid.js` | Operacje na bryłach przez Manifold (WASM). Każda funkcja może zwrócić `null` — wtedy `csg.js` liczy po staremu drzewami BSP. |
 | `renderer/skp.js` | Import `.skp`: model z OpenSKP → bryły z dowolnych ścian, linie, grupy, komponenty, warstwy, sceny. |
 | `renderer/dwg.js` | Czytanie DWG przez LibreDWG (WASM): baza encji → prosty tekst DXF → `dxf.js`; druga droga to zapis DXF samego LibreDWG. |
+| `renderer/geo.js` | Wspólna geometria: zlewanie luźnych brył w jedną (`absorb`), porządek w płaszczyźnie (`rebuildPlane`), dokładanie ścian (`addFace`), wypychanie (`pushFace`), części spójne, usuwanie ścian z zachowaniem krawędzi, wyjmowanie ścian do osobnej bryły (`liftFaces`). |
 | `renderer/stitch.js` | Łączenie geometrii po narysowaniu: dzielenie linii w miejscach styku, układ płaski krawędzi (`arrange`), ściany z zamkniętych pól, dzielenie ścian linią, otwory, scalanie ścian po usunięciu krawędzi (`healFaces`). |
 | `renderer/textures.js` | Materiały z teksturą dla wiaderka: wzory rysowane w kodzie (cegła, deski, beton, płytki, dachówka, blacha, trawa, żwir), powtarzalne, w prawdziwej skali. |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
 
 ## Model
+
+**Wspólna geometria (od wersji 0.4).** Jak w SketchUpie: wszystko, co narysowane luzem w jednym kontekście (cały szkic albo wnętrze edytowanej grupy), jest jedną bryłą-siatką z flagą `geo` — zbiorem ścian połączonych wspólnymi punktami. Osobnym obiektem jest tylko grupa albo komponent. Pilnuje tego `absorb` wołany z `postEdit`, przy otwarciu szkicu i przy wejściu do grupy: każda luźna bryła kontekstu (poza wycinającymi, figurami 2D, ukrytymi i zablokowanymi) wchodzi do geometrii; płaska ściana przez `addFace` (na istniejącej ścianie tylko ją dzieli krawędziami), bryła przez dopisanie wielokątów i `rebuildPlane`. Opisane niżej bryły wyciągnięte (`o, u, v, n, pts, h`) istnieją więc tylko chwilowo — narzędzia tworzą je, a `absorb` zaraz je zlewa — oraz w grupach, do których jeszcze nikt nie wszedł (np. po imporcie .skp).
+
+- **Ściana** to obszar siatki: wielokąty w jednej płaszczyźnie, zwrócone w tę samą stronę i nierozdzielone znacznikiem (`regions`, liczone kubełkami po płaszczyźnie i pamiętane). Ściana z otworami jest trzymana jako kilka kawałków.
+- **`rebuildPlane(s, n, w)`**: wielokąty jednej płaszczyzny zwrócone w obie strony są cięte nawzajem układem płaskim (`arrange`); pole przykryte z jednej strony zostaje, z obu — znika. Tak znika przegroda między stykającymi się bryłami, dno otworu wybitego na wylot i kawałek ściany skracanej przy wciskaniu.
+- **`pushFace(s, pi, d, keep)`**: ściana w nowym miejscu, boki z każdej krawędzi brzegu (także otworów), potem `rebuildPlane` dla wszystkich dotkniętych płaszczyzn. Czy za ścianą jest materiał, rozstrzyga parzystość przecięć promienia (`solidBehind`): ściana bryły wyciągana dokłada materiał, wciskana wybiera go; wolna płaska ściana staje się bryłą, a jej pierwotne miejsce zostaje drugą podstawą. `keep` (⌥ / Ctrl) zostawia pierwotną ścianę.
+- **Zaznaczenie**: ściany i krawędzie geometrii leżą w `app.sub`; dwuklik zaznacza część spójną (`component`). Geometria w całości nigdy nie trafia do `app.selection` (`selectionChanged` zamienia ją na jej ściany). Przesuń i Obróć z zaznaczonymi ścianami przekształcają ich punkty (`moveSub`): sąsiednie ściany i zaczepione linie się rozciągają; z ⌥ / Ctrl powstają kopie ścian.
+- **Polecenia na obiektach** (grupa, komponent, ukryj, zablokuj, kopiuj, wytnij, odbij, skaluj): `app.liftSub` wyjmuje zaznaczone ściany do osobnej bryły z flagą `apart` i zaznacza ją; gdy przestaje być zaznaczona (albo po cofnięciu), `absorb` zlewa ją z powrotem. Ukryta albo zablokowana część zostaje osobną bryłą do odkrycia.
+- **Kolor, materiał i krycie** należą do ściany (`fc`: `{ c, t, a }`); przy zlewaniu kolor całej bryły przechodzi na jej ściany.
+- **Usuwanie**: `eraseFaces` zabiera ściany, a ich krawędzie, które nie należą już do żadnej ściany, zostają jako linie.
+- Bryły wycinające (`op: 'cut'`) nie działają na wspólną geometrię (nie musi być zamknięta) — otwór robi się wypchnięciem na wylot; działają nadal na bryły w grupach.
+- Współrzędne nie „pływają”: węzły układu płaskiego zachowują dokładne punkty wejściowe, a `addFace` przykleja nowe punkty do istniejących wierzchołków.
 
 Szkic to lista **brył**, luźnych **linii** i **prowadnic** (nieskończone linie z taśmy: punkt `o` i kierunek `d`). Bryła to wielokąt w płaszczyźnie (`o`, `u`, `v`) wyciągnięty o `h` wzdłuż `n = u × v`. Płaska ściana (świeży prostokąt albo zamknięty obrys z linii) to bryła o `h = 0`. Bryły są osobne jak grupy w SketchUpie; „lepka” jest geometria płaska — luźne linie i płaskie ściany łączą się i dzielą przy rysowaniu (niżej: „Łączenie geometrii”). Push/pull bryły wyciągniętej jest przewidywalny:
 

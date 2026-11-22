@@ -167,6 +167,8 @@ const isGeo = id => typeof id === 'number' && app.model.shapes.some(s => s.id ==
 app.selectionChanged = () => {
   dropLocked();
   for (const id of [...app.selection]) if (isGeo(id)) { const s = app.model.shapes.find(q => q.id === id); app.selection.delete(id); app.sub = [...app.sub.filter(q => q.id !== id), ...subFaces(s, s.polys.map((_, i) => i))]; }
+  // bryła wyjęta do polecenia na obiektach, która przestała być zaznaczona, wraca do wspólnej geometrii
+  if (app.model.shapes.some(q => q.apart && !app.selection.has(q.id))) { for (const q of app.model.shapes) if (q.apart && !app.selection.has(q.id)) delete q.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } viewer.setModel(app.model); }
   showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.();
 };
 // Polecenia działające na całych obiektach (grupa, ukryj, kopiuj, skaluj…): zaznaczone ściany wspólnej geometrii są
@@ -675,13 +677,15 @@ function deleteSelection() {
   removeIds(app.model, app.selection);
   app.selection.clear(); app.changed();
 }
+// po cofnięciu albo ponowieniu: bryły wyjęte do polecenia wracają do wspólnej geometrii
+function regeo() { for (const s of app.model.shapes) delete s.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } }
 function undo() {
   if (tool.active || tool.anchor || tool.p0) tool.cancel();
   if (!app.undo.length) return;
   app.clearSub();
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
-  app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 function redo() {
@@ -689,7 +693,7 @@ function redo() {
   app.clearSub();
   app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
-  app.selection.clear(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 
