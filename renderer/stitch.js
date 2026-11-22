@@ -156,6 +156,22 @@ export function stitch(m, prev, limit = 200) {
     }
   }
 
+  // 1b. linia narysowana po krawędzi, która jest wygładzona albo ukryta, przywraca ją (a sama znika — krawędź już jest)
+  for (const N of [...isFresh]) {
+    const L = V.dist(N.a, N.b); if (L < EPS) continue; const d = V.mul(V.sub(N.b, N.a), 1 / L);
+    const onN = p => { const t = V.dot(V.sub(p, N.a), d); return t > -1e-4 && t < L + 1e-4 && V.dist(V.add(N.a, V.mul(d, t)), p) < 1e-4; };
+    let hit = false;
+    for (const s of m.shapes) {
+      if (!same(s) || !ok(s) || !isMesh(s)) continue;
+      for (const k of ['softs', 'hid']) {
+        if (!s[k]) continue;
+        const keep = s[k].filter(([a, b]) => !(onN(a) && onN(b)));
+        if (keep.length !== s[k].length) { hit = true; if (keep.length) s[k] = keep; else delete s[k]; }
+      }
+    }
+    if (hit) { m.lines = m.lines.filter(l => l !== N); isFresh.delete(N); split++; }
+  }
+
   // 2. linia po ścianie bryły, od krawędzi do krawędzi, dzieli tę ścianę
   const doneOn = new Map();   // linia → bryły, których ścianę już podzieliła
   for (const N of [...isFresh]) {
