@@ -84,13 +84,23 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return _t('Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>⇧</kbd> przełącza, <kbd>⌥</kbd> (Mac) albo <kbd>Ctrl</kbd> (Windows) dodaje, oba razem odejmują. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'); }
+  hint() { return _t('Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik w ścianę zaznacza ją razem z jej krawędziami, w krawędź — krawędź ze stykającymi się ścianami, a w grupie — wchodzi do środka; potrójny klik zaznacza wszystko, co połączone. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>⇧</kbd> przełącza, <kbd>⌥</kbd> (Mac) albo <kbd>Ctrl</kbd> (Windows) dodaje, oba razem odejmują. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'); }
   subAt(id, x, y) { return subAt(this.app, id, x, y); }
   // potrójny klik: wszystko połączone — elementy luzem, które mają wspólny punkt (linie połączone końcami, stykające się bryły)
   triple(e, x, y) {
     const id = this.pickAny(x, y); if (id == null || this.app.groupAt(id)) return;
     if (typeof id !== 'number' && String(id)[0] !== 'l') return;
-    if (typeof id === 'number' && this.model.shapes.some(q => q.id === id && q.geo)) return this.dbl(e, x, y);
+    if (typeof id === 'number') {
+      const s = this.model.shapes.find(q => q.id === id && q.geo);
+      if (s) {
+        // wspólna geometria: wszystko, co połączone ze wskazaną ścianą albo krawędzią — ściany i ich krawędzie (jak w SketchUpie)
+        const sub = this.subAt(id, x, y); if (!sub) return;
+        let seed = sub.kind === 'face' ? +sub.key.split(':')[1] : s.polys.findIndex(P => onLoop(P, V.lerp(sub.a, sub.b, 0.5)));
+        if (seed < 0) return;
+        const faces = subFaces(s, component(s, seed));
+        this.app.selection.clear(); this.app.sub = [...faces, ...boundaryEdges(s, faces.flatMap(f => f.polys), true)]; this.app.selectionChanged(); return;
+      }
+    }
     const m = this.model, K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);
     const ok = (el, i) => !isHidden(m, el) && !el.locked && !this.app.groupAt(i) && (!this.app.editing || this.app.inEditing(i));
     const items = [...m.shapes.filter(q => q.op !== 'cut' && !q.bill && ok(q, q.id)).map(q => ({ id: q.id, keys: vertices(q).map(K) })), ...m.lines.filter(l => ok(l, 'l' + l.id)).map(l => ({ id: 'l' + l.id, keys: [K(l.a), K(l.b)] }))];
@@ -190,9 +200,16 @@ export class SelectTool extends Tool {
     else if (typeof id === 'number') {
       const s = this.model.shapes.find(q => q.id === id);
       if (s && s.geo) {
-        // wspólna geometria: dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą (osobnym obiektem jest tylko grupa)
-        const hit = this.v.pick(x, y); if (!hit || hit.shapeId !== id) return;
-        this.app.selection.clear(); this.app.sub = subFaces(s, component(s, +hit.key.split(':')[1])); this.app.selectionChanged(); return;
+        // wspólna geometria (jak w SketchUpie): dwuklik w ścianę — ściana z krawędziami, które ją ograniczają;
+        // dwuklik w krawędź — krawędź ze ścianami, które się na niej stykają. Potrójny klik — wszystko połączone.
+        const sub = this.subAt(id, x, y); if (!sub) return;
+        let list;
+        if (sub.kind === 'face') list = [sub, ...boundaryEdges(s, sub.polys)];
+        else {
+          const mid = V.lerp(sub.a, sub.b, 0.5);
+          list = [sub, ...subFaces(s, s.polys.map((_, i) => i)).filter(f => boundaryEdges(s, f.polys, false, true).some(([a, b]) => onSeg(mid, a, b)))];
+        }
+        this.app.selection.clear(); this.app.sub = list; this.app.selectionChanged(); return;
       }
       // dwuklik w bryłę zaznacza ją całą (edycja bryły: Enter albo menu podręczne)
       this.app.sub = []; this.app.selection.clear(); this.app.expand(id).forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
@@ -658,6 +675,23 @@ export function geoComp(app, x, y) {
 // zaznaczone krawędzie bryły `id` jako pary punktów
 export const subEdges = (sub, id) => sub.filter(q => q.id === id && q.kind === 'edge').map(q => [q.a.slice(), q.b.slice()]);
 // ściany (obszary) wspólnej geometrii jako pozycje zaznaczenia
+// brzeg ściany złożonej z kawałków: boki kawałków, które nie mają pary w przeciwną stronę (wewnętrzne przekątne się znoszą)
+const onSeg = (p, a, b) => { const L = V.dist(a, b); if (L < 1e-9) return false; const d = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(p, a), d); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(a, V.mul(d, t)), p) < 1e-5; };
+const onLoop = (P, p) => P.some((a, i) => onSeg(p, a, P[(i + 1) % P.length]));
+// krawędzie bryły leżące na brzegu ścian (polys); all — także krawędzie w środku zaznaczonej części; raw — same odcinki brzegu
+function boundaryEdges(s, polys, all = false, raw = false) {
+  const K = p => p.map(x => Math.round(x * 1e5)).join(','), half = new Map();
+  for (const P of polys) for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length], k = K(a) + '>' + K(b), r = K(b) + '>' + K(a); if (half.has(r)) half.delete(r); else half.set(k, [a, b]); }
+  const segs = [...half.values()];
+  if (raw) return segs;
+  const out = [];
+  for (const e of shapeEdges(s)) {
+    if (e.hid) continue;
+    const mid = V.lerp(e.a, e.b, 0.5);
+    if (segs.some(([a, b]) => onSeg(mid, a, b)) || (all && polys.some(P => onLoop(P, mid)))) out.push({ id: s.id, kind: 'edge', a: e.a.slice(), b: e.b.slice(), pts: [e.a.slice(), e.b.slice()] });
+  }
+  return out;
+}
 export function subFaces(s, idx) { return facesOfPolys(s, idx).map(f => ({ id: s.id, kind: 'face', key: f.key, polys: f.polys, pts: f.pts })); }
 // bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się i chwyta osobno
 export function looseSolid(app, id) {
