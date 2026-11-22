@@ -77,7 +77,7 @@ export const ACTIONS = [
   { group: _t('Widok'), id: 'viewPrev', name: _t('Poprzedni widok'), keys: ['BracketLeft'] },
   { group: _t('Widok'), id: 'viewNext', name: _t('Następny widok'), keys: ['BracketRight'] },
   { group: _t('Widok'), id: 'twoPoint', name: _t('Perspektywa dwupunktowa'), keys: ['Shift+C'] },
-  { group: _t('Widok'), id: 'views', name: _t('Widok, kamera i sceny'), keys: ['K'] },
+  { group: _t('Widok'), id: 'views', name: _t('Kamera: widoki, rzut, kąt widzenia'), keys: ['K'] },
   { group: _t('Widok'), id: 'sceneAdd', name: _t('Dodaj scenę'), keys: [] },
   { group: _t('Widok'), id: 'scenePrev', name: _t('Poprzednia scena'), keys: ['PageUp'] },
   { group: _t('Widok'), id: 'sceneNext', name: _t('Następna scena'), keys: ['PageDown'] },

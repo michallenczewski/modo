@@ -2,7 +2,7 @@
 // 1. polskie napisy w kodzie, które nie są owinięte w _t (zostałyby po polsku w wersji angielskiej),
 // 2. napisy w _t bez wpisu w renderer/lang/en.js,
 // 3. stałe napisy z renderer/index.html bez wpisu w słowniku,
-// 4. wpisy słownika, których kod już nie używa (do usunięcia).
+// 4. wpisy słownika, których kod już nie używa (z --usun-nieuzywane: usuwa je ze słownika).
 // Kończy się kodem 1, gdy znajdzie coś z punktów 1–3.
 import fs from 'fs';
 import path from 'path';
@@ -50,4 +50,10 @@ show('Polskie napisy bez _t', unwrapped);
 show('Napisy w _t bez tłumaczenia w lang/en.js', [...missing].map(([k, w]) => w + '  ' + JSON.stringify(k).slice(0, 120)));
 show('Napisy z index.html bez tłumaczenia', htmlMissing.map(k => JSON.stringify(k)));
 console.log(`\nWpisy słownika nieużywane w kodzie: ${unused.length}` + (unused.length ? ' (np. ' + unused.slice(0, 5).map(k => JSON.stringify(k)).join(', ') + ')' : ''));
+// --usun-nieuzywane: zapisuje słownik bez wpisów, których kod już nie używa
+if (process.argv.includes('--usun-nieuzywane') && unused.length) {
+  const keep = Object.fromEntries(Object.entries(EN).filter(([k]) => used.has(k)));
+  fs.writeFileSync(path.join(root, 'lang', 'en.js'), '// Słownik angielski: klucz to napis polski z kodu (zob. i18n.js). Brak klucza = napis zostaje po polsku.\nexport default ' + JSON.stringify(keep, null, 1) + ';\n');
+  console.log('Usunięto nieużywane wpisy: ' + unused.length);
+}
 process.exit(unwrapped.length || missing.size || htmlMissing.length ? 1 : 0);

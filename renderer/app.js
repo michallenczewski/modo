@@ -33,6 +33,9 @@ api.onFullscreen(v => document.documentElement.classList.toggle('fs', v));
 
 /* ---------- ikony narzędzi ---------- */
 const IC = {
+  eye: '<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>',
+  gear: '<path d="M2.5 4.5h4M9.5 4.5h4M2.5 11.5h7M12.5 11.5h1"/><circle cx="8" cy="4.5" r="1.5"/><circle cx="11" cy="11.5" r="1.5"/>',
+  ops: '<path d="M2.5 6.5h7v7h-7z"/><path d="M6.5 2.5h7v7h-3"/><path d="M9.5 9.5v-3h-3" stroke-dasharray="1.3 1.5"/>',
   select: '<path d="M4 2.5v10.2l2.9-2.5 1.9 4.1 1.7-.8-1.9-4h3.9z"/>',
   line: '<path d="M4 12 12 4"/><circle cx="3.2" cy="12.8" r="1.2"/><circle cx="12.8" cy="3.2" r="1.2"/>',
   rect: '<rect x="2.5" y="4" width="11" height="8" rx=".5"/>',
@@ -278,7 +281,8 @@ const TOOL_NAME = { line: _t('Linia'), freehand: _t('Linia odręczna'), arc3: _t
 const FAMILIES = { line: ['line', 'freehand'], rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'arc3', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'], orbit: ['orbit', 'look', 'walk', 'camPos'] };
 const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
-const TOOLBAR = [['select', _t('Zaznacz')], null, ['line', _t('Linia')], ['rect', _t('Prostokąt')], ['circle', _t('Okrąg')], ['arc', _t('Łuk')], null, ['push', _t('Wypchnij / wciśnij')], ['move', _t('Przesuń')], ['rotate', _t('Obróć')], ['scale', _t('Skaluj')], ['offset', _t('Odsunięcie')], null, ['tape', _t('Taśma')], ['dim', _t('Wymiar')], ['section', _t('Przekrój')], ['eraser', _t('Gumka')], ['paint', _t('Kolor i materiał')], 'grow', ['orbit', _t('Orbita')], ['pan', _t('Przesuń widok')], ['extents', _t('Pokaż wszystko')]];
+// Lewy pasek w kolejności pracy: zaznacz / gumka / wiaderko, rysowanie, zmiana kształtu (z operacjami na bryłach), pomiary, a na dole kamera.
+const TOOLBAR = [['select', _t('Zaznacz')], ['eraser', _t('Gumka')], ['paint', _t('Kolor i materiał')], null, ['line', _t('Linia')], ['rect', _t('Prostokąt')], ['circle', _t('Okrąg')], ['arc', _t('Łuk')], null, ['push', _t('Wypchnij / wciśnij')], ['move', _t('Przesuń')], ['rotate', _t('Obróć')], ['scale', _t('Skaluj')], ['offset', _t('Odsunięcie')], ['ops', _t('Operacje na bryłach')], null, ['tape', _t('Taśma')], ['dim', _t('Wymiar')], ['section', _t('Przekrój')], 'grow', ['orbit', _t('Orbita')], ['pan', _t('Przesuń widok')], ['extents', _t('Pokaż wszystko')]];
 app.tools = tools;   // do testów w konsoli
 app.setTool = id => setTool(id);
 const toolsEl = $('#tools');
@@ -296,6 +300,7 @@ for (const t of TOOLBAR) {
   b.addEventListener('click', () => {
     if (later) return toast(name + _t(' będzie w kolejnej wersji.'));
     if (id === 'extents') return viewer.zoomExtents();
+    if (id === 'ops') return openOps(b);
     if (FAMILIES[id]) { hideFlyout(); return setTool(famCur[id]); }
     setTool(id);
     if (id === 'paint') showSec('mat');
@@ -528,13 +533,13 @@ function run(act) {
   if (LIFT.has(act)) app.liftSub();
   switch (act) {
     case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
-    case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? _t('Mgła włączona') : _t('Mgła wyłączona')); break;
+    case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? _t('Mgła włączona') : _t('Mgła wyłączona')); syncLook(); break;
     case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); syncLook(); app.markDirtySoft(); toast(viewer.wire ? _t('Siatka: same krawędzie') : _t('Ściany widoczne')); break;
-    case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? _t('Ukryta geometria widoczna (blado)') : _t('Ukryta geometria schowana')); break;
+    case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? _t('Ukryta geometria widoczna (blado)') : _t('Ukryta geometria schowana')); syncLook(); break;
     case 'makeFaces': makeFaces(); break;
     case 'cleanLines': cleanLines(); break;
     case 'backEdges': viewer.setLook({ backEdges: !viewer.backEdges }); renderViewPop(); syncLook(); toast(viewer.backEdges ? _t('Krawędzie tylne widoczne (blado)') : _t('Krawędzie tylne schowane')); break;
-    case 'guides': viewer.setLook({ showGuides: viewer.showGuides === false }); renderViewPop(); toast(viewer.showGuides === false ? _t('Prowadnice ukryte') : _t('Prowadnice widoczne')); break;
+    case 'guides': viewer.setLook({ showGuides: viewer.showGuides === false }); renderViewPop(); toast(viewer.showGuides === false ? _t('Prowadnice ukryte') : _t('Prowadnice widoczne')); syncLook(); break;
     case 'soften': softenSel(true); break;
     case 'unsoften': softenSel(false); break;
     case 'selSameMat': selectSameMaterial(); break;
@@ -557,7 +562,7 @@ function run(act) {
     case 'saveCopy': saveCopy(); break;
     case 'revert': revertSketch(); break;
     case 'updateCheck': checkUpdate(); break;
-    case 'edit': openPop('#editPop', $('#editBtn')); break;
+    case 'edit': openFileMenu(); break;
     case 'hideRest': hideRest(); break;
     case 'hideSimilar': hideSimilar(); break;
     case 'hideSel': hideSel(); break;
@@ -860,9 +865,40 @@ function setStyle(s) {
 }
 document.querySelectorAll('#styleSeg button').forEach(b => b.addEventListener('click', () => { setStyle(b.dataset.style); }));
 // prześwit (wszystkie krawędzie widać przez ściany) i siatka (same krawędzie) — pod ręką obok stylu
-const lookBtns = [['xrayBtn', 'xray', _t('Prześwit — półprzezroczyste ściany'), () => viewer.xray], ['backBtn', 'backEdges', _t('Krawędzie tylne — zasłonięte krawędzie widać blado'), () => viewer.backEdges], ['wireBtn', 'wire', _t('Siatka — same krawędzie'), () => viewer.wire]];
-function syncLook() { for (const [id, , , on] of lookBtns) $('#' + id).classList.toggle('on', !!on()); }
-for (const [id, act, name] of lookBtns) { const b = $('#' + id); b.innerHTML = ic(act); b.setAttribute('aria-label', name); { const k = keysFor(act, app.keys.over)[0]; b.title = name + (k ? ' (' + prettyCombo(k, isMac) + ')' : ''); } b.addEventListener('click', () => run(act)); }
+// Wygląd widoku (prześwit, krawędzie tylne, siatka, mgła, ukryta geometria, prowadnice): jedno okienko z przełącznikami.
+// Przycisk na pasku jest podświetlony, gdy coś odbiega od zwykłego widoku.
+const LOOK = [['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges],
+  ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire], ['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden],
+  ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false]];
+function syncLook() {
+  $('#lookBtn').classList.toggle('on', LOOK.some(([id, , , on]) => id !== 'guides' && on()));
+  if (!$('#lookPop').hidden) renderLookPop();
+}
+function renderLookPop() {
+  const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  $('#lookList').innerHTML = LOOK.map(([id, name, sub, on]) => `<label class="row"><span class="grow">${name}${sub ? ' <span class="lbl">' + sub + '</span>' : ''}</span>${k(id)}<input type="checkbox" class="tg" role="switch" data-a="${id}"${on() ? ' checked' : ''}></label>`).join('');
+  $('#lookList').querySelectorAll('input').forEach(i => i.addEventListener('change', () => run(i.dataset.a)));
+}
+$('#lookBtn').innerHTML = ic('eye');
+$('#lookBtn').addEventListener('click', () => openPop('#lookPop', $('#lookBtn')));
+$('#undoBtn').innerHTML = ic('undo'); $('#redoBtn').innerHTML = ic('redo');
+for (const [id, name] of [['undo', _t('Cofnij')], ['redo', _t('Ponów')]]) { const b = $('#' + id + 'Btn'); const c = keysFor(id, app.keys.over)[0]; b.title = name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); b.addEventListener('click', () => run(id)); }
+$('#setBtn').innerHTML = ic('gear');
+
+// Operacje na bryłach (dawniej w okienku Edycja): menu wysuwane w prawo od przycisku na lewym pasku
+const OPS = [[['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')]],
+  [['solidUnion', _t('Suma brył')], ['solidIntersect', _t('Część wspólna')], ['solidSubtract', _t('Odejmij od pierwszej')], ['solidTrim', _t('Przytnij pierwszą')]],
+  [['intersect', _t('Przetnij ściany brył')], ['makeFaces', _t('Ściany z zaznaczonych linii')], ['cleanLines', _t('Usuń luźne krawędzie')]],
+  [['soften', _t('Wygładź krawędzie (do 30°)')], ['unsoften', _t('Przywróć wygładzone krawędzie')]]];
+function openOps(btn) {
+  const m = $('#opsMenu'); const was = !m.hidden; closePops(); hideTip(); if (was) return;
+  const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  m.innerHTML = `<div class="mlbl">${_t('Operacje na bryłach')}</div>` + OPS.map(g => g.map(([a, n]) => `<button role="menuitem" data-a="${a}">${IC[a] ? ic(a) : '<i class="noic"></i>'}<span>${n}</span>${k(a)}</button>`).join('')).join('<div class="msep"></div>');
+  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); run(b.dataset.a); }));
+  m.hidden = false;
+  const r = btn.getBoundingClientRect();
+  m.style.left = (r.right + 8) + 'px'; m.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - m.offsetHeight - 8)) + 'px';
+}
 
 /* ---------- okienka ---------- */
 function openPop(sel, anchor, side) {
@@ -877,8 +913,8 @@ function openPop(sel, anchor, side) {
   if (sel === '#pngPop') renderPng();
   if (sel === '#underPop') renderUnder();
   if (sel === '#viewPop') renderViewPop();
+  if (sel === '#lookPop') renderLookPop();
   if (sel === '#libPop') renderLib();
-  if (sel === '#editPop') renderEditPop();
 }
 function closePops() {
   let any = false;
@@ -889,6 +925,8 @@ function closePops() {
 document.addEventListener('pointerdown', e => {
   if (e.target.closest('.pop, .menu, header button, #tools button')) return;
   if (!e.target.closest('#view')) closePops();
+  // menu (Plik, ustawienia, operacje na bryłach) znika też po kliknięciu w widok; okienka typu słońce zostają, żeby widzieć efekt
+  else for (const m of document.querySelectorAll('.menu:not(#flyout)')) if (!m.hidden) { m.hidden = true; document.querySelectorAll('header .open').forEach(b => b.classList.remove('open')); }
 });
 
 /* ---------- panel boczny: element, warstwy, struktura ---------- */
@@ -954,7 +992,7 @@ function selectionTops() {
 }
 function renderPanel() {
   if (!app.panel) return;
-  renderInfo(); renderTags(); renderTree();
+  renderInfo(); renderTags(); renderTree(); renderScenes();
 }
 function infoRow(label, value) { return `<div class="row"><span class="lbl w70">${label}</span><span class="val num">${value}</span></div>`; }
 function renderInfo() {
@@ -1179,22 +1217,15 @@ function sectionToggle() {
 /* ---------- widok, kamera, sceny ---------- */
 const VIEWS = [['viewIso', _t('Izometria')], ['viewTop', _t('Góra')], ['viewFront', _t('Przód')], ['viewRight', _t('Prawy')], ['viewBack', _t('Tył')], ['viewLeft', _t('Lewy')], ['viewBottom', _t('Dół')]];
 // polecenia widoku pokazane samymi ikonami (nazwa i skrót w podpowiedzi)
-const VIEW_ICONS = [['viewPrev', _t('Poprzedni widok')], ['viewNext', _t('Następny widok')], ['zoomWin', _t('Powiększ okno (ramką)')], ['extents', _t('Pokaż cały model')], ['look', _t('Rozejrzyj się')], ['walk', _t('Spacer')], ['camPos', _t('Ustaw kamerę')], ['xray', _t('Prześwit')], ['backEdges', _t('Krawędzie tylne')], ['wire', _t('Siatka — same krawędzie')], ['fog', _t('Mgła')], ['hiddenGeo', _t('Ukryta geometria')], ['guides', _t('Prowadnice: pokaż / ukryj')]];
+const VIEW_ICONS = [['viewPrev', _t('Poprzedni widok')], ['viewNext', _t('Następny widok')], ['zoomWin', _t('Powiększ okno (ramką)')], ['extents', _t('Pokaż cały model')], ['look', _t('Rozejrzyj się')], ['walk', _t('Spacer')], ['camPos', _t('Ustaw kamerę')]];
 const VIEW_ON = { xray: () => viewer.xray, wire: () => viewer.wire, fog: () => viewer.fog, hiddenGeo: () => viewer.showHidden, backEdges: () => viewer.backEdges, guides: () => viewer.showGuides !== false };
 const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
 const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
-// okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
-const EDIT_ICONS = [[['undo', _t('Cofnij')], ['redo', _t('Ponów')]], [['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej (wskaż miejsce)')], ['pasteInPlace', _t('Wklej w tym samym miejscu')]], [['selectAll', _t('Zaznacz wszystko')], ['selectNone', _t('Odznacz wszystko')], ['selectInvert', _t('Odwróć zaznaczenie')]], [['hideSel', _t('Ukryj zaznaczone')], ['unhideAll', _t('Pokaż wszystko')], ['lock', _t('Zablokuj zaznaczone')], ['unlockAll', _t('Odblokuj wszystko')]], [['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], ['makeFaces', _t('Ściany z zaznaczonych linii')], ['intersect', _t('Przetnij ściany brył')], ['cleanLines', _t('Usuń luźne krawędzie')]], [['soften', _t('Wygładź krawędzie (do 30°)')], ['unsoften', _t('Przywróć wygładzone krawędzie')]]];
-function renderEditPop() {
-  const p = $('#editPop');
-  p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
-  p.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const a = b.dataset.a; if (a === 'paste') closePops(); run(a); }));
-}
-$('#editBtn').addEventListener('click', () => openPop('#editPop', $('#editBtn')));
 app.scenes = []; app.scene = -1;
 const mmOf = fov => Math.round(12 / Math.tan(fov * Math.PI / 360));
 $('#viewBtn').addEventListener('click', () => openPop('#viewPop', $('#viewBtn')));
 function renderViewPop() {
+  renderScenes();
   if ($('#viewPop').hidden) return;
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
   $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"><span>${n}</span>${k(id)}</button>`).join('');
@@ -1208,6 +1239,9 @@ function renderViewPop() {
   const secs = app.model.sections || [];
   $('#secRow').hidden = !secs.length;
   $('#secOn').checked = secs.some(q => q.on); $('#secPlanes').checked = viewer.showSectPlanes;
+}
+// sceny są w panelu (sekcja Sceny)
+function renderScenes() {
   const L = $('#sceneList');
   L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num" title="${_t('Pokaż scenę')}">${i + 1}</button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
   L.querySelectorAll('.scene').forEach(row => {
@@ -1242,13 +1276,13 @@ function showScene(i) {
   app.scene = i;
   viewer.setCamera(sc.camera);
   if (sc.style && STYLES[sc.style]) setStyle(sc.style);
-  if ('fog' in sc) viewer.setLook({ fog: sc.fog, wire: sc.wire });
+  if ('fog' in sc) { viewer.setLook({ fog: sc.fog, wire: sc.wire }); syncLook(); }
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
 }
 function goScene(d) {
-  if (!app.scenes.length) return toast(_t('Nie ma jeszcze scen — dodaj je w okienku Widok.'));
+  if (!app.scenes.length) return toast(_t('Nie ma jeszcze scen — dodaj je w panelu, w sekcji Sceny.'));
   const i = ((app.scene < 0 ? (d > 0 ? -1 : 0) : app.scene) + d + app.scenes.length) % app.scenes.length;
   showScene(i); toast(app.scenes[i].name);
 }
@@ -1542,8 +1576,6 @@ renderSwatches();
 /* ---------- skróty ---------- */
 function openKeys() { $('#keysModal').hidden = false; renderKeys(); $('#keysQ').focus(); }
 function closeKeys() { $('#keysModal').hidden = true; capture = null; }
-$('#keysBtn').addEventListener('click', openKeys);
-$('#themeBtn').addEventListener('click', () => cycleTheme());
 $('#keysClose').addEventListener('click', closeKeys);
 $('#keysModal .scrim').addEventListener('click', closeKeys);
 $('#keysQ').addEventListener('input', renderKeys);
@@ -1674,19 +1706,28 @@ function switchLang() {
   location.href = location.pathname + (p ? '?p=' + encodeURIComponent(p) : '');
 }
 /* ---------- menu pliku ---------- */
-$('#fileBtn').addEventListener('click', async () => {
-  const m = $('#menu'); const was = !m.hidden; closePops(); if (was) return;
+$('#fileBtn').addEventListener('click', () => openFileMenu());
+async function openFileMenu() {
+  const m = $('#menu'); const was = !m.hidden && m.dataset.owner === 'file'; closePops(); if (was) return; m.dataset.owner = 'file';
   const k = id => prettyCombo(keysFor(id, app.keys.over)[0] || '', isMac);
   // ostatnio otwierane pliki i szkice z autozapisu (po awarii) — tylko w programie
   let recent = [], lost = [];
   try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
   const items = [['new', _t('Nowy szkic')], ['open', _t('Otwórz…')], null, ['save', _t('Zapisz')], ['saveAs', _t('Zapisz jako…')], ['saveCopy', _t('Zapisz kopię jako…')]];
   if (app.file.path) items.push(['revert', _t('Przywróć zapisaną wersję')]);
-  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['theme', _t('Wygląd: ') + THEME_NAME[theme]], ['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);   // i18n-ok
+  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
+  // Edycja: schowek, zaznaczenie, ukrywanie i blokada (dawne okienko Edycja)
+  items.push('edit', ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej (wskaż miejsce)')], ['pasteInPlace', _t('Wklej w tym samym miejscu')], null,
+    ['selectAll', _t('Zaznacz wszystko')], ['selectNone', _t('Odznacz wszystko')], ['selectInvert', _t('Odwróć zaznaczenie')], null,
+    ['hideSel', _t('Ukryj zaznaczone')], ['unhideAll', _t('Pokaż wszystko')], ['lock', _t('Zablokuj zaznaczone')], ['unlockAll', _t('Odblokuj wszystko')]);
   const hhmm = t => new Date(t).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('')
+  // dwie kolumny: Plik (z ostatnimi i niezapisanymi szkicami) i Edycja — menu nie wychodzi poza okno
+  const btn = i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>';
+  const cut = items.indexOf('edit'), fileItems = items.slice(0, cut), editItems = items.slice(cut + 1);
+  m.innerHTML = `<div class="mcols"><div class="mcol"><div class="mlbl">${_t('Plik')}</div>` + fileItems.map(btn).join('')
     + (lost.length ? _t('<div class="msep"></div><div class="mlbl">Niezapisane po awarii</div>') + lost.map((r, i) => `<button role="menuitem" data-lost="${i}"><span>${esc(r.name || _t('Bez nazwy'))}</span><kbd>${hhmm(r.time)}</kbd></button>`).join('') : '')
-    + (recent.length ? _t('<div class="msep"></div><div class="mlbl">Ostatnie</div>') + recent.map((r, i) => `<button role="menuitem" data-recent="${i}" title="${esc(r.path)}"><span>${esc(r.name)}</span><kbd>${esc(r.dir)}</kbd></button>`).join('') : '');
+    + (recent.length ? _t('<div class="msep"></div><div class="mlbl">Ostatnie</div>') + recent.map((r, i) => `<button role="menuitem" data-recent="${i}" title="${esc(r.path)}"><span>${esc(r.name)}</span><kbd>${esc(r.dir)}</kbd></button>`).join('') : '')
+    + `</div><div class="mcol"><div class="mlbl">${_t('Edycja')}</div>` + editItems.map(btn).join('') + '</div></div>';
   m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     closePops();
     if (b.dataset.recent) return openRecent(recent[+b.dataset.recent].path);
@@ -1695,8 +1736,20 @@ $('#fileBtn').addEventListener('click', async () => {
   }));
   m.hidden = false;
   const r = $('#fileBtn').getBoundingClientRect();
-  m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = Math.max(8, r.left) + 'px'; m.style.top = (r.bottom + 6) + 'px';
   $('#fileBtn').classList.add('open');
+}
+// Ustawienia: wygląd programu, język, skróty
+$('#setBtn').addEventListener('click', () => {
+  const m = $('#menu'); const was = !m.hidden && m.dataset.owner === 'set'; closePops(); if (was) return; m.dataset.owner = 'set';
+  const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  const items = [['theme', _t('Wygląd: ') + THEME_NAME[theme]], ['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['keys', _t('Skróty klawiszowe')]];   // i18n-ok
+  m.innerHTML = items.map(([a, n]) => `<button role="menuitem" data-a="${a}"><span>${n}</span>${k(a)}</button>`).join('');
+  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); run(b.dataset.a); }));
+  m.hidden = false;
+  const r = $('#setBtn').getBoundingClientRect();
+  m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = (r.bottom + 6) + 'px';
+  $('#setBtn').classList.add('open');
 });
 
 /* ---------- plik ---------- */

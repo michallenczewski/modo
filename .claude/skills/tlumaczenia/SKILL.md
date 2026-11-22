@@ -27,6 +27,6 @@ Cudzysłów „…” po angielsku to “…”. Styl: spokojne, pełne zdania w
 node scripts/tlumaczenia.mjs
 ```
 
-Pokazuje polskie napisy bez `_t`, napisy bez tłumaczenia, brakujące napisy z `index.html` i nieużywane wpisy słownika; kod wyjścia 1 = jest coś do poprawienia. Potem rzuć okiem na angielski interfejs: `localStorage['modo.lang'] = 'en'`, przeładowanie, a potem z powrotem `pl`.
+Pokazuje polskie napisy bez `_t`, napisy bez tłumaczenia, brakujące napisy z `index.html` i nieużywane wpisy słownika; kod wyjścia 1 = jest coś do poprawienia. `node scripts/tlumaczenia.mjs --usun-nieuzywane` usuwa ze słownika wpisy, których kod już nie używa (np. po zmianie napisu). Potem rzuć okiem na angielski interfejs: `localStorage['modo.lang'] = 'en'`, przeładowanie, a potem z powrotem `pl`.
 
 Przy dużej porcji napisów (dziesiątki i więcej) zleć tłumaczenie pomocnikowi `tlumacz`.

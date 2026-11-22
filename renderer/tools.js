@@ -97,12 +97,18 @@ export class SelectTool extends Tool {
   move(e, x, y) {
     if (this.drag(x, y)) return;
     const id = this.pickAny(x, y);
-    if (id !== this.hoverId) {
-      this.hoverId = id;
+    // Porównujemy ścianę, nie sam obiekt: luźna geometria to jedna bryła, więc przejście na sąsiednią ścianę
+    // (także w tej samej płaszczyźnie) musi przełączyć podświetlenie.
+    // (klucz to najmniejszy numer wielokąta w obszarze ściany — podział na obszary jest pamiętany, więc to tanie)
+    const hit = typeof id === 'number' ? this.v.pick(x, y) : null;
+    const s = hit && this.model.shapes.find(q => q.id === hit.solidId);
+    const key = id + '|' + (s && isMesh(s) && hit.key.startsWith('p:') ? Math.min(...regionOf(s, +hit.key.split(':')[1])) : hit ? hit.key : '');
+    if (key !== this.hoverKey) {
+      this.hoverKey = key;
       hoverShape(this.app, x, y, id);
     }
   }
-  reset() { this.box = null; }
+  reset() { this.box = null; this.hoverKey = null; }
   // przycisk w dół zapamiętuje miejsce; przeciągnięcie rysuje ramkę (także zaczęte na bryle), zwykły klik zaznacza przy puszczeniu
   // Modyfikatory jak w SketchUpie: ⇧ przełącza, ⌥ (Mac) / Ctrl (Windows) dodaje, oba razem odejmują; bez nich — nowe zaznaczenie.
   mode(e) { const add = this.app.isMac ? e.altKey : e.ctrlKey; return e.shiftKey && add ? 'sub' : add ? 'add' : e.shiftKey ? 'toggle' : 'new'; }
@@ -1090,7 +1096,7 @@ export class SectionTool extends Tool {
     const q = { id: this.model.next++, o: V.sub(this.o, V.mul(this.n, depth)), n: this.n, on: true };
     this.model.sections.push(q);
     this.app.changed(); this.reset(); this.app.lockAxis = null;
-    this.app.toast?.(_t('Przekrój włączony. Przesuń go narzędziem W albo wyłącz w okienku Widok.'));
+    this.app.toast?.(_t('Przekrój włączony. Przesuń go narzędziem W albo wyłącz w okienku Kamera (górny pasek).'));
   }
   value(str) { const L = parseLength(str); if (L == null || !this.o) return false; this.create(Math.abs(L)); return true; }
   draw(c, v) {

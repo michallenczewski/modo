@@ -265,3 +265,20 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 /* podpisy kafelków materiałów w wąskim panelu: bez wychodzenia poza kafelek */
 .sw{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
 .sw.tex span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+/* menu Plik przy nazwie szkicu, cofnij / ponów obok */
+.filebtn{padding:0 8px;gap:4px;height:28px;font-weight:500;color:var(--text)}
+.filebtn svg{color:var(--muted)}
+#undoBtn,#redoBtn{width:28px;height:28px}
+/* menu z ikonami (operacje na bryłach) */
+.menu button svg{color:var(--muted);flex:none}
+.menu .noic{width:16px;flex:none}
+#opsMenu{min-width:280px}
+/* okienko wyglądu widoku */
+.looklist{display:flex;flex-direction:column;gap:6px}
+.looklist .row{display:flex;align-items:center;gap:8px;min-height:28px}
+.looklist kbd{margin-right:4px}
+.menu .mcols{display:flex;gap:4px}
+.menu .mcol{min-width:236px}
+.menu .mcol+.mcol{border-left:1px solid var(--line);padding-left:4px}
+.menu{max-height:calc(100vh - 60px);overflow:auto}
+.looklist .lbl{display:block;font-size:11.5px}
