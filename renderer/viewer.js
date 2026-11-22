@@ -315,11 +315,20 @@ export class Viewer {
       edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
     }
     if (this.edgeMesh) { this.edgeMesh.geometry.dispose(); this.scene.remove(this.edgeMesh); this.edgeMesh = null; }
+    if (this.backMesh) { this.scene.remove(this.backMesh); this.backMesh = null; }
     if (edgeList.length) {
       this.edgeMesh = new THREE.Mesh(buildEdgeGeometry(edgeList), this.edgeMat);
       this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
       this.scene.add(this.edgeMesh);
+      // krawędzie tylne: te same kreski narysowane drugi raz, blado, tylko tam, gdzie zasłania je ściana
+      if (this.backEdges) {
+        this.backMat ||= new THREE.ShaderMaterial({ vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false, depthFunc: THREE.GreaterDepth, uniforms: { ...this.edgeMat.uniforms, opacity: { value: 0.3 } } });
+        this.backMesh = new THREE.Mesh(this.edgeMesh.geometry, this.backMat);
+        this.backMesh.frustumCulled = false; this.backMesh.renderOrder = 2;
+        this.scene.add(this.backMesh);
+      }
     }
+    this.guideGroup.visible = this.showGuides !== false;
     this.applySection(st);
     this.rebuildGuides();
     this.updateSun();
@@ -561,7 +570,7 @@ export class Viewer {
   }
   // mgła, siatka i ukryta geometria: materiały trzeba zbudować na nowo (mgła jest wkompilowana w shader)
   setLook(o) {
-    for (const k of ['fog', 'wire', 'showHidden']) if (k in o) this[k] = !!o[k];
+    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides']) if (k in o) this[k] = !!o[k];
     this.scene.fog = null; this.applyStyleUniforms();
     this.scene.traverse(q => { for (const m of [].concat(q.material || [])) m.needsUpdate = true; });
     if (this.model) this.rebuild(); else this.needs = true;

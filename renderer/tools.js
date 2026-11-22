@@ -76,7 +76,7 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
+  hint() { return 'Klik zaznacza ścianę, krawędź, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą, a w grupie — wchodzi do środka. Osobnym obiektem jest tylko grupa (Spacja); reszta to jedna wspólna geometria. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>⇧</kbd> przełącza, <kbd>⌥</kbd> (Mac) albo <kbd>Ctrl</kbd> (Windows) dodaje, oba razem odejmują. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
   subAt(id, x, y) { return subAt(this.app, id, x, y); }
   // potrójny klik: wszystko połączone — elementy luzem, które mają wspólny punkt (linie połączone końcami, stykające się bryły)
   triple(e, x, y) {
@@ -103,9 +103,11 @@ export class SelectTool extends Tool {
   }
   reset() { this.box = null; }
   // przycisk w dół zapamiętuje miejsce; przeciągnięcie rysuje ramkę (także zaczęte na bryle), zwykły klik zaznacza przy puszczeniu
-  down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y, add: e.shiftKey, id: this.pickAny(x, y) }; }
-  click(id, shift, x, y) {
-    const sel = this.app.selection;
+  // Modyfikatory jak w SketchUpie: ⇧ przełącza, ⌥ (Mac) / Ctrl (Windows) dodaje, oba razem odejmują; bez nich — nowe zaznaczenie.
+  mode(e) { const add = this.app.isMac ? e.altKey : e.ctrlKey; return e.shiftKey && add ? 'sub' : add ? 'add' : e.shiftKey ? 'toggle' : 'new'; }
+  down(e, x, y) { this.box = { x0: x, y0: y, x1: x, y1: y, mode: this.mode(e), id: this.pickAny(x, y) }; }
+  click(id, mode, x, y) {
+    const sel = this.app.selection, shift = mode !== 'new';
     const sub = x == null ? null : this.subAt(id, x, y);
     if (sub && id == null) id = sub.id;
     if (this.app.editSolid != null && id !== this.app.editSolid) this.app.exitSolid();
@@ -114,14 +116,15 @@ export class SelectTool extends Tool {
       // ta sama ściana albo krawędź kliknięta z ⇧ wypada z zaznaczenia
       const same = q => q.id === sub.id && q.kind === sub.kind && (sub.kind === 'face' ? q.key === sub.key : V.dist(q.a, sub.a) < 1e-6 && V.dist(q.b, sub.b) < 1e-6);
       const had = this.app.sub.some(same);
-      sel.clear();
-      this.app.sub = shift ? (had ? this.app.sub.filter(q => !same(q)) : [...this.app.sub, sub]) : [sub];
+      if (!shift) sel.clear();
+      const drop = mode === 'sub' || (mode === 'toggle' && had);
+      this.app.sub = !shift ? [sub] : drop ? this.app.sub.filter(q => !same(q)) : had ? this.app.sub : [...this.app.sub, sub];
       this.app.selectionChanged(); return;
     }
     if (!shift || id != null) this.app.sub = [];
     const ids = id == null ? [] : this.app.expand(id);
     if (id == null) { if (!shift) sel.clear(); }
-    else if (shift) { const on = sel.has(id); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
+    else if (shift) { const on = mode === 'sub' || (mode === 'toggle' && sel.has(id)); ids.forEach(i => on ? sel.delete(i) : sel.add(i)); }
     else { sel.clear(); ids.forEach(i => sel.add(i)); }
     this.app.selectionChanged();
   }
@@ -129,267 +132,27 @@ export class SelectTool extends Tool {
   up(e, x, y) {
     const b = this.box; if (!b) return; this.box = null;
     const sel = this.app.selection;
-    if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.add, b.x0, b.y0);
+    if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.mode, b.x0, b.y0);
     // od lewej do prawej: tylko to, co w całości w ramce; od prawej do lewej: wszystko, czego ramka dotyka
-    const window_ = b.x1 >= b.x0, hits = boxSelect(this.app, b, window_);
-    if (!b.add) { sel.clear(); this.app.sub = []; }
-    hits.forEach(i => sel.add(i));
+    const window_ = b.x1 >= b.x0, hits = new Set(boxSelect(this.app, b, window_));
     // ściany wspólnej geometrii zaznaczają się pojedynczo
+    let faces = [];
     const geo = this.model.shapes.find(q => q.geo && (q.g ?? null) === (this.app.editing ?? null) && !isHidden(this.model, q) && !q.locked);
     if (geo) {
-      sel.delete(geo.id);
+      hits.delete(geo.id);
       const X0 = Math.min(b.x0, b.x1), X1 = Math.max(b.x0, b.x1), Y0 = Math.min(b.y0, b.y1), Y1 = Math.max(b.y0, b.y1);
-      const inR = p => { const P = this.v.toScreen(p); return !P.behind && P.x >= X0 && P.x <= X1 && P.y >= Y0 && P.y <= Y1; };
-      const got = subFaces(geo, geo.polys.map((_, i) => i)).filter(f => window_ ? f.pts.every(inR) : f.pts.some(inR));
-      const have = new Set(this.app.sub.map(q => q.key));
-      this.app.sub = [...this.app.sub, ...got.filter(f => !have.has(f.key))];
+      const scr = new Map(), S = p => { const k = p[0] + ',' + p[1] + ',' + p[2]; let q = scr.get(k); if (!q) scr.set(k, q = this.v.toScreen(p)); return q; };
+      const inR = P => !P.behind && P.x >= X0 && P.x <= X1 && P.y >= Y0 && P.y <= Y1;
+      // ramka „dotyka” ściany, gdy obejmuje jej narożnik albo przecina którąś jej krawędź
+      const cross = (A, B) => { if (A.behind || B.behind) return false; if (inR(A) || inR(B)) return true; const c = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]; for (let i = 0; i < 4; i++) { const [rx, ry] = c[i], [sx, sy] = c[(i + 1) % 4], d = (B.x - A.x) * (sy - ry) - (B.y - A.y) * (sx - rx); if (Math.abs(d) < 1e-9) continue; const t = ((rx - A.x) * (sy - ry) - (ry - A.y) * (sx - rx)) / d, u = ((rx - A.x) * (B.y - A.y) - (ry - A.y) * (B.x - A.x)) / d; if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return true; } return false; };
+      faces = subFaces(geo, geo.polys.map((_, i) => i)).filter(f => window_ ? f.pts.every(p => inR(S(p))) : f.polys.some(P => P.some((p, i) => cross(S(p), S(P[(i + 1) % P.length])))));
     }
+    const have = new Set(this.app.sub.filter(q => q.kind === 'face').map(q => q.key)), got = new Set(faces.map(f => f.key));
+    if (b.mode === 'new') { sel.clear(); hits.forEach(i => sel.add(i)); this.app.sub = faces; }
+    else if (b.mode === 'add') { hits.forEach(i => sel.add(i)); this.app.sub = [...this.app.sub, ...faces.filter(f => !have.has(f.key))]; }
+    else if (b.mode === 'sub') { hits.forEach(i => sel.delete(i)); this.app.sub = this.app.sub.filter(q => !(q.kind === 'face' && got.has(q.key))); }
+    else { hits.forEach(i => sel.has(i) ? sel.delete(i) : sel.add(i)); this.app.sub = [...this.app.sub.filter(q => !(q.kind === 'face' && got.has(q.key))), ...faces.filter(f => !have.has(f.key))]; }
     this.app.selectionChanged();
-  }
-  draw(c) {
-    const b = this.box; if (!b || Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return;
-    const crossing = b.x1 < b.x0, dark = this.app.viewer.dark;
-    c.save();
-    c.fillStyle = dark ? 'rgba(150,170,210,0.10)' : 'rgba(63,95,153,0.06)';
-    c.strokeStyle = dark ? '#9fb4dc' : '#3f5f99'; c.lineWidth = 1;
-    if (crossing) c.setLineDash([5, 4]);
-    const x = Math.min(b.x0, b.x1) + 0.5, y = Math.min(b.y0, b.y1) + 0.5, w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0);
-    c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h);
-    c.restore();
-  }
-  // dwuklik w grupę albo komponent: edycja w środku
-  dbl(e, x, y) {
-    const id = this.pickAny(x, y); if (id == null) return;
-    if (typeof id === 'string' && id[0] === 't') { const t = this.model.texts.find(q => 't' + q.id === id); if (t) this.app.editText(t, false); return; }
-    const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
-    if (g) this.app.enterGroup(g.id);
-    else if (typeof id === 'number') {
-      const s = this.model.shapes.find(q => q.id === id);
-      if (s && s.geo) {
-        // wspólna geometria: dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą (osobnym obiektem jest tylko grupa)
-        const hit = this.v.pick(x, y); if (!hit || hit.shapeId !== id) return;
-        this.app.selection.clear(); this.app.sub = subFaces(s, component(s, +hit.key.split(':')[1])); this.app.selectionChanged(); return;
-      }
-      // dwuklik w bryłę zaznacza ją całą (edycja bryły: Enter albo menu podręczne)
-      this.app.sub = []; this.app.selection.clear(); this.app.expand(id).forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
-    }
-  }
-}
-
-/* ---------- linia ---------- */
-export class LineTool extends Tool {
-  reset() { this.anchor = null; this.chain = []; this.ids = []; this.cur = null; }
-  hint() {
-    return this.anchor
-      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Kursor łapie kierunek równoległy i prostopadły do krawędzi, nad którą przed chwilą był.  Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.'
-      : 'Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę, linia przez ścianę dzieli ją, a linia dochodząca do krawędzi dzieli krawędź.';
-  }
-  vcb() { return { label: 'Długość', value: this.anchor && this.cur ? fmtLength(V.dist(this.anchor, this.cur.p)) : '' }; }
-  move(e, x, y) {
-    this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.anchor, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir, extraPoints: this.chain.length > 2 ? [this.chain[0]] : null });
-  }
-  lockFrom() { return this.anchor; }
-  down(e, x, y) {
-    if (!this.cur) return;
-    const p = this.cur.p.slice();
-    if (!this.anchor) { this.anchor = p; this.chain = [p]; this.ids = []; return; }
-    this.add(p);
-  }
-  add(p) {
-    if (V.dist(this.anchor, p) < 1e-6) return;
-    this.app.checkpoint();
-    // w edycji bryły linia po jej ścianie dzieli ścianę (jak w SketchUpie)
-    if (this.app.editSolid != null) {
-      const sh = this.model.shapes.find(q => q.id === this.app.editSolid);
-      if (sh && splitByLine(this.model, sh, this.anchor, p)) { this.chain.push(p); this.anchor = p.slice(); this.app.lockAxis = null; this.app.changed(); return; }
-    }
-    const l = { id: this.model.next++, a: this.anchor.slice(), b: p.slice() };
-    this.model.lines.push(l);
-    this.ids.push(l.id); this.chain.push(p);
-    this.anchor = p.slice();
-    this.app.lockAxis = null;
-    this.app.changed();
-    // linia zamknęła pole w ścianę albo podzieliła ścianę — ciąg linii się kończy (jak w SketchUpie)
-    if (this.app.lastStitch && (this.app.lastStitch.made || !this.model.lines.some(q => q.id === l.id))) this.reset();
-  }
-  value(str) {
-    const L = parseLength(str); if (L == null || !this.anchor || !this.cur) return false;
-    const d = V.sub(this.cur.p, this.anchor); if (V.len(d) < 1e-9) return false;
-    this.add(V.add(this.anchor, V.mul(V.norm(d), L)));
-    return true;
-  }
-  draw(c, v) {
-    const s = this.cur; if (!s) return;
-    if (this.anchor) drawSeg(c, v, this.anchor, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || INK, { width: s.axis || s.color ? 2 : 1.6 });
-    drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label, s.axis ? AXIS_COLOR[s.axis] : s.color || BLUE);
-  }
-}
-
-/* ---------- prostokąt ---------- */
-export class RectTool extends Tool {
-  reset() { this.p0 = null; this.plane = null; this.cur = null; }
-  hint() {
-    return this.p0
-      ? 'Kliknij przeciwległy narożnik albo wpisz wymiary, np. <kbd>6;4</kbd>, i <kbd>Enter</kbd>. Prostokąt kładzie się na ścianie, nad którą jest kursor (jeśli pierwszy narożnik na niej leży); <kbd>⇧</kbd> zatrzymuje płaszczyznę, strzałki ją wymuszają: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.'
-      : 'Kliknij pierwszy narożnik — na ziemi albo na ścianie bryły. Po przejechaniu kursorem po krawędzi zostaje linia śledzenia; <kbd>⇧</kbd> trzyma na niej kursor.';
-  }
-  // płaszczyzna o normalnej n przez pierwszy narożnik; boki prostokąta wzdłuż krawędzi ściany, jeśli jest podana
-  setPlane(n, along) {
-    let u = along && Math.abs(V.dot(along, n)) < 1e-6 ? along : Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
-    u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
-    this.plane = { o: this.p0, n, u, v: V.cross(n, u) };
-  }
-  // Ściana, na której ma leżeć prostokąt: ta pod kursorem, o ile pierwszy narożnik leży w jej płaszczyźnie
-  // (np. narożnik wspólny dla trzech ścian — wybierasz ścianę, najeżdżając na nią). Poza bryłami — ziemia, gdy narożnik jest na ziemi.
-  pickPlane(x, y, shift) {
-    if (this.app.lockAxis) { const n = AXES[this.app.lockAxis]; if (Math.abs(V.dot(n, this.plane.n)) < 0.999) this.setPlane(n); return; }
-    if (shift || this.app.snapper.lockLine) return;
-    const hit = this.v.pick(x, y);
-    if (hit) {
-      const sh = this.model.shapes.find(q => q.id === hit.shapeId), f = sh && faceByKey(sh, hit.key);
-      if (f && Math.abs(V.dot(V.sub(this.p0, f.verts[0]), f.normal)) < 1e-4 && Math.abs(V.dot(f.normal, this.plane.n)) < 0.999) this.setPlane(f.normal);
-      return;
-    }
-    if (Math.abs(this.p0[2]) < 1e-6 && Math.abs(this.plane.n[2]) < 0.999 && this.v.onPlane(x, y, [0, 0, 0], [0, 0, 1])) this.setPlane([0, 0, 1]);
-  }
-  dims() {
-    if (!this.p0 || !this.cur) return null;
-    const d = V.sub(this.cur.p, this.p0);
-    return [V.dot(d, this.plane.u), V.dot(d, this.plane.v)];
-  }
-  vcb() {
-    const d = this.dims() || (this.lastValid() ? [this.last.a, this.last.b] : null);
-    return { label: 'Wymiary', value: d ? fmtNum(Math.abs(d[0])) + '; ' + fmtLength(Math.abs(d[1])) : '' };
-  }
-  lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  move(e, x, y) {
-    if (this.p0) this.pickPlane(x, y, e.shiftKey);
-    this.cur = this.p0 ? this.app.snapper.find(x, y, { model: this.model, plane: this.plane }) : this.app.snapper.find(x, y, { model: this.model });
-  }
-  down(e, x, y) {
-    if (!this.cur) return;
-    if (!this.p0) {
-      const s = this.cur, p0 = s.p.slice();
-      let n = [0, 0, 1];
-      if (s.face && (s.type === 'face' || s.type === 'edge' || s.type === 'end' || s.type === 'mid')) {
-        const sh = this.model.shapes.find(q => q.id === s.face.shapeId);
-        const f = sh && faceByKey(sh, s.face.key);
-        if (f && Math.abs(V.dot(V.sub(p0, f.verts[0]), f.normal)) < 1e-4) n = f.normal;
-      }
-      if (this.app.lockAxis) n = AXES[this.app.lockAxis];
-      this.p0 = p0; this.setPlane(n);
-      return;
-    }
-    const d = this.dims(); if (d) this.create(d[0], d[1]);
-  }
-  create(a, b) {
-    if (Math.abs(a) < 1e-6 || Math.abs(b) < 1e-6) return;
-    this.app.checkpoint();
-    makeShape(this.model, { o: this.p0, u: this.plane.u, v: this.plane.v }, [[0, 0], [a, 0], [a, b], [0, b]], 0);
-    this.app.lockAxis = null;
-    this.app.changed();
-    // zapamiętujemy, żeby po narysowaniu dało się jeszcze wpisać wymiary (jak w SketchUpie)
-    this.last = { p0: this.p0, plane: this.plane, a, b, seq: this.app.opSeq };
-    this.reset();
-  }
-  value(str) {
-    const L = parseLengths(str); if (!L) return false;
-    // po narysowaniu: wpisane wymiary poprawiają ostatni prostokąt
-    if (!this.p0 && this.lastValid() && this.app.revertLast()) { const l = this.last; this.p0 = l.p0; this.plane = l.plane; this.cur = { p: V.add(V.add(l.p0, V.mul(l.plane.u, l.a)), V.mul(l.plane.v, l.b)) }; }
-    if (!this.p0) return false;
-    const d = this.dims() || [1, 1];
-    const a = L[0] * (Math.sign(d[0]) || 1), b = (L[1] ?? L[0]) * (Math.sign(d[1]) || 1);
-    this.create(a, b); return true;
-  }
-  draw(c, v) {
-    const s = this.cur; if (!s) return;
-    const d = this.dims();
-    if (d) {
-      const { u, v: w } = this.plane, o = this.p0;
-      const q = [o, V.add(o, V.mul(u, d[0])), V.add(V.add(o, V.mul(u, d[0])), V.mul(w, d[1])), V.add(o, V.mul(w, d[1]))];
-      for (let i = 0; i < 4; i++) drawSeg(c, v, q[i], q[(i + 1) % 4], INK, { width: 1.6 });
-    }
-    drawMarker(c, v, s);
-    const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, d ? fmtNum(Math.abs(d[0])) + ' × ' + fmtLength(Math.abs(d[1])) : s.label);
-  }
-}
-
-/* ---------- wypchnij / wciśnij ---------- */
-export class PushTool extends Tool {
-  reset() { this.active = null; this.cur = null; this.hit = null; this.downAt = null; }
-  hint() {
-    const mod = this.app.isMac ? '⌥' : 'Ctrl';
-    return this.active
-      ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
-      : this.picked() ? 'Zaznaczona ściana: kliknij gdziekolwiek i przesuń, żeby ją wypchnąć, albo wpisz odległość po kliknięciu.'
-      : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle zmienia tę bryłę: wyciągnięta staje się jej częścią, wciśnięta wycina w niej otwór albo wnękę. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
-  }
-  vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
-  lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  shapeOf(id, m = this.model) { return m.shapes.find(s => s.id === id); }
-  move(e, x, y) {
-    this.mx = x; this.my = y;
-    if (!this.active) {
-      const hit = this.v.pick(x, y);
-      this.hit = hit;
-      const s = hit && this.shapeOf(hit.shapeId);
-      this.v.setHoverFace(this.picked() ? null : s ? faceByKey(s, hit.key)?.verts : null);
-      return;
-    }
-    const A = this.active;
-    // Punkty i krawędzie pochodzą z modelu sprzed wypychania (stoją w miejscu), więc liczą się także te z wypychanej bryły —
-    // np. wyrównanie do innego narożnika tej samej bryły. Tylko ściana pod kursorem tej bryły się nie liczy, bo rusza się razem z nią.
-    this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, noFace: new Set(A.host ? [A.shapeId, A.host.shape.id] : [A.shapeId]) });
-    if (!this.cur) return;
-    this.dist = V.dot(V.sub(this.cur.p, A.o), A.d) - (this.cur.type === 'free' ? A.t0 || 0 : 0);
-    this.apply(this.dist);
-  }
-  apply(d) {
-    const A = this.active, m = cloneModel(A.start);
-    const s = this.shapeOf(A.shapeId, m);
-    const k = A.flip ? -d : d;   // płaska ściana oglądana od spodu: ciągniemy przeciwnie do jej normalnej
-    let target = null;
-    if (s.geo) pushPull(s, A.key, k, this.copy);   // wspólna geometria: ⌥ / Ctrl zostawia pierwotną ścianę na miejscu
-    else if (this.copy) target = extrudeFace(m, s, A.key, k);
-    else if (A.host && this.shapeOf(A.host.shape.id, m)) {
-      // ścianka narysowana na bryle zmienia tę bryłę (jak w SketchUpie): wyciągnięta staje się jej częścią, wciśnięta wycina w niej
-      const host = this.shapeOf(A.host.shape.id, m), inward = V.dot(V.mul(A.d, d), A.host.normal) < 0;
-      pushPull(s, A.key, k);
-      if (s.h > 1e-7) {
-        const part = toMesh(JSON.parse(JSON.stringify(s)), facesOf);
-        toMesh(host, facesOf);
-        booleanMesh(host, part, inward ? 'subtract' : 'union');
-        m.shapes = m.shapes.filter(q => q !== s && (q !== host || host.polys.length));
-      }
-    }
-    else { pushPull(s, A.key, k); target = s; }
-    this.app.setModelLive(m);
-    const nk = this.copy ? 'top' : (A.key === 'face' ? (k >= 0 ? 'top' : 'bottom') : A.key);
-    const f = target && faceByKey(target, target.h === 0 ? 'face' : nk);
-    this.v.setHoverFace(f ? f.verts : null);
-  }
-  // ściana zaznaczona wcześniej narzędziem Zaznacz: wypychasz ją, klikając gdziekolwiek (jak w SketchUpie)
-  picked() { const q = this.app.sub; return q.length === 1 && q[0].kind === 'face' && !this.app.selection.size ? q[0] : null; }
-  start(x, y) {
-    const pre = this.picked();
-    let hit = this.hit || this.v.pick(x, y);
-    if (pre) { const c = pre.pts.reduce((a, p) => V.add(a, p), [0, 0, 0]); hit = { shapeId: pre.id, key: pre.key, point: V.mul(c, 1 / pre.pts.length), far: true }; this.app.clearSub(); }
-    if (!hit) return false;
-    const s = this.shapeOf(hit.shapeId); const f = s && faceByKey(s, hit.key); if (!f) return false;
-    let d = f.normal;
-    // płaska ściana: ciągniemy w stronę, z której patrzymy
-    if (s.h === 0 && V.dot(d, V.sub(this.v.cam.position.toArray(), hit.point)) < 0) d = V.mul(d, -1);
-    this.active = { shapeId: s.id, key: hit.key, o: hit.point, d, start: cloneModel(this.model), flip: d !== f.normal, host: s.h === 0 ? hostFace(this.model, s) : null };
-    // kliknięcie z dala od ściany: liczy się ruch kursora od miejsca kliknięcia, nie jego położenie
-    if (hit.far) { const r = this.v.onLine(x, y, hit.point, d); this.active.t0 = r ? r.t : 0; }
-    this.dist = 0;
-    return true;
-  }
-  down(e, x, y) {
-    if (!this.active) { if (this.start(x, y)) this.downAt = { x, y }; return; }
-    this.finish();
   }
   up(e, x, y) {
     // przeciągnięcie zamiast dwóch kliknięć
@@ -764,7 +527,7 @@ function drawPlus(c, x, y) {
 /* ---------- okrąg ---------- */
 export class CircleTool extends Tool {
   reset() { this.c = null; this.plane = null; this.cur = null; }
-  hint() { return this.c ? 'Przesuń, żeby ustalić promień, i kliknij — albo wpisz promień i <kbd>Enter</kbd>.' : 'Kliknij środek okręgu — na ziemi albo na ścianie. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.'; }
+  hint() { return this.c ? 'Przesuń, żeby ustalić promień, i kliknij — albo wpisz promień i <kbd>Enter</kbd>.' : 'Kliknij środek okręgu — na ziemi albo na ścianie. Strzałki ustawiają płaszczyznę: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe. Liczbę boków zmienia wpis np. <kbd>48s</kbd>.'; }
   r() { return this.c && this.cur ? V.dist(this.c, this.cur.p) : 0; }
   vcb() { return { label: 'Promień', value: this.c ? fmtLength(this.r()) : this.lastValid() ? fmtLength(this.last.r) : '' }; }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
@@ -778,13 +541,16 @@ export class CircleTool extends Tool {
   create(r, a0 = this.angle()) {
     if (r < 1e-6) return;
     this.app.checkpoint();
-    const s = makeShape(this.model, { o: this.c, u: this.plane.u, v: this.plane.v }, circlePts(r, CIRCLE_SEGMENTS, a0), 0);
+    const s = makeShape(this.model, { o: this.c, u: this.plane.u, v: this.plane.v }, circlePts(r, this.app.circleSeg || CIRCLE_SEGMENTS, a0), 0);
     s.soft = true;
     this.app.changed();
     this.last = { c: this.c, plane: this.plane, r, a0, seq: this.app.opSeq };
     this.reset();
   }
   value(str) {
+    // „32s” ustawia liczbę boków okręgu (jak w SketchUpie); zostaje do zmiany
+    const sides = String(str).trim().match(/^(\d+)\s*s$/i);
+    if (sides && this.constructor === CircleTool) { this.app.circleSeg = Math.max(6, Math.min(200, +sides[1])); this.app.toast?.('Okrąg: ' + this.app.circleSeg + ' boków'); this.app.refresh(); return true; }
     const r = parseLength(str); if (r == null || r <= 0) return false;
     if (this.c) { this.create(r); return true; }
     if (this.lastValid() && this.app.revertLast()) { const l = this.last; this.c = l.c; this.plane = l.plane; this.create(r, l.a0); return true; }
