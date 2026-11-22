@@ -290,6 +290,18 @@ function drawTrace(c, v) {
   }
   if (lk) { const L = viewer.pixelSize(lk.o) * 2500; for (let k = -6; k < 6; k++) seg(V.add(lk.o, V.mul(lk.d, L * k / 6)), V.add(lk.o, V.mul(lk.d, L * (k + 1) / 6)), 1.6); }
 }
+// Kursor w widoku: kropka wskazuje dokładne miejsce, a obok niej jest ikona bieżącego narzędzia.
+const cursorCache = new Map();
+function toolCursor(id) {
+  if (id === 'select' || !IC[id]) return '';
+  if (!cursorCache.has(id)) {
+    const icon = IC[id].replace(/currentColor/g, '#1a1a19');
+    const svg = k => `<svg xmlns="http://www.w3.org/2000/svg" width="${32 * k}" height="${32 * k}" viewBox="0 0 32 32"><g transform="translate(12.5 12.5) scale(1.1)" fill="none" stroke-linecap="round" stroke-linejoin="round"><g stroke="#fff" stroke-width="3.4" opacity=".92">${icon}</g><g stroke="#1a1a19" stroke-width="1.4">${icon}</g></g><circle cx="6" cy="6" r="2.3" fill="#1a1a19" stroke="#fff" stroke-width="1.3"/></svg>`;
+    const url = k => `url("data:image/svg+xml,${encodeURIComponent(svg(k))}")`;
+    cursorCache.set(id, `image-set(${url(1)} 1x, ${url(2)} 2x) 6 6, crosshair`);
+  }
+  return cursorCache.get(id);
+}
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
@@ -300,6 +312,7 @@ function setTool(id) {
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
+  $('#view').style.cursor = toolCursor(id);
   viewer.overlayDraw = (c, v) => { drawSub(c, v); drawTrace(c, v); tool.draw(c, v); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
@@ -354,7 +367,7 @@ view.addEventListener('pointerdown', e => {
   if (e.button === 1 || e.button === 2) {
     e.preventDefault();
     nav = { mode: e.button === 2 || e.shiftKey ? 'pan' : 'orbit', last: { x, y }, pivot: viewer.pivotAt(x, y), btn: e.button, moved: 0 };
-    view.setPointerCapture(e.pointerId); view.classList.add('c-grabbing');
+    view.setPointerCapture(e.pointerId); view.classList.add('c-grabbing'); view.style.cursor = 'grabbing';
     return;
   }
   if (e.button === 0) { view.setPointerCapture(e.pointerId); tool.down(e, x, y); app.refresh(); }
@@ -372,7 +385,7 @@ view.addEventListener('pointermove', e => {
 view.addEventListener('pointerup', e => {
   const [x, y] = xy(e);
   if (nav) {
-    const click = nav.btn === 2 && nav.moved < 4; nav = null; view.classList.remove('c-grabbing');
+    const click = nav.btn === 2 && nav.moved < 4; nav = null; view.classList.remove('c-grabbing'); view.style.cursor = toolCursor(toolId);
     if (click) openContext(x, y, e.clientX, e.clientY);   // prawy klik bez przeciągania: menu podręczne
     return;
   }

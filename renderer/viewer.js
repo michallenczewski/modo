@@ -3,7 +3,7 @@
 
 import * as THREE from './vendor/three.module.js';
 import { isHidden, triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, boxesTouch, subtreeIds, isSolid, V } from './model.js';
-import { triangulatePoly, isMesh } from './mesh.js';
+import { triangulatePoly, isMesh, segKey, newell, polyArea } from './mesh.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
 import { TEXTURES, textureCanvas } from './textures.js';
@@ -283,10 +283,10 @@ export class Viewer {
       if (s.bill) { this.addBillboard(s, st, paper); continue; }
       const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
-      const items = [];
+      const items = [], sm = this.smoother(s);
       for (const f of triangulate(s)) for (const tri of f.tris) {
-        const g = V.cross(V.sub(tri[1], tri[0]), V.sub(tri[2], tri[0]));
-        items.push({ tri: V.dot(g, f.normal) < 0 ? [tri[0], tri[2], tri[1]] : tri, n: f.normal, key: f.key, id: s.id });
+        const g = V.cross(V.sub(tri[1], tri[0]), V.sub(tri[2], tri[0])), t = V.dot(g, f.normal) < 0 ? [tri[0], tri[2], tri[1]] : tri;
+        items.push({ tri: t, n: f.normal, ns: sm ? t.map(p => sm(f.key, p)) : null, key: f.key, id: s.id });
       }
       const sel = this.selected.has(s.id);
       const flat = s.h === 0;
@@ -440,6 +440,18 @@ export class Viewer {
       polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2
     });
   }
+  // Ściany połączone wygładzoną krawędzią (np. trójkąty, na które złożyła się ściana po przesunięciu wierzchołka)
+  // cieniują się jak jedna gładka powierzchnia: normalna w wierzchołku to średnia z tych ścian.
+  // Zwraca funkcję (klucz ściany, punkt) → normalna albo null, gdy bryła nie ma wygładzonych krawędzi.
+  smoother(s) {
+    if (!isMesh(s) || !s.softs || !s.softs.length) return null;
+    const soft = new Set(s.softs.map(([a, b]) => segKey(a, b))), n = s.polys.length, par = [...Array(n).keys()];
+    const find = i => par[i] === i ? i : (par[i] = find(par[i])), owner = new Map();
+    s.polys.forEach((p, i) => p.forEach((a, k) => { const key = segKey(a, p[(k + 1) % p.length]); if (!soft.has(key)) return; if (owner.has(key)) par[find(i)] = find(owner.get(key)); else owner.set(key, i); }));
+    const K = v => Math.round(v[0] * 1e4) + ',' + Math.round(v[1] * 1e4) + ',' + Math.round(v[2] * 1e4), sum = new Map();
+    s.polys.forEach((p, i) => { const g = find(i), w = V.mul(newell(p), polyArea(p)); for (const v of p) { const k = g + '|' + K(v); sum.set(k, V.add(sum.get(k) || [0, 0, 0], w)); } });
+    return (key, v) => { const i = +String(key).split(':')[1], q = sum.get(find(i) + '|' + K(v)); return q ? V.norm(q) : null; };
+  }
   // tekstura materiału (jedna na cały widok), powtarzana w obu kierunkach
   texture(id) {
     this.texCache ||= new Map();
@@ -464,7 +476,7 @@ export class Viewer {
       const w = V.cross(n, u);
       if (!groups.length || groups[groups.length - 1].sig !== sg) groups.push({ sig: sg, start: keys.length * 3, count: 0, fp: sg ? fc[it.key] : null });
       groups[groups.length - 1].count += 3;
-      for (const p of it.tri) { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); uv.push(V.dot(p, u), V.dot(p, w)); }
+      it.tri.forEach((p, k) => { const m = (it.ns && it.ns[k]) || n; pos.push(p[0], p[1], p[2]); nor.push(m[0], m[1], m[2]); uv.push(V.dot(p, u), V.dot(p, w)); });
       keys.push(it.key); ids.push(it.id);
     }
     const geo = new THREE.BufferGeometry();

@@ -357,17 +357,24 @@ export function moveMeshPoints(s, pts, d) { return mapMeshPoints(s, pts, v => V.
 export function mapMeshPoints(s, pts, f) {
   const K = v => v.map(x => Math.round(x * 1e5)).join(','), set = new Set(pts.map(K));
   const mv = v => set.has(K(v)) ? f(v) : v.slice();
-  const out = [], fc = {};
+  const out = [], fc = {}, folds = [];
   s.polys.forEach((p, i) => {
     const paint = s.fc && s.fc['p:' + i], put = q => { if (paint) fc['p:' + out.length] = paint; out.push(q); };
     if (!p.some(v => set.has(K(v)))) { put(p); return; }
     const q = p.map(mv), n = newell(q);
     const flat = q.every(v => Math.abs(V.dot(n, V.sub(v, q[0]))) < 1e-6);
-    if (flat) put(q); else for (const t of triangulatePoly(p)) put(t.map(mv));
+    if (flat) { put(q); return; }
+    // Ściana przestała być płaska: składa się w trójkąty. Krawędzie tego złożenia (przekątne) są wygładzone —
+    // widać je tylko jako kontur, żeby podział na trójkąty nie rysował się na ścianie.
+    for (const t of triangulatePoly(p)) {
+      put(t.map(mv));
+      for (let k = 0; k < 3; k++) { const i = p.indexOf(t[k]), j = p.indexOf(t[(k + 1) % 3]), d = Math.abs(i - j); if (d !== 1 && d !== p.length - 1) folds.push([mv(t[k]), mv(t[(k + 1) % 3])]); }
+    }
   });
   s.polys = out; if (Object.keys(fc).length) s.fc = fc; else delete s.fc;
   s.marks = (s.marks || []).map(([a, b]) => [mv(a), mv(b)]);
   for (const k of ['softs', 'hid']) if (s[k]) s[k] = s[k].map(([a, b]) => [mv(a), mv(b)]);
+  if (folds.length) { const have = new Set((s.softs || []).map(([a, b]) => segKey(a, b))); s.softs = [...(s.softs || []), ...folds.filter(([a, b]) => !have.has(segKey(a, b)) && have.add(segKey(a, b)))]; }
   return s;
 }
 

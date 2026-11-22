@@ -322,7 +322,9 @@ export class PushTool extends Tool {
       return;
     }
     const A = this.active;
-    this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, exclude: A.shapeId, noFace: A.host ? new Set([A.host.shape.id]) : null });
+    // Punkty i krawędzie pochodzą z modelu sprzed wypychania (stoją w miejscu), więc liczą się także te z wypychanej bryły —
+    // np. wyrównanie do innego narożnika tej samej bryły. Tylko ściana pod kursorem tej bryły się nie liczy, bo rusza się razem z nią.
+    this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, noFace: new Set(A.host ? [A.shapeId, A.host.shape.id] : [A.shapeId]) });
     if (!this.cur) return;
     this.dist = V.dot(V.sub(this.cur.p, A.o), A.d) - (this.cur.type === 'free' ? A.t0 || 0 : 0);
     this.apply(this.dist);
