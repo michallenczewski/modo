@@ -652,6 +652,8 @@ export function geoComp(app, x, y) {
   for (const q of fs) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p);
   return { id: s.id, pts, polys: fs.flatMap(q => q.polys), what: _t('połączone') };
 }
+// zaznaczone krawędzie bryły `id` jako pary punktów
+export const subEdges = (sub, id) => sub.filter(q => q.id === id && q.kind === 'edge').map(q => [q.a.slice(), q.b.slice()]);
 // ściany (obszary) wspólnej geometrii jako pozycje zaznaczenia
 export function subFaces(s, idx) { return facesOfPolys(s, idx).map(f => ({ id: s.id, kind: 'face', key: f.key, polys: f.polys, pts: f.pts })); }
 // bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się i chwyta osobno
@@ -693,12 +695,23 @@ export function mapPoints(s, pts, f) {
 // copies = 0 — punkty się przesuwają, a wszystko, co się z nimi styka, rozciąga się (także luźne linie zaczepione w tych punktach);
 // copies > 0 — zaznaczone ściany zostają, a powstaje tyle ich kopii.
 export function moveSub(m, s, sub, fk, copies = 0) {
-  if (copies > 0 && sub.polys && sub.polys.length && isMesh(s)) {
+  const P0 = sub.polys && sub.polys.length && isMesh(s) ? sub.polys : [], E0 = sub.edges || [];
+  if (copies > 0 && (P0.length || E0.length)) {
     const same = (P, p) => P.length === p.length && P.every((v, i) => V.dist(v, p[i]) < 1e-6);
-    const src = sub.polys.map(P => { const i = s.polys.findIndex(p => same(P, p)); return { P, paint: i >= 0 && s.fc ? s.fc['p:' + i] : null }; });
-    const polys = s.polys.slice(), fc = { ...(s.fc || {}) };
-    for (let k = 1; k <= copies; k++) { const f = fk(k); for (const { P, paint } of src) { if (paint) fc['p:' + polys.length] = paint; polys.push(P.map(f)); } }
-    s.polys = polys; if (Object.keys(fc).length) s.fc = fc;
+    if (P0.length) {
+      const src = P0.map(P => { const i = s.polys.findIndex(p => same(P, p)); return { P, paint: i >= 0 && s.fc ? s.fc['p:' + i] : null }; });
+      const polys = s.polys.slice(), fc = { ...(s.fc || {}) };
+      for (let k = 1; k <= copies; k++) { const f = fk(k); for (const { P, paint } of src) { if (paint) fc['p:' + polys.length] = paint; polys.push(P.map(f)); } }
+      s.polys = polys; if (Object.keys(fc).length) s.fc = fc;
+    }
+    // krawędzie: kopie stają się nowymi liniami (krawędzie zaznaczonych ścian idą już razem z nimi)
+    const near = (p, q) => V.dist(p, q) < 1e-6;
+    const onPoly = ([a, b]) => P0.some(P => P.some((p, i) => { const q = P[(i + 1) % P.length]; return (near(p, a) && near(q, b)) || (near(p, b) && near(q, a)); }));
+    const E = E0.filter(e => !onPoly(e));
+    for (let k = 1; k <= copies; k++) {
+      const f = fk(k);
+      for (const [a, b] of E) { const l = { id: m.next++, a: f(a), b: f(b) }; if (s.g != null) l.g = s.g; if (s.tag != null) l.tag = s.tag; m.lines.push(l); }
+    }
     return;
   }
   const f = fk(1), has = p => sub.pts.some(q => V.dist(p, q) < 1e-5);
@@ -1385,10 +1398,13 @@ export class MoveTool extends Tool {
   lockFrom() { return this.p0; }
   // bez zaznaczenia: wierzchołek, krawędź albo ściana bryły luzem pod kursorem (jak w SketchUpie)
   grabAt(x, y) {
-    if (this.app.editSolid != null || this.app.selection.size || this.app.sub.length || this.copy) return null;
+    if (this.app.editSolid != null || this.app.selection.size || this.app.sub.length) return null;
     const id = pickEntity(this.app, x, y);
     if (id != null && typeof id !== 'number') return null;
     const sub = subAt(this.app, id, x, y); if (!sub) return null;
+    // kopia (⌥ / Ctrl) bez zaznaczenia: krawędź pod kursorem kopiuje się sama, a ściana — z całą połączoną geometrią
+    if (this.copy) return sub.kind === 'edge' ? { ...sub, edges: [[sub.a, sub.b]] } : null;
+    if (sub.kind === 'edge') sub.edges = [[sub.a, sub.b]];
     const s = this.model.shapes.find(q => q.id === sub.id), c = this.cur;
     if (c && c.type === 'end' && vertices(s).some(p => V.dist(p, c.p) < 1e-5)) return { id: sub.id, kind: 'vertex', pts: [c.p.slice()] };
     return sub;
@@ -1437,7 +1453,7 @@ export class MoveTool extends Tool {
       if (!sub && this.app.sub.length && !this.app.selection.size) {
         const id = this.app.sub[0].id, pts = [];
         for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
-        sub = { id, pts, what: 'zaznaczenie', polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys) };
+        sub = { id, pts, what: 'zaznaczenie', polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys), edges: subEdges(this.app.sub, id) };
         this.app.clearSub();
       }
       if (!sub) sub = this.grabAt(x, y);
@@ -1572,7 +1588,7 @@ export class RotateTool extends Tool {
       if (this.app.sub.length && !this.app.selection.size) {
         const id = this.app.sub[0].id, pts = [];
         for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
-        this.sub = { id, pts, polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys) }; this.targets = new Set(); this.app.clearSub();
+        this.sub = { id, pts, polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys), edges: subEdges(this.app.sub, id) }; this.targets = new Set(); this.app.clearSub();
       } else {
         const t = targetsAt(this.app, x, y); if (!t) return;
         // bez zaznaczenia nad wspólną geometrią: obraca się wszystko, co połączone ze ścianą pod kursorem

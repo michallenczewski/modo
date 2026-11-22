@@ -2,7 +2,7 @@
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
-import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines } from './model.js';
+import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
 import { TEXTURES, textureCanvas } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
@@ -530,7 +530,15 @@ window.addEventListener('keyup', e => {
 function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + _t(' będzie w kolejnej wersji.'));
+  // zaznaczone krawędzie wspólnej geometrii trafiają do schowka jako linie (liftSub zabiera tylko ściany)
+  const clipEdges = act === 'copy' || act === 'cutClip' ? app.sub.filter(q => q.kind === 'edge').map(q => { const s = app.model.shapes.find(t => t.id === q.id); const l = { a: q.a.slice(), b: q.b.slice() }; if (s?.g != null) l.g = s.g; if (s?.tag != null) l.tag = s.tag; return l; }) : [];
+  const edgeSub = act === 'cutClip' ? app.sub.filter(q => q.kind === 'edge') : [];
   if (LIFT.has(act)) app.liftSub();
+  // wycinanie: krawędzie zaznaczone razem ze ścianami też mają zniknąć (liftSub czyści całe zaznaczenie podelementów)
+  if (edgeSub.length && !app.sub.length) {
+    const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-6;
+    app.sub = edgeSub.filter(q => { const s = app.model.shapes.find(t => t.id === q.id); return s && edgeList(s).some(e => (near(e.a, q.a) && near(e.b, q.b)) || (near(e.a, q.b) && near(e.b, q.a))); });
+  }
   switch (act) {
     case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
     case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? _t('Mgła włączona') : _t('Mgła wyłączona')); syncLook(); break;
@@ -547,8 +555,8 @@ function run(act) {
     case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
     case 'selectInvert': selectInvert(); break;
-    case 'copy': copySel(); break;
-    case 'cutClip': if (copySel()) deleteSelection(); break;
+    case 'copy': copySel(clipEdges); break;
+    case 'cutClip': if (copySel(clipEdges)) deleteSelection(); break;
     case 'paste': pasteClip(false); break;
     case 'pasteInPlace': pasteClip(true); break;
     case 'lock': lockSel(); break;
@@ -783,11 +791,13 @@ function flipSel(axis) {
 const CLIP = 'modo.schowek';
 let clipMem = null;
 app.docId = Math.random().toString(36).slice(2);   // schowek z tego samego szkicu zachowuje warstwy i powiązania komponentów
-function packSelection(ids) {
+function packSelection(ids, edges = []) {
   const m = app.model;
-  const shapes = m.shapes.filter(s => ids.has(s.id)), lines = m.lines.filter(l => ids.has('l' + l.id));
+  const shapes = m.shapes.filter(s => ids.has(s.id)), lines = [...m.lines.filter(l => ids.has('l' + l.id)), ...edges];
   if (!shapes.length && !lines.length) return null;
-  const b = bounds(m, null, [...ids]), o = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, b.lo[2]], neg = o.map(x => -x);
+  const b = bounds(m, null, [...ids]) || { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity] };
+  for (const l of edges) for (const p of [l.a, l.b]) for (let k = 0; k < 3; k++) { b.lo[k] = Math.min(b.lo[k], p[k]); b.hi[k] = Math.max(b.hi[k], p[k]); }
+  const o = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, b.lo[2]], neg = o.map(x => -x);
   const groups = groupsWhollyIn(m, ids).map(g => JSON.parse(JSON.stringify(g))), gset = new Set(groups.map(g => g.id));
   for (const g of groups) { if (g.p == null || !gset.has(g.p)) delete g.p; if (g.frame) g.frame.o = g.frame.o.map((x, k) => x + neg[k]); }
   const clean = c => { if (c.g == null || !gset.has(c.g)) delete c.g; delete c.hidden; delete c.locked; return c; };
@@ -795,9 +805,9 @@ function packSelection(ids) {
   const L = lines.map(l => { const c = JSON.parse(JSON.stringify(l)); c.a = c.a.map((x, k) => x + neg[k]); c.b = c.b.map((x, k) => x + neg[k]); return clean(c); });
   return { paste: true, name: _t('Schowek'), doc: app.docId, o, shapes: S, lines: L, groups };
 }
-function copySel() {
-  const item = packSelection(new Set(app.selection));
-  if (!item) { toast(_t('Zaznacz bryły albo linie do skopiowania.')); return false; }
+function copySel(edges) {
+  const item = packSelection(new Set(app.selection), edges);
+  if (!item) { toast(_t('Zaznacz bryły, krawędzie albo linie do skopiowania.')); return false; }
   clipMem = item;
   try { localStorage.setItem(CLIP, JSON.stringify(item)); } catch (e) {}
   toast(_t('Skopiowano: ') + (item.shapes.length + item.lines.length));
@@ -1678,6 +1688,7 @@ function openContext(x, y, cx, cy) {
   } else if (app.sub.length) {
     // zaznaczone ściany albo krawędzie wspólnej geometrii
     if (app.sub.some(q => q.kind === 'face')) items.push(['selSameMat', _t('Zaznacz ściany z tym samym materiałem')], ['soften', _t('Wygładź krawędzie')], ['unsoften', _t('Przywróć wygładzone krawędzie')], null, ['group', _t('Utwórz grupę')], ['comp', _t('Utwórz komponent')], null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], null, ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], null);
+    else items.push(['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null);
     items.push(['delete', _t('Usuń')]);
   } else {
     if (app.editing || app.editSolid != null) items.push(['exitEdit', _t('Zakończ edycję')], null);

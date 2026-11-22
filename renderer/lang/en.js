@@ -251,7 +251,7 @@ export default {
  "Nie ma wcześniejszego widoku.": "There is no previous view.",
  "Schowek jest pusty — najpierw skopiuj zaznaczenie.": "The clipboard is empty — copy a selection first.",
  "Skopiowano: ": "Copied: ",
- "Zaznacz bryły albo linie do skopiowania.": "Select shapes or lines to copy.",
+ "Zaznacz bryły, krawędzie albo linie do skopiowania.": "Select shapes, edges or lines to copy.",
  "Schowek": "Clipboard",
  "Odbito wzdłuż osi ": "Flipped along axis ",
  "Zaznacz bryły, linie albo grupę, które mają zostać odbite (dwuklik zaznacza całą bryłę).": "Select the shapes, lines or group to flip (double-click selects the whole solid).",
