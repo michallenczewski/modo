@@ -1,5 +1,8 @@
 // Słownik angielski: klucz to napis polski z kodu (zob. i18n.js). Brak klucza = napis zostaje po polsku.
 export default {
+ "Model": "Model",
+ "Model ": "Model ",
+ "Van": "Van",
  "zmieniono": "modified",
  "zapisano": "saved",
  "Bez nazwy": "Untitled",
@@ -154,7 +157,6 @@ export default {
  "wysokość {0}° · azymut {1}°": "altitude {0}° · azimuth {1}°",
  "zachód ": "sunset ",
  "wschód ": "sunrise ",
- "paź": "Oct",
  "Nie ma jeszcze scen — dodaj je w okienku Widok.": "No scenes yet. Add them in the View panel.",
  "Dodano scenę „": "Scene added: “",
  "Scena ": "Scene ",
@@ -662,5 +664,4 @@ export default {
  " — zainstaluj": " — install",
  " (<b>zablokowany</b>)": " (<b>locked</b>)",
  " (<b>zablokowana</b>)": " (<b>locked</b>)",
- "Edytujesz grupę · wyjdź": "Editing group · exit"
 };

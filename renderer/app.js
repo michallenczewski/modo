@@ -22,6 +22,7 @@ import { drawAnnotations } from './annot.js';
 import { UNITS, getUnit, setUnit } from './units.js';
 
 import { _t, lang, LANGS, setLang, translateDom } from './i18n.js';
+import { installTestApi } from './testapi.js';
 const api = window.api;
 const $ = s => document.querySelector(s);
 translateDom();   // stałe napisy z index.html w wybranym języku
@@ -279,6 +280,7 @@ const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
 const TOOLBAR = [['select', _t('Zaznacz')], null, ['line', _t('Linia')], ['rect', _t('Prostokąt')], ['circle', _t('Okrąg')], ['arc', _t('Łuk')], null, ['push', _t('Wypchnij / wciśnij')], ['move', _t('Przesuń')], ['rotate', _t('Obróć')], ['scale', _t('Skaluj')], ['offset', _t('Odsunięcie')], null, ['tape', _t('Taśma')], ['dim', _t('Wymiar')], ['section', _t('Przekrój')], ['eraser', _t('Gumka')], ['paint', _t('Kolor i materiał')], 'grow', ['orbit', _t('Orbita')], ['pan', _t('Przesuń widok')], ['extents', _t('Pokaż wszystko')]];
 app.tools = tools;   // do testów w konsoli
+app.setTool = id => setTool(id);
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -1220,7 +1222,7 @@ function goScene(d) {
 }
 
 /* ---------- słońce ---------- */
-const MON = lang === 'en' ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] : ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+const MON = lang === 'en' ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] : ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];   // i18n-ok
 function setSun(c) { viewer.setSun(c); renderSun(); app.markDirtySoft(); }
 app.markDirtySoft = () => { if (!app.file.dirty && app.model.shapes.length) app.markDirty(); };
 const setRangeFill = el => el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%');
@@ -1647,7 +1649,7 @@ $('#fileBtn').addEventListener('click', async () => {
   try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
   const items = [['new', _t('Nowy szkic')], ['open', _t('Otwórz…')], null, ['save', _t('Zapisz')], ['saveAs', _t('Zapisz jako…')], ['saveCopy', _t('Zapisz kopię jako…')]];
   if (app.file.path) items.push(['revert', _t('Przywróć zapisaną wersję')]);
-  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['theme', _t('Wygląd: ') + THEME_NAME[theme]], ['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
+  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['theme', _t('Wygląd: ') + THEME_NAME[theme]], ['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);   // i18n-ok
   const hhmm = t => new Date(t).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   m.innerHTML = items.map(i => i ? `<button role="menuitem" data-a="${i[0]}"><span>${i[1]}</span>${keysFor(i[0], app.keys.over).length ? '<kbd>' + k(i[0]) + '</kbd>' : ''}</button>` : '<div class="msep"></div>').join('')
     + (lost.length ? _t('<div class="msep"></div><div class="mlbl">Niezapisane po awarii</div>') + lost.map((r, i) => `<button role="menuitem" data-lost="${i}"><span>${esc(r.name || _t('Bez nazwy'))}</span><kbd>${hhmm(r.time)}</kbd></button>`).join('') : '')
@@ -1952,6 +1954,7 @@ viewHide.fn = e => {
   return e.g == null || !set.has(e.g);
 };
 window.modo = app;   // do testów w konsoli
+installTestApi(app);   // window.modoTest — stałe polecenia do testów
 app.solidReady = solidReady;
 // Manifold ładuje się w tle; po załadowaniu scena przelicza wycięcia już nim
 initSolid().then(ok => { if (ok && app.model.shapes.some(q => q.op === 'cut')) viewer.rebuild(); });
