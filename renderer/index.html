@@ -10,8 +10,9 @@
 <header id="top">
   <div id="crumbs"><span id="fileName">Bez nazwy</span><span id="saved"></span></div>
   <div class="gap"></div>
+  <div id="topBar">
   <button id="updBtn" class="tb" hidden></button>
-  <button id="sunBtn" class="tb" aria-haspopup="dialog" aria-label="Słońce i cienie"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg><span id="sunLabel" class="num"></span></button>
+  <button id="sunBtn" class="ib" aria-haspopup="dialog" aria-label="Słońce i cienie"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg></button>
   <div class="seg" id="styleSeg" role="group" aria-label="Styl rysunku">
     <button data-style="szkic">Szkic</button><button data-style="kreska">Kreska</button><button data-style="model">Model</button>
   </div>
@@ -23,10 +24,11 @@
   <button id="underBtn" class="ib" aria-label="Podkład DXF / DWG" title="Podkład DXF / DWG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.3 8 11.3l6-3"/><path d="M2 11 8 14l6-3"/></svg></button>
   <button id="themeBtn" class="ib" aria-label="Wygląd: jasny albo ciemny" title="Wygląd: automatyczny / jasny / ciemny"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/></svg></button>
   <button id="keysBtn" class="ib" aria-label="Skróty klawiszowe" title="Skróty klawiszowe (?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.5"/><path d="M4.5 6.7h.01M7 6.7h.01M9.5 6.7h.01M12 6.7h.01M5 9.4h6"/></svg></button>
-  <button id="panelBtn" class="ib" aria-label="Panel: element, warstwy, struktura" title="Panel: element, warstwy, struktura"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.8" width="12" height="10.4" rx="1.5"/><path d="M10 2.8v10.4"/></svg></button>
+  <button id="panelBtn" class="ib" aria-label="Panel: element, materiały, render, warstwy, struktura" title="Panel: element, materiały, render, warstwy, struktura"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.8" width="12" height="10.4" rx="1.5"/><path d="M10 2.8v10.4"/></svg></button>
   <button id="fileBtn" class="ib" aria-label="Plik" aria-haspopup="menu" title="Plik"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.8h5.2L12 4.6v9.6H4z"/><path d="M9 1.8v3h3"/></svg></button>
   <button id="aiBtn" class="tb" aria-haspopup="dialog" aria-label="Render widoku przez Gemini"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 9.5 6.5 13.8 8 9.5 9.5 8 13.8 6.5 9.5 2.2 8 6.5 6.5z"/></svg><span>Render</span></button>
   <button id="pngBtn" class="tb" aria-haspopup="dialog" aria-label="Eksport PNG"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M5 7.5l3 3 3-3"/><path d="M2.5 11v2.5h11V11"/></svg><span>PNG</span></button>
+  </div>
 </header>
 
 <nav id="tools" aria-label="Narzędzia"></nav>
@@ -34,9 +36,32 @@
 <main id="view"></main>
 
 <aside id="panel" hidden aria-label="Panel">
-  <section class="psec"><div class="phead"><span class="ttl">Element</span></div><div id="infoBody" class="pbody"></div></section>
-  <section class="psec"><div class="phead"><span class="ttl grow">Warstwy</span><button class="tb soft" id="tagAdd">Dodaj</button></div><div id="tagList" class="pbody"></div></section>
-  <section class="psec grow"><div class="phead"><span class="ttl">Struktura</span></div><div id="tree" class="pbody"></div></section>
+  <section class="psec" data-sec="info"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Element</span></button></div><div id="infoBody" class="pbody"></div></section>
+  <section class="psec" data-sec="mat"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Materiały</span></button></div><div id="matBody" class="pbody">
+  <div id="swatches"></div>
+  <div id="texSwatches"></div>
+  <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
+  <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
+  <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>
+  </div></section>
+  <section class="psec" data-sec="render"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Render</span></button><span class="lbl grow right">Gemini · Nano Banana</span></div><div id="renderBody" class="pbody">
+  <div id="aiKeyBox">
+    <div class="lbl note">Potrzebny jest Twój klucz API Gemini (z Google AI Studio). Zostaje na tym komputerze.</div>
+    <div class="row"><input id="aiKey" class="fld grow" type="password" autocomplete="off" spellcheck="false" placeholder="Klucz API" aria-label="Klucz API Gemini"><button class="tb soft" id="aiKeySave">Zapisz</button></div>
+  </div>
+  <div id="aiMain">
+    <div class="row"><span class="lbl w60">Model</span><select id="aiModel" class="fld grow" aria-label="Model"></select></div>
+    <div class="row" id="aiCustomRow" hidden><span class="lbl w60">Nazwa</span><input id="aiCustom" class="fld grow" spellcheck="false" placeholder="identyfikator modelu" aria-label="Identyfikator modelu"></div>
+    <div class="row"><span class="lbl w60">Rozmiar</span><div class="seg stretch grow" id="aiSize" role="group" aria-label="Rozmiar obrazu"><button data-s="1K">1K</button><button data-s="2K">2K</button><button data-s="4K">4K</button></div></div>
+    <textarea id="aiPrompt" class="fld" rows="6" spellcheck="false" aria-label="Opis renderu"></textarea>
+    <div class="row"><button class="tb soft" id="aiPromptReset">Przywróć opis</button><span class="grow"></span><button class="tb soft" id="aiKeyChange">Zmień klucz</button></div>
+    <div class="lbl note">Do Gemini trafia bieżący widok w wybranym stylu, bez osi i prowadnic. Każdy render jest płatny według cennika Google.</div>
+    <div class="hr"></div>
+    <div class="row"><span class="lbl grow ell" id="aiStatus"></span><button class="primary" id="aiGo">Renderuj</button></div>
+  </div>
+  </div></section>
+  <section class="psec" data-sec="tags"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Warstwy</span></button><span class="grow"></span><button class="tb soft" id="tagAdd">Dodaj</button></div><div id="tagList" class="pbody"></div></section>
+  <section class="psec grow" data-sec="tree"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Struktura</span></button></div><div id="tree" class="pbody"></div></section>
 </aside>
 
 <footer id="status">
@@ -102,23 +127,6 @@
   <div class="lbl note" id="libNote">Zaznacz bryły (albo grupę) i zapisz je tutaj — będą dostępne w każdym szkicu na tym komputerze.</div>
 </section>
 
-<section id="aiPop" class="pop wide" role="dialog" aria-label="Render przez Gemini" hidden>
-  <div class="row"><span class="ttl grow">Render widoku</span><span class="lbl">Gemini · Nano Banana</span></div>
-  <div id="aiKeyBox">
-    <div class="lbl note">Potrzebny jest Twój klucz API Gemini (z Google AI Studio). Zostaje na tym komputerze.</div>
-    <div class="row"><input id="aiKey" class="fld grow" type="password" autocomplete="off" spellcheck="false" placeholder="Klucz API" aria-label="Klucz API Gemini"><button class="tb soft" id="aiKeySave">Zapisz</button></div>
-  </div>
-  <div id="aiMain">
-    <div class="row"><span class="lbl w60">Model</span><select id="aiModel" class="fld grow" aria-label="Model"></select></div>
-    <div class="row" id="aiCustomRow" hidden><span class="lbl w60">Nazwa</span><input id="aiCustom" class="fld grow" spellcheck="false" placeholder="identyfikator modelu" aria-label="Identyfikator modelu"></div>
-    <div class="row"><span class="lbl w60">Rozmiar</span><div class="seg stretch grow" id="aiSize" role="group" aria-label="Rozmiar obrazu"><button data-s="1K">1K</button><button data-s="2K">2K</button><button data-s="4K">4K</button></div></div>
-    <textarea id="aiPrompt" class="fld" rows="6" spellcheck="false" aria-label="Opis renderu"></textarea>
-    <div class="row"><button class="tb soft" id="aiPromptReset">Przywróć opis</button><span class="grow"></span><button class="tb soft" id="aiKeyChange">Zmień klucz</button></div>
-    <div class="lbl note">Do Gemini trafia bieżący widok w wybranym stylu, bez osi i prowadnic. Każdy render jest płatny według cennika Google.</div>
-    <div class="hr"></div>
-    <div class="row"><span class="lbl grow ell" id="aiStatus"></span><button class="primary" id="aiGo">Renderuj</button></div>
-  </div>
-</section>
 
 <section id="pngPop" class="pop" role="dialog" aria-label="Eksport PNG" hidden>
   <div class="row"><span class="ttl grow">Eksport PNG</span><span class="lbl" id="pngStyle"></span></div>
@@ -157,14 +165,6 @@
   </div>
 </section>
 
-<section id="paintPop" class="pop" role="dialog" aria-label="Kolor i materiał" hidden>
-  <div class="row"><span class="ttl grow">Kolor i materiał</span></div>
-  <div id="swatches"></div>
-  <div id="texSwatches"></div>
-  <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
-  <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
-  <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>
-</section>
 
 <div id="menu" class="menu" role="menu" hidden></div>
 <div id="ctxMenu" class="menu" role="menu" hidden></div>

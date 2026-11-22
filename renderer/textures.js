@@ -29,7 +29,7 @@ export const TEXTURES = {
     }
   },
   drewno: {
-    name: 'deski', avg: '#b8946a', size: [1.2, 0.6], px: [256, 128],
+    name: _t('deski'), avg: '#b8946a', size: [1.2, 0.6], px: [256, 128],
     draw(c, W, H) {
       const r = rng(23), n = 5, ph = H / n;
       for (let k = 0; k < n; k++) {
@@ -43,7 +43,7 @@ export const TEXTURES = {
     }
   },
   beton: {
-    name: 'beton', avg: '#b9b6ae', size: [2.4, 2.4], px: [256, 256],
+    name: _t('beton'), avg: '#b9b6ae', size: [2.4, 2.4], px: [256, 256],
     draw(c, W, H) {
       const r = rng(37); c.fillStyle = '#bcb9b1'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 2600, ['rgba(255,255,255,.10)', 'rgba(70,68,62,.10)', 'rgba(120,116,108,.08)'], 2.4);
@@ -74,7 +74,7 @@ export const TEXTURES = {
     }
   },
   blacha: {
-    name: 'blacha', avg: '#8f959a', size: [0.5, 0.5], px: [128, 128],
+    name: _t('blacha'), avg: '#8f959a', size: [0.5, 0.5], px: [128, 128],
     draw(c, W, H) {
       const g = c.createLinearGradient(0, 0, W, 0);
       g.addColorStop(0, '#7b8187'); g.addColorStop(0.06, '#a9afb4'); g.addColorStop(0.14, '#93999e'); g.addColorStop(0.92, '#8d9398'); g.addColorStop(1, '#7b8187');
@@ -82,7 +82,7 @@ export const TEXTURES = {
     }
   },
   trawa: {
-    name: 'trawa', avg: '#8fa573', size: [2, 2], px: [256, 256],
+    name: _t('trawa'), avg: '#8fa573', size: [2, 2], px: [256, 256],
     draw(c, W, H) {
       const r = rng(67); c.fillStyle = '#90a674'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 5200, ['rgba(60,90,40,.22)', 'rgba(190,205,140,.20)', 'rgba(110,140,80,.25)'], 2.2);

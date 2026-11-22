@@ -35,7 +35,13 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .frame-mac header{padding-left:88px}
 .frame-win header{padding-right:150px}
 .fs.frame-mac header{padding-left:18px}
-#crumbs{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap;overflow:hidden}
+#crumbs{display:flex;align-items:baseline;gap:8px;min-width:80px;flex:0 0.25 auto;white-space:nowrap;overflow:hidden}
+/* ikony po prawej: w wąskim oknie przewijają się w bok (kółkiem albo gładzikiem); puste miejsce przed nimi dalej przeciąga okno */
+#topBar{display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-app-region:no-drag;height:100%}
+#topBar::-webkit-scrollbar{display:none}
+#topBar.lmask{-webkit-mask-image:linear-gradient(90deg,transparent,#000 24px)}
+#topBar.rmask{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent)}
+#topBar.lmask.rmask{-webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)}
 #fileName{font-weight:500;overflow:hidden;text-overflow:ellipsis}
 #saved{color:var(--muted2);font-size:12px}
 .gap{flex:1 1 0;min-width:8px}
@@ -190,6 +196,17 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .psec{background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--line);padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:none}
 .psec.grow{flex:1 1 auto;min-height:120px}
 .phead{display:flex;align-items:center;gap:8px;height:26px}
+/* sekcje panelu zwijane kliknięciem w nagłówek */
+.pfold{display:flex;align-items:center;gap:6px;height:26px;margin-left:-4px;padding:0 4px;border-radius:6px;color:var(--text)}
+.pfold:hover{background:var(--hover)}
+.pfold .chev{color:var(--muted);transition:transform .12s}
+.psec.closed .pfold .chev{transform:rotate(-90deg)}
+.psec.closed>.pbody{display:none}
+.psec.closed{gap:0}
+.psec.grow.closed{flex:none;min-height:0}
+.phead .right{text-align:right}
+#panel #matBody #swatches,#panel #matBody #texSwatches{grid-template-columns:repeat(4,minmax(0,1fr))}
+#panel #renderBody textarea{min-height:96px}
 .pbody{display:flex;flex-direction:column;gap:8px}
 .pbody .row{display:flex;align-items:center;gap:8px;min-height:28px}
 .pbody .lbl{color:var(--muted);font-size:12px}
@@ -244,3 +261,7 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 
 #curIcon{position:fixed;left:0;top:0;z-index:5;pointer-events:none;width:19px;height:19px;will-change:transform}
 #curIcon[hidden]{display:none}
+
+/* podpisy kafelków materiałów w wąskim panelu: bez wychodzenia poza kafelek */
+.sw{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+.sw.tex span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}

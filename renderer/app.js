@@ -298,7 +298,7 @@ for (const t of TOOLBAR) {
     if (id === 'extents') return viewer.zoomExtents();
     if (FAMILIES[id]) { hideFlyout(); return setTool(famCur[id]); }
     setTool(id);
-    if (id === 'paint') openPop('#paintPop', b, 'right');
+    if (id === 'paint') showSec('mat');
   });
   toolsEl.append(b);
 }
@@ -565,7 +565,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? _t('Rzut równoległy') : _t('Perspektywa')); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
-    case 'render': openPop('#aiPop', $('#aiBtn')); break;
+    case 'render': showSec('render'); break;
     case 'importSkp': importSkp(); break;
     case 'library': openPop('#libPop', $('#libBtn')); break;
     case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
@@ -878,7 +878,6 @@ function openPop(sel, anchor, side) {
   if (sel === '#underPop') renderUnder();
   if (sel === '#viewPop') renderViewPop();
   if (sel === '#libPop') renderLib();
-  if (sel === '#aiPop') renderAi();
   if (sel === '#editPop') renderEditPop();
 }
 function closePops() {
@@ -905,6 +904,39 @@ function togglePanel(v) {
   renderPanel();
 }
 $('#panelBtn').addEventListener('click', () => togglePanel());
+// Sekcje panelu zwijają się kliknięciem w nagłówek; program pamięta, które są zwinięte.
+const FOLD_KEY = 'modo.panelFold';
+let folded = new Set(['render']);
+try { const f = localStorage.getItem(FOLD_KEY); if (f) folded = new Set(JSON.parse(f)); } catch (e) {}
+function setFold(name, closed) {
+  const sec = $(`#panel [data-sec="${name}"]`); if (!sec) return;
+  closed ? folded.add(name) : folded.delete(name);
+  sec.classList.toggle('closed', closed); sec.querySelector('.pfold').setAttribute('aria-expanded', String(!closed));
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch (e) {}
+  if (!closed && name === 'render') renderAi();
+}
+for (const sec of document.querySelectorAll('#panel .psec')) {
+  const name = sec.dataset.sec;
+  sec.classList.toggle('closed', folded.has(name)); sec.querySelector('.pfold').setAttribute('aria-expanded', String(!folded.has(name)));
+  sec.querySelector('.pfold').addEventListener('click', () => setFold(name, !folded.has(name)));
+}
+// otwiera panel na danej sekcji (wiaderko → Materiały, przycisk Render → Render)
+function showSec(name) {
+  closePops(); if (!app.panel) togglePanel(true);
+  setFold(name, false);
+  const sec = $(`#panel [data-sec="${name}"]`); if (sec) sec.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+app.showSec = showSec;
+if (!folded.has('render')) setTimeout(() => renderAi());   // po wczytaniu całego pliku (lista modeli jest niżej)
+/* ---------- górny pasek: przewijanie ikon w wąskim oknie ---------- */
+{
+  const bar = $('#topBar');
+  const mask = () => { const l = bar.scrollLeft > 1, r = bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1; bar.classList.toggle('lmask', l); bar.classList.toggle('rmask', r); };
+  // kółko myszy przewija w bok (gładzik przewija w bok sam)
+  bar.addEventListener('wheel', e => { if (bar.scrollWidth <= bar.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; bar.scrollLeft += e.deltaY; e.preventDefault(); }, { passive: false });
+  bar.addEventListener('scroll', () => { mask(); closePops(); });
+  new ResizeObserver(mask).observe(bar); mask();
+}
 const groupName = g => g.name || (g.kind === 'comp' ? _t('Komponent ') + g.def.slice(1) : _t('Grupa ') + g.id);
 const solidsIn = ids => ids.filter(i => typeof i === 'number').map(i => app.model.shapes.find(s => s.id === i)).filter(s => s && isSolid(s) && s.op !== 'cut');
 const meshCopy = s => meshOf(JSON.parse(JSON.stringify(s)), facesOfShape);
@@ -1228,7 +1260,8 @@ app.markDirtySoft = () => { if (!app.file.dirty && app.model.shapes.length) app.
 const setRangeFill = el => el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%');
 function renderSun() {
   const c = viewer.sunCfg, [Y, M, D] = c.date.split('-').map(Number);
-  $('#sunLabel').textContent = `${D} ${MON[M - 1]} · ${fmtHour(c.hour)} · ${placeName(c)}`;
+  // na pasku jest sama ikona; data, godzina i miejsce — w podpowiedzi
+  { const t = `${_t('Słońce i cienie')} · ${D} ${MON[M - 1]} · ${fmtHour(c.hour)} · ${placeName(c)}`; $('#sunBtn').title = t; $('#sunBtn').setAttribute('aria-label', t); }
   if ($('#sunPop').hidden) return;
   $('#placeLbl').textContent = `${placeName(c)} · ${c.lat.toFixed(2).replace('.', ',')}° N · ${c.lon.toFixed(2).replace('.', ',')}° E`;
   $('#sunDate').value = c.date;
@@ -1479,7 +1512,7 @@ function makeFaces() {
 }
 
 /* ---------- kolor bryły ---------- */
-const PALETTE = [[null, _t('biały')], ['#e4dfd3', 'jasny beton'], ['#c9c3b5', 'beton'], ['#8d8980', 'grafit'], ['#c99a7c', _t('cegła')], ['#bfa17c', 'drewno'], ['#a9b49a', _t('zieleń')], ['#a7b6c2', _t('szkło'), 0.3]];
+const PALETTE = [[null, _t('biały')], ['#e4dfd3', _t('jasny beton')], ['#c9c3b5', _t('beton')], ['#8d8980', _t('grafit')], ['#c99a7c', _t('cegła')], ['#bfa17c', _t('drewno')], ['#a9b49a', _t('zieleń')], ['#a7b6c2', _t('szkło'), 0.3]];
 const texThumb = new Map();
 function renderSwatches() {
   const box = $('#swatches'); box.innerHTML = '';
@@ -1783,7 +1816,7 @@ const AI_RATIOS = [['1:1', 1], ['5:4', 1.25], ['4:3', 4 / 3], ['3:2', 1.5], ['16
 const aiGet = (k, d) => { try { return localStorage.getItem('modo.ai.' + k) ?? d; } catch (e) { return d; } };
 const aiSet = (k, v) => { try { localStorage.setItem('modo.ai.' + k, v); } catch (e) {} };
 let aiBusy = false, aiLast = null;   // aiLast: { url, blob, source }
-$('#aiBtn').addEventListener('click', () => openPop('#aiPop', $('#aiBtn')));
+$('#aiBtn').addEventListener('click', () => showSec('render'));
 $('#aiModel').innerHTML = AI_MODELS.map(([id, n]) => `<option value="${id}">${n}</option>`).join('');
 async function renderAi(forceKey) {
   const has = await api.geminiHasKey();
@@ -1846,7 +1879,7 @@ $('#aiGo').addEventListener('click', aiRender);
 const aiClose = () => { $('#aiModal').hidden = true; };
 $('#aiClose').addEventListener('click', aiClose);
 $('#aiModal .scrim').addEventListener('click', aiClose);
-$('#aiAgain').addEventListener('click', () => { aiClose(); openPop('#aiPop', $('#aiBtn')); });
+$('#aiAgain').addEventListener('click', () => { aiClose(); showSec('render'); });
 // przytrzymanie przycisku pokazuje widok wysłany z Modo — do porównania
 for (const [ev, on] of [['pointerdown', true], ['pointerup', false], ['pointerleave', false]]) $('#aiCompare').addEventListener(ev, () => { if (aiLast) $('#aiImg').src = on ? aiLast.source : aiLast.url; });
 $('#aiSave').addEventListener('click', async () => {

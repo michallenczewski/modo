@@ -13,6 +13,8 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'rend
 const FILES = fs.readdirSync(root).filter(f => f.endsWith('.js') && !['i18n.js', 'web-api.js'].includes(f));
 const EN = (await import(path.join(root, 'lang', 'en.js'))).default;
 const PL = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
+// polskie słowa bez polskich liter (np. „beton”, „deski”) — inaczej takie napisy umykają sprawdzeniu
+const PL_WORDS = /\b(albo|oraz|jest|nie|dla|przez|kliknij|wpisz|zapisz|beton|drewno|deski|trawa|blacha|grafit|jasny|ciemny|metry|zapisano|zmieniono|grupa|warstwa|szkic|widok|kolor|nazwa|brak|rodzaj|tekst|godzina|miejsce|okno|bryla|linia|sciana)\b/i;
 // wiersz z komentarzem „i18n-ok” jest pomijany (napis celowo bez tłumaczenia, np. dwujęzyczny)
 // napisy, które nie są tekstem interfejsu (kody klawiszy, nazwy własne, kod shaderów…)
 const NOT_UI = k => /gl_Position|gl_FragColor|^(Tr|Ks|Ka|Kd) |^Europe\//.test(k);
@@ -32,7 +34,7 @@ for (const f of FILES) {
     if (NOT_UI(k) || /i18n-ok/.test(src.split('\n')[line - 1])) continue;
     // polski tekst poza _t; w szablonach liczy się tylko tekst dosłowny (bez wstawek ${…})
     const plain = t.kind === 'tpl' ? t.parts.join(' ') : k;
-    if (PL.test(plain) && !/^\s*\/\//.test(plain)) unwrapped.push(f + ':' + line + '  ' + JSON.stringify(k).slice(0, 120));
+    if ((PL.test(plain) || (!/^[a-z]+$/.test(plain) && PL_WORDS.test(plain.replace(/<[^>]*>/g, ' ')))) && !/^\s*\/\//.test(plain)) unwrapped.push(f + ':' + line + '  ' + JSON.stringify(k).slice(0, 120));
   }
 }
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace(/<svg[\s\S]*?<\/svg>|<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/g, '');

@@ -1,3 +1,4 @@
+import { _t } from './i18n.js';
 // Czytnik DXF (tekstowy) do podkładu: linie, polilinie (także z łukami), okręgi, łuki, elipsy, splajny
 // i bloki (INSERT z przesunięciem, skalą i obrotem). Wynik to odcinki w rzucie, w metrach, pogrupowane w warstwy.
 // Teksty, kreskowania i wymiary jako napisy są pomijane — podkład ma być lekki.
@@ -32,7 +33,7 @@ function pairs(text) {
 
 export function parseDxf(input, { unitsOverride } = {}) {
   let text = typeof input === 'string' ? input : new TextDecoder('utf-8').decode(input);
-  if (text.startsWith('AutoCAD Binary DXF')) throw new Error('Binarny DXF — zapisz plik jako DXF tekstowy (ASCII)');
+  if (text.startsWith('AutoCAD Binary DXF')) throw new Error(_t('Binarny DXF — zapisz plik jako DXF tekstowy (ASCII)'));
   if (text.includes('�') && typeof input !== 'string') text = new TextDecoder('windows-1250').decode(input);
   const P = pairs(text);
   let i = 0;
@@ -190,7 +191,7 @@ export function parseDxf(input, { unitsOverride } = {}) {
   // jednostki i przesunięcie do okolic początku układu (współrzędne geodezyjne bywają ogromne)
   let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
   for (const s of out.values()) for (let j = 0; j < s.length; j += 2) { if (s[j] < lo[0]) lo[0] = s[j]; if (s[j] > hi[0]) hi[0] = s[j]; if (s[j + 1] < lo[1]) lo[1] = s[j + 1]; if (s[j + 1] > hi[1]) hi[1] = s[j + 1]; }
-  if (lo[0] === Infinity) throw new Error('W pliku nie ma linii do pokazania');
+  if (lo[0] === Infinity) throw new Error(_t('W pliku nie ma linii do pokazania'));
   const ext = Math.max(hi[0] - lo[0], hi[1] - lo[1]);
   let unitKey = unitsOverride || (UNITS[insunits] ? { 1: 'in', 2: 'ft', 4: 'mm', 5: 'cm', 6: 'm', 14: 'dm' }[insunits] : (ext > 3000 ? 'mm' : 'm'));
   const scale = { mm: 0.001, cm: 0.01, dm: 0.1, m: 1, in: 0.0254, ft: 0.3048 }[unitKey] || 1;
