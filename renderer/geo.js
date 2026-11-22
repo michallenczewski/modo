@@ -92,7 +92,19 @@ export function addFace(s, outer, holes = [], paint = null) {
     const m = [(e.a.p[0] + e.b.p[0]) / 2, (e.a.p[1] + e.b.p[1]) / 2];
     if (P2.some(L => inLoop(m, L))) cuts.push([to3(e.a.p), to3(e.b.p)]);
   }
+  // Krawędź nowej ściany, która biegnie po brzegu istniejącej ściany w tej samej płaszczyźnie (dwa prostokąty obok siebie,
+  // nakładające się obrysy), zostaje krawędzią — inaczej obie ściany zlałyby się w jedną (jak w SketchUpie: narysowana krawędź zostaje).
+  const keep = [];
+  for (const e of A.all.values()) {
+    const both = e.src.includes('new') && e.src.some(q => q !== 'new');
+    // brzeg istniejącej ściany, który po dodaniu nowej ściany ma ścianę po obu stronach (obrysy zachodzą na siebie)
+    const m = [(e.a.p[0] + e.b.p[0]) / 2, (e.a.p[1] + e.b.p[1]) / 2];
+    // (tylko brzeg: krawędź jednego wielokąta; przekątne podziału ściany na trójkąty należą do dwóch i nie są krawędziami)
+    const inside = !e.src.includes('new') && new Set(e.src).size === 1 && inLoop(m, L2) && !H2.some(h => inLoop(m, h));
+    if (both || inside) keep.push([to3(e.a.p), to3(e.b.p)]);
+  }
   if (fresh.length) push(fresh);
+  if (keep.length) s.marks = [...(s.marks || []), ...keep];
   for (const [a, b] of cuts) splitMesh(s, a, b, true, true);
 }
 export function finish(s) { keepPaint(s, () => simplify(s)); return s; }
