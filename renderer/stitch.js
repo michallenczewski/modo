@@ -122,7 +122,8 @@ export function stitch(m, prev, limit = 200) {
   if (!prev) return null;
   const ok = e => !isHidden(m, e) && !e.locked;
   let fresh = m.lines.filter(l => l.id >= prev.next && ok(l));
-  const freshFaces = m.shapes.filter(s => s.id >= prev.next && flat(s) && ok(s));
+  // nowe płaskie ściany (prostokąt, okrąg…) łączy z resztą `absorb` w geo.js — tu zajmujemy się liniami
+  const freshFaces = [];
   if (!fresh.length && !freshFaces.length) return null;
   if (fresh.length + freshFaces.length > limit) return null;
   const G = (fresh[0] || freshFaces[0]).g ?? null, same = e => (e.g ?? null) === G;

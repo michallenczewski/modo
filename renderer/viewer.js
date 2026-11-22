@@ -281,7 +281,8 @@ export class Viewer {
         continue;
       }
       if (s.bill) { this.addBillboard(s, st, paper); continue; }
-      const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
+      // wspólna geometria nie musi być zamkniętą bryłą, więc bryły wycinające jej nie dotyczą (otwór robi się wypchnięciem na wylot)
+      const cut = isSolid(s) && !s.geo ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
       const items = [], sm = this.smoother(s);
       for (const f of triangulate(s)) for (const tri of f.tris) {
@@ -432,7 +433,7 @@ export class Viewer {
   // fp — kolor i tekstura pojedynczej ściany ({ c, t }); bez niego obowiązuje kolor całej bryły
   matFor(s, st, paper, flat, fp) {
     // prześwit: wszystkie ściany półprzezroczyste, żeby było widać, co jest w środku i z tyłu
-    const a = this.xray ? Math.min(s.alpha ?? 1, 0.32) : s.alpha ?? 1, glass = a < 0.999;
+    const a0 = (fp && fp.a) ?? s.alpha ?? 1, a = this.xray ? Math.min(a0, 0.32) : a0, glass = a < 0.999;
     const color = fp ? fp.c : s.color, tex = fp ? fp.t : s.tex, map = tex ? this.texture(tex) : null;
     return new THREE.MeshLambertMaterial({
       map, color: this.colorFor(s, st, paper, color, !!map), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
@@ -467,7 +468,7 @@ export class Viewer {
   // siatka ścian bryły. items: [{ tri, n, key, id }]; ściany z własnym kolorem albo teksturą (s.fc) dostają osobny materiał.
   // Współrzędne tekstury to metry w płaszczyźnie ściany (poziom i pion świata), więc wzór ma prawdziwą skalę.
   faceMesh(s, items, st, paper, flat) {
-    const fc = s.fc || null, sig = it => { const f = fc && it.id === s.id && fc[it.key]; return f ? (f.c || '') + '|' + (f.t || '') : ''; };
+    const fc = s.fc || null, sig = it => { const f = fc && it.id === s.id && fc[it.key]; return f ? (f.c || '') + '|' + (f.t || '') + '|' + (f.a ?? '') : ''; };
     const order = items.map((it, i) => [sig(it), i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]);
     const pos = [], nor = [], uv = [], keys = [], ids = [], groups = [];
     for (const [sg, i] of order) {

@@ -5,7 +5,8 @@ import { Snapper } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines } from './model.js';
 import { TEXTURES, textureCanvas } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
-import { scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
+import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -13,7 +14,7 @@ import { exportObj } from './export.js';
 import { initSolid, solidReady } from './solid.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
 import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds } from './model.js';
-import { meshVolume, meshArea } from './mesh.js';
+import { meshVolume, meshArea, regionOf } from './mesh.js';
 import { LIBRARY, loadUserLib, saveUserLib } from './lib.js';
 import { translateShape, groupsWhollyIn, edges as edgesOf } from './model.js';
 import { fmtNum, fmtLength } from './units.js';
@@ -115,7 +116,9 @@ app.revertLast = () => { if (!app.undo.length) return false; app.model = app.und
 const auto = { key: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), seq: 0, saved: 0, written: false };
 function autoClear() { auto.saved = auto.seq; if (auto.written) { auto.written = false; api.autosaveClear(auto.key); } }
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? 'zmieniono' : (app.file.path || api.web ? 'zapisano' : ''); if (v) auto.seq++; else autoClear(); };
-app.changed = () => { app.clearSub(); postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
+// po każdej zakończonej operacji blokada osi strzałką się zwalnia (jak w SketchUpie) — następna zaczyna bez niej
+const unlockAxis = () => { if (!app.lockByShift) { app.lockAxis = null; app.lockDir = null; } };
+app.changed = () => { app.clearSub(); unlockAxis(); postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
 // po każdej zmianie: nowe elementy w edytowanej grupie należą do niej, a inne wystąpienia komponentu dostają tę samą zmianę
 function postEdit(prev = app.undo[app.undo.length - 1]) {
   const m = app.model;
@@ -129,12 +132,16 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   // nowe linie i płaskie ściany łączą się z tym, co już jest: dzielą krawędzie, zamykają pola w ściany, dzielą ściany, robią otwory
   app.lastStitch = null;
   if (prev && !app.noStitch) { try { app.lastStitch = stitch(m, prev, app.stitchLimit || 200); } catch (e) { console.error('stitch', e); } }
+  // Wspólna geometria: luźne bryły bieżącego kontekstu (szkic albo edytowana grupa) zlewają się w jedną.
+  // Bryła wyjęta do polecenia na obiektach (`apart`) wraca do wspólnej, gdy przestaje być zaznaczona.
+  for (const s of m.shapes) if (s.apart && !app.selection.has(s.id)) delete s.apart;
+  try { const r = absorb(m, app.editing ?? null); for (const id of r.gone) app.selection.delete(id); } catch (e) { console.error('absorb', e); }
   pruneGroups(m);
   if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();
   if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
 }
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
-app.commitLive = start => { app.clearSub(); app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
+app.commitLive = start => { app.clearSub(); unlockAxis(); app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
 // zablokowane elementy nie mogą trafić do zaznaczenia żadną drogą (ramka, panel, „zaznacz wszystko”)
 function dropLocked() {
@@ -154,7 +161,25 @@ function drawSub(c, v) {
     c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke(); c.restore();
   }
 }
-app.selectionChanged = () => { dropLocked(); if (app.selection.size) app.sub = []; showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
+// Wspólna geometria nie jest obiektem: gdyby trafiła do zaznaczenia w całości (zaznacz wszystko, panel), zamienia się
+// w zaznaczenie wszystkich jej ścian. Ściany i obiekty mogą być zaznaczone razem.
+const isGeo = id => typeof id === 'number' && app.model.shapes.some(s => s.id === id && s.geo);
+app.selectionChanged = () => {
+  dropLocked();
+  for (const id of [...app.selection]) if (isGeo(id)) { const s = app.model.shapes.find(q => q.id === id); app.selection.delete(id); app.sub = [...app.sub.filter(q => q.id !== id), ...subFaces(s, s.polys.map((_, i) => i))]; }
+  showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.();
+};
+// Polecenia działające na całych obiektach (grupa, ukryj, kopiuj, skaluj…): zaznaczone ściany wspólnej geometrii są
+// wyjmowane do osobnej bryły, która zostaje zaznaczona. Po odznaczeniu wraca do wspólnej geometrii (postEdit).
+app.liftSub = () => {
+  const faces = app.sub.filter(q => q.kind === 'face'); if (!faces.length) return null;
+  const s = app.model.shapes.find(q => q.id === faces[0].id); if (!s || !s.geo) return null;
+  const idx = new Set(); for (const q of faces) if (q.id === s.id) for (const i of regionOf(s, +q.key.split(':')[1])) idx.add(i);
+  const t = liftFaces(app.model, s, [...idx]);
+  app.sub = []; showSub(); app.selection.add(t.id); viewer.setModel(app.model);
+  return t;
+};
+const LIFT = new Set(['group', 'comp', 'hideSel', 'hideRest', 'hideSimilar', 'lock', 'copy', 'cutClip', 'flipX', 'flipY', 'flipZ', 'solidUnion', 'solidIntersect', 'solidSubtract', 'solidTrim', 'cut', 'intersect']);
 app.setPaint = (c, a, t) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; app.paintTex = t || null; renderSwatches(); };
 
 /* ---------- grupy i komponenty ---------- */
@@ -167,7 +192,7 @@ app.editSolid = null;
 // edycja bryły: wierzchołki, krawędzie i ściany (dwuklik w bryłę)
 app.enterSolid = id => { app.editSolid = id; viewer.editSolid = id; app.selection.clear(); viewer.rebuild(); app.refresh(); renderViewChip(); };
 app.exitSolid = () => { if (app.editSolid == null) return; const id = app.editSolid; app.editSolid = null; viewer.editSolid = null; app.selection.clear(); if (app.model.shapes.some(s => s.id === id)) app.expand(id).forEach(i => app.selection.add(i)); viewer.rebuild(); app.refresh(); renderViewChip(); };
-app.enterGroup = gid => { app.editing = gid; viewer.editGroup = gid; app.selection.clear(); viewer.rebuild(); app.refresh(); renderViewChip(); };
+app.enterGroup = gid => { app.editing = gid; viewer.editGroup = gid; app.selection.clear(); app.sub = []; try { absorb(app.model, gid); } catch (e) { console.error('absorb', e); } viewer.setModel(app.model); app.refresh(); renderViewChip(); };
 // wyjście o jeden poziom w górę (jak Esc w SketchUpie)
 app.exitGroup = () => {
   if (!app.editing) return;
@@ -482,6 +507,7 @@ window.addEventListener('keyup', e => {
 function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
+  if (LIFT.has(act)) app.liftSub();
   switch (act) {
     case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
     case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? 'Mgła włączona' : 'Mgła wyłączona'); break;
@@ -549,7 +575,7 @@ function run(act) {
     case 'theme': cycleTheme(); break;
     case 'extents': viewer.zoomExtents(); break;
     case 'delete': deleteSelection(); break;
-    case 'selectAll': app.selection.clear(); app.model.shapes.forEach(s => { if (!s.locked) app.selection.add(s.id); }); app.model.lines.forEach(l => { if (!l.locked) app.selection.add('l' + l.id); }); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
+    case 'selectAll': app.selection.clear(); app.sub = []; app.model.shapes.forEach(s => { if (!s.locked) app.selection.add(s.id); }); app.model.lines.forEach(l => { if (!l.locked) app.selection.add('l' + l.id); }); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
     case 'style1': setStyle('szkic'); break;
@@ -642,14 +668,10 @@ function solidOp(op) {
 }
 
 function deleteSelection() {
-  if (!app.selection.size && app.sub.length) {
-    // pojedyncza ściana albo krawędź (jak w SketchUpie): bryła zostaje otwartą powłoką
-    const subs = app.sub; app.checkpoint();
-    for (const q of subs) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b); }
-    app.changed(); return;
-  }
-  if (!app.selection.size) return;
+  if (!app.selection.size && !app.sub.length) return;
   app.checkpoint();
+  // ściany i krawędzie (jak w SketchUpie): po usunięciu ściany jej krawędzie zostają
+  for (const q of app.sub) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b); }
   removeIds(app.model, app.selection);
   app.selection.clear(); app.changed();
 }
@@ -1471,7 +1493,10 @@ function openContext(x, y, cx, cy) {
   closePops();
   const id = pickEntity(app, x, y);
   // prawy klik w niezaznaczony element zaznacza go (jak w SketchUpie)
-  if (id != null && !app.selection.has(id) && (!app.editing || app.inEditing(id))) {
+  if (isGeo(id)) {
+    const q = subAt(app, id, x, y);
+    if (q && !app.sub.some(o => o.kind === q.kind && (q.kind === 'face' ? o.key === q.key : V.dist(o.a, q.a) + V.dist(o.b, q.b) < 1e-6))) { app.selection.clear(); app.sub = [q]; app.selectionChanged(); }
+  } else if (id != null && !app.selection.has(id) && (!app.editing || app.inEditing(id))) {
     if (app.editSolid != null && id !== app.editSolid) app.exitSolid();
     app.selection.clear(); app.expand(id).forEach(i => app.selection.add(i)); app.selectionChanged();
   }
@@ -1496,6 +1521,10 @@ function openContext(x, y, cx, cy) {
     if (sel.filter(i => String(i)[0] === 'l').length >= 3) items.push(null, ['makeFaces', 'Ściany z linii']);
     items.push(null, ['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej']);
     items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['lock', 'Zablokuj'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
+  } else if (app.sub.length) {
+    // zaznaczone ściany albo krawędzie wspólnej geometrii
+    if (app.sub.some(q => q.kind === 'face')) items.push(['group', 'Utwórz grupę'], ['comp', 'Utwórz komponent'], null, ['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], null, ['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej'], null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['lock', 'Zablokuj'], null);
+    items.push(['delete', 'Usuń']);
   } else {
     if (app.editing || app.editSolid != null) items.push(['exitEdit', 'Zakończ edycję'], null);
     items.push(['paste', 'Wklej'], ['pasteInPlace', 'Wklej w tym samym miejscu'], null);
@@ -1551,6 +1580,7 @@ function load(text, name, path) {
   if (d.app !== 'Modo') throw new Error('To nie jest plik Modo');
   app.editing = null; viewer.editGroup = null; app.editSolid = null; viewer.editSolid = null; app.clearSub();
   app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
+  try { absorb(app.model, null); } catch (e) { console.error('absorb', e); }   // starsze szkice: luźne bryły zlewają się we wspólną geometrię
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
   if (d.style && STYLES[d.style]) setStyle(d.style);

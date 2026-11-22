@@ -9,6 +9,7 @@
 
 import { ShapeUtils, Vector2 } from './vendor/three.module.js';
 import { triangulateHoles } from './mesh.js';
+import { pushFace } from './geo.js';
 import { isMesh, toMesh, meshEdges, meshVertices, meshTriangles, pushPullMesh, transformMesh, newell, regionOf, regionLoops, flagEdges } from './mesh.js';
 
 export const V = {
@@ -177,8 +178,9 @@ export function triangulate(s) {
 const isect2 = (p, d, q, e) => { const den = d[0] * e[1] - d[1] * e[0]; if (Math.abs(den) < 1e-9) return null; const t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den; return [p[0] + d[0] * t, p[1] + d[1] * t]; };
 
 // push/pull ściany o odległość d wzdłuż jej zewnętrznej normalnej; zmienia bryłę w miejscu
-export function pushPull(s, key, d) {
-  if (isMesh(s)) return pushPullMesh(s, +key.split(':')[1], d);
+// keep (⌥ / Ctrl): pierwotna ściana zostaje na miejscu — tylko we wspólnej geometrii
+export function pushPull(s, key, d, keep) {
+  if (isMesh(s)) return s.geo ? pushFace(s, +key.split(':')[1], d, keep) : pushPullMesh(s, +key.split(':')[1], d);
   if (key === 'top' || key === 'face') { s.h += d; normalizeShape(s); return s; }
   if (key === 'bottom') { s.o = V.add(s.o, V.mul(s.n, -d)); s.h += d; normalizeShape(s); return s; }
   if (key.startsWith('hole:')) { const [, k, e] = key.split(':'); s.holes = s.holes.slice(); s.holes[+k] = pushEdge(s.holes[+k], +e, d); normalizeShape(s); return s; }

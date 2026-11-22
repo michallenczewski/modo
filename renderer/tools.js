@@ -8,6 +8,7 @@ import { AXIS_COLOR, AXES } from './snap.js';
 import { mapMeshPoints, booleanMesh, isMesh, transformMesh, regionOf, removePolys, polysOnEdge, newell, inPoly, segKey } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 import { healFaces, mergeTouching } from './stitch.js';
+import { component, facesOfPolys, eraseFaces } from './geo.js';
 
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
 
@@ -81,6 +82,7 @@ export class SelectTool extends Tool {
   triple(e, x, y) {
     const id = this.pickAny(x, y); if (id == null || this.app.groupAt(id)) return;
     if (typeof id !== 'number' && String(id)[0] !== 'l') return;
+    if (typeof id === 'number' && this.model.shapes.some(q => q.id === id && q.geo)) return this.dbl(e, x, y);
     const m = this.model, K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);
     const ok = (el, i) => !isHidden(m, el) && !el.locked && !this.app.groupAt(i) && (!this.app.editing || this.app.inEditing(i));
     const items = [...m.shapes.filter(q => q.op !== 'cut' && !q.bill && ok(q, q.id)).map(q => ({ id: q.id, keys: vertices(q).map(K) })), ...m.lines.filter(l => ok(l, 'l' + l.id)).map(l => ({ id: 'l' + l.id, keys: [K(l.a), K(l.b)] }))];
@@ -128,11 +130,20 @@ export class SelectTool extends Tool {
     const b = this.box; if (!b) return; this.box = null;
     const sel = this.app.selection;
     if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.add, b.x0, b.y0);
-    this.app.sub = [];
     // od lewej do prawej: tylko to, co w całości w ramce; od prawej do lewej: wszystko, czego ramka dotyka
     const window_ = b.x1 >= b.x0, hits = boxSelect(this.app, b, window_);
-    if (!b.add) sel.clear();
+    if (!b.add) { sel.clear(); this.app.sub = []; }
     hits.forEach(i => sel.add(i));
+    // ściany wspólnej geometrii zaznaczają się pojedynczo
+    const geo = this.model.shapes.find(q => q.geo && (q.g ?? null) === (this.app.editing ?? null) && !isHidden(this.model, q) && !q.locked);
+    if (geo) {
+      sel.delete(geo.id);
+      const X0 = Math.min(b.x0, b.x1), X1 = Math.max(b.x0, b.x1), Y0 = Math.min(b.y0, b.y1), Y1 = Math.max(b.y0, b.y1);
+      const inR = p => { const P = this.v.toScreen(p); return !P.behind && P.x >= X0 && P.x <= X1 && P.y >= Y0 && P.y <= Y1; };
+      const got = subFaces(geo, geo.polys.map((_, i) => i)).filter(f => window_ ? f.pts.every(inR) : f.pts.some(inR));
+      const have = new Set(this.app.sub.map(q => q.key));
+      this.app.sub = [...this.app.sub, ...got.filter(f => !have.has(f.key))];
+    }
     this.app.selectionChanged();
   }
   draw(c) {
@@ -153,6 +164,12 @@ export class SelectTool extends Tool {
     const g = this.app.groupAt(id);   // grupa wprost w edytowanej — dwuklik schodzi o jeden poziom
     if (g) this.app.enterGroup(g.id);
     else if (typeof id === 'number') {
+      const s = this.model.shapes.find(q => q.id === id);
+      if (s && s.geo) {
+        // wspólna geometria: dwuklik zaznacza wszystko, co połączone ze wskazaną ścianą (osobnym obiektem jest tylko grupa)
+        const hit = this.v.pick(x, y); if (!hit || hit.shapeId !== id) return;
+        this.app.selection.clear(); this.app.sub = subFaces(s, component(s, +hit.key.split(':')[1])); this.app.selectionChanged(); return;
+      }
       // dwuklik w bryłę zaznacza ją całą (edycja bryły: Enter albo menu podręczne)
       this.app.sub = []; this.app.selection.clear(); this.app.expand(id).forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
     }
@@ -334,7 +351,8 @@ export class PushTool extends Tool {
     const s = this.shapeOf(A.shapeId, m);
     const k = A.flip ? -d : d;   // płaska ściana oglądana od spodu: ciągniemy przeciwnie do jej normalnej
     let target = null;
-    if (this.copy) target = extrudeFace(m, s, A.key, k);
+    if (s.geo) pushPull(s, A.key, k, this.copy);   // wspólna geometria: ⌥ / Ctrl zostawia pierwotną ścianę na miejscu
+    else if (this.copy) target = extrudeFace(m, s, A.key, k);
     else if (A.host && this.shapeOf(A.host.shape.id, m)) {
       // ścianka narysowana na bryle zmienia tę bryłę (jak w SketchUpie): wyciągnięta staje się jej częścią, wciśnięta wycina w niej
       const host = this.shapeOf(A.host.shape.id, m), inward = V.dot(V.mul(A.d, d), A.host.normal) < 0;
@@ -385,7 +403,7 @@ export class PushTool extends Tool {
     // bryła, która po wypchnięciu styka się ścianą z inną bryłą luzem, łączy się z nią (z ⌥ / Ctrl zostaje osobna)
     if (!this.copy) {
       const s = this.shapeOf(A.shapeId);
-      const k = s ? mergeTouching(this.model, s) : 0;
+      const k = s && !s.geo ? mergeTouching(this.model, s) : 0;
       if (k) this.app.toast?.(`Bryły się połączyły, bo stykają się ścianami. Osobne zostają bryły w grupach albo wypchnięte z ${this.app.isMac ? '⌥' : 'Ctrl'}.`);
     }
     this.app.commitLive(A.start);
@@ -445,7 +463,7 @@ export class PushTool extends Tool {
 
 /* ---------- wiaderko: kolor bryły ---------- */
 export class PaintTool extends Tool {
-  hint() { return `Kliknij ścianę bryły, żeby nadać jej kolor albo materiał. <kbd>⇧</kbd> + klik maluje całą bryłę (razem z kryciem — szkło); grupa i płaska ściana malują się w całości. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor.`; }
+  hint() { return `Kliknij ścianę, żeby nadać jej kolor, materiał i krycie. <kbd>⇧</kbd> + klik maluje wszystkie połączone ściany; grupa maluje się w całości. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor.`; }
   move(e, x, y) {
     const hit = this.v.pick(x, y);
     const s = hit && this.model.shapes.find(q => q.id === hit.shapeId);
@@ -455,12 +473,20 @@ export class PaintTool extends Tool {
     const hit = this.v.pick(x, y); if (!hit) return;
     const s = this.model.shapes.find(q => q.id === (hit.solidId ?? hit.shapeId)); if (!s) return;
     const own = hit.shapeId === s.id && s.fc && s.fc[hit.key];
-    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint((own ? own.c : s.color) || null, s.alpha ?? 1, (own ? own.t : s.tex) || null); return; }
+    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint((own ? own.c : s.color) || null, (own && own.a) ?? s.alpha ?? 1, (own ? own.t : s.tex) || null); return; }
     // grupa albo komponent (poza edycją) dostaje kolor w całości
     const ids = this.app.expand(s.id).filter(i => typeof i === 'number');
     const a = this.app.paintAlpha >= 0.999 ? undefined : this.app.paintAlpha, c = this.app.paint || null, t = this.app.paintTex || null;
-    const whole = e.shiftKey || ids.length > 1 || s.bill || hit.shapeId !== s.id || (!isMesh(s) && s.h === 0) || a !== undefined || (s.alpha ?? 1) < 0.999;
+    const whole = !s.geo && (e.shiftKey || ids.length > 1 || s.bill || hit.shapeId !== s.id || (!isMesh(s) && s.h === 0) || a !== undefined || (s.alpha ?? 1) < 0.999);
     this.app.checkpoint();
+    if (s.geo) {
+      // wspólna geometria: kolor, materiał i krycie należą do ściany; z ⇧ — do wszystkich połączonych ścian
+      const i = +hit.key.split(':')[1], idx = e.shiftKey ? component(s, i) : regionOf(s, i), v = { c, t }; if (a !== undefined) v.a = a;
+      s.fc = { ...(s.fc || {}) };
+      for (const k of idx) { if (!c && !t && a === undefined) delete s.fc['p:' + k]; else s.fc['p:' + k] = v; }
+      if (!Object.keys(s.fc).length) delete s.fc;
+      this.app.changed(); return;
+    }
     if (whole) for (const id of ids) {
       const q = this.model.shapes.find(x => x.id === id); if (!q) continue;
       q.color = c; if (t) q.tex = t; else delete q.tex; delete q.fc;
@@ -603,6 +629,16 @@ export function pickEntity(app, x, y) {
   }
   return best;
 }
+// wszystko, co we wspólnej geometrii jest połączone ze ścianą pod kursorem: { id, pts, polys } albo null
+export function geoComp(app, x, y) {
+  const hit = app.viewer.pick(x, y), s = hit && app.model.shapes.find(q => q.id === hit.shapeId && q.geo);
+  if (!s || !looseSolid(app, s.id)) return null;
+  const fs = subFaces(s, component(s, +hit.key.split(':')[1])), pts = [];
+  for (const q of fs) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p);
+  return { id: s.id, pts, polys: fs.flatMap(q => q.polys), what: 'połączone' };
+}
+// ściany (obszary) wspólnej geometrii jako pozycje zaznaczenia
+export function subFaces(s, idx) { return facesOfPolys(s, idx).map(f => ({ id: s.id, kind: 'face', key: f.key, polys: f.polys, pts: f.pts })); }
 // bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się i chwyta osobno
 export function looseSolid(app, id) {
   const s = app.model.shapes.find(q => q.id === id);
@@ -638,6 +674,22 @@ export function mapPoints(s, pts, f) {
   toMesh(s, facesOf);
   return mapMeshPoints(s, pts, f);
 }
+// Przekształcenie zaznaczonych ścian / krawędzi / wierzchołka bryły: fk(k) to przekształcenie k-tego kroku.
+// copies = 0 — punkty się przesuwają, a wszystko, co się z nimi styka, rozciąga się (także luźne linie zaczepione w tych punktach);
+// copies > 0 — zaznaczone ściany zostają, a powstaje tyle ich kopii.
+export function moveSub(m, s, sub, fk, copies = 0) {
+  if (copies > 0 && sub.polys && sub.polys.length && isMesh(s)) {
+    const same = (P, p) => P.length === p.length && P.every((v, i) => V.dist(v, p[i]) < 1e-6);
+    const src = sub.polys.map(P => { const i = s.polys.findIndex(p => same(P, p)); return { P, paint: i >= 0 && s.fc ? s.fc['p:' + i] : null }; });
+    const polys = s.polys.slice(), fc = { ...(s.fc || {}) };
+    for (let k = 1; k <= copies; k++) { const f = fk(k); for (const { P, paint } of src) { if (paint) fc['p:' + polys.length] = paint; polys.push(P.map(f)); } }
+    s.polys = polys; if (Object.keys(fc).length) s.fc = fc;
+    return;
+  }
+  const f = fk(1), has = p => sub.pts.some(q => V.dist(p, q) < 1e-5);
+  mapPoints(s, sub.pts, f);
+  for (const l of m.lines) if ((l.g ?? null) === (s.g ?? null) && !l.locked) { if (has(l.a)) l.a = f(l.a); if (has(l.b)) l.b = f(l.b); }
+}
 // płaska ściana znika, a jej krawędzie (poza `skip`) zostają jako linie
 function flatToLines(m, s, skip) {
   const same = (p, q) => V.dist(p, q) < 1e-6;
@@ -649,7 +701,13 @@ function flatToLines(m, s, skip) {
   m.shapes = m.shapes.filter(q => q !== s);
 }
 // Usunięcie ściany bryły: zostaje otwarta powłoka (jak Delete na ścianie w SketchUpie); płaska ściana zostawia same krawędzie.
+// krawędzie, które po usunięciu ścian nie należą już do żadnej ściany, zostają jako linie (jak w SketchUpie)
+function keepEdges(m, s, left) {
+  for (const [a, b] of left) { const l = { id: m.next++, a, b }; if (s.g != null) l.g = s.g; m.lines.push(l); }
+  if (!s.polys.length) m.shapes = m.shapes.filter(q => q !== s);
+}
 export function deleteFace(m, s, polys) {
+  if (s.geo) { const idx = []; s.polys.forEach((p, i) => { if (polys.some(P => P.length === p.length && P.every((v, k) => V.dist(v, p[k]) < 1e-6))) idx.push(i); }); return keepEdges(m, s, eraseFaces(s, idx)); }
   if (!isMesh(s) && s.h === 0) return flatToLines(m, s);
   toMesh(s, facesOf);
   removePolys(s, p => polys.some(P => P.length === p.length && P.every((v, i) => V.dist(v, p[i]) < 1e-6)));
@@ -666,6 +724,7 @@ export function deleteEdge(m, s, a, b) {
     if (other && healFaces(m, s, other, a, b)) return;
     return flatToLines(m, s, { a, b });
   }
+  if (s.geo) return keepEdges(m, s, eraseFaces(s, polysOnEdge(s, a, b), [a, b]));
   toMesh(s, facesOf);
   const idx = new Set(polysOnEdge(s, a, b));
   removePolys(s, (p, i) => idx.has(i));
@@ -1333,8 +1392,8 @@ export class MoveTool extends Tool {
     const m = cloneModel(this.start);
     if (this.sub) {
       const s = m.shapes.find(q => q.id === this.sub.id);
-      if (s) mapPoints(s, this.sub.pts, p => V.add(p, d));
-      this.d = d; this.count = 1; this.result = new Set(); this.app.setModelLive(m); return;
+      if (s) moveSub(m, s, this.sub, k => p => V.add(p, V.mul(d, k)), copy ? count : 0);
+      this.d = d; this.count = copy ? count : 1; this.result = new Set(); this.app.setModelLive(m); return;
     }
     let sel = this.targets;
     if (copy) {
@@ -1352,16 +1411,18 @@ export class MoveTool extends Tool {
   down(e, x, y) {
     if (!this.cur) return;
     if (!this.p0) {
+      if (this.app.sub.length && this.app.selection.size) this.app.liftSub();   // ściany i obiekty razem: ściany idą jako osobna bryła
       // w edycji bryły: chwytasz wierzchołek, krawędź albo ścianę i ją przesuwasz
       let sub = this.app.editSolid != null && this.subAt(this.cur);
       // zaznaczona ściana albo krawędź: przesuwają się jej punkty, a bryła się odkształca
       if (!sub && this.app.sub.length && !this.app.selection.size) {
         const id = this.app.sub[0].id, pts = [];
         for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
-        sub = { id, pts, what: 'zaznaczenie' };
+        sub = { id, pts, what: 'zaznaczenie', polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys) };
         this.app.clearSub();
       }
       if (!sub) sub = this.grabAt(x, y);
+      if (!sub && !this.app.selection.size) sub = geoComp(this.app, x, y);   // np. kopia (⌥ / Ctrl): wszystko połączone ze ścianą pod kursorem
       this.hov = null;
       if (sub) { this.sub = sub; this.targets = new Set(); this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0]; this.v.setHoverFace(null); return; }
       const t = targetsAt(this.app, x, y); if (!t) return;
@@ -1470,8 +1531,8 @@ export class RotateTool extends Tool {
     if (this.sub) {
       // zaznaczona ściana albo krawędź: obracają się jej punkty, a bryła się skręca
       const s = m.shapes.find(q => q.id === this.sub.id);
-      if (s) mapPoints(s, this.sub.pts, p => V.add(this.c, rotVec(V.sub(p, this.c), this.n, a)));
-      this.ang = a; this.count = 1; this.result = new Set(); this.app.setModelLive(m); return;
+      if (s) moveSub(m, s, this.sub, k => p => V.add(this.c, rotVec(V.sub(p, this.c), this.n, a * k)), copy ? count : 0);
+      this.ang = a; this.count = copy ? count : 1; this.result = new Set(); this.app.setModelLive(m); return;
     }
     if (copy) {
       sel = new Set();
@@ -1488,13 +1549,21 @@ export class RotateTool extends Tool {
   down(e, x, y) {
     if (!this.cur) return;
     if (!this.c) {
+      if (this.app.sub.length && this.app.selection.size) this.app.liftSub();   // ściany i obiekty razem: ściany idą jako osobna bryła
       if (this.app.sub.length && !this.app.selection.size) {
         const id = this.app.sub[0].id, pts = [];
         for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
-        this.sub = { id, pts }; this.targets = new Set(); this.app.clearSub();
+        this.sub = { id, pts, polys: this.app.sub.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys) }; this.targets = new Set(); this.app.clearSub();
       } else {
         const t = targetsAt(this.app, x, y); if (!t) return;
-        this.targets = t;
+        // bez zaznaczenia nad wspólną geometrią: obraca się wszystko, co połączone ze ścianą pod kursorem
+        const gid = [...t].find(i => typeof i === 'number' && this.model.shapes.some(q => q.id === i && q.geo));
+        if (gid != null) {
+          const s = this.model.shapes.find(q => q.id === gid), hit = this.v.pick(x, y); if (!hit || hit.shapeId !== gid) return;
+          const fs = subFaces(s, component(s, +hit.key.split(':')[1])), pts = [];
+          for (const q of fs) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p);
+          this.sub = { id: gid, pts, polys: fs.flatMap(q => q.polys) }; this.targets = new Set();
+        } else this.targets = t;
       }
       const pl = planeAt(this.app, this.cur);
       this.c = this.cur.p.slice(); this.n = this.lockN || pl.n; this.v.setHoverFace(null);
@@ -1742,7 +1811,10 @@ export function edgeAt(app, x, y) {
     const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1;
     const t = Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / L2));
     const d = Math.hypot(A.x + dx * t - x, A.y + dy * t - y) + bias;
-    if (d >= bd || !visible(V.lerp(a, b, t))) return;
+    if (d >= bd) return;
+    // punkt krawędzi pod kursorem liczony w przestrzeni (podział na ekranie nie jest liniowy w perspektywie)
+    const L = V.dist(a, b), r = L > 1e-9 ? v.onLine(x, y, a, V.sub(b, a)) : null, p3 = r ? V.add(a, V.mul(V.sub(b, a), Math.max(0, Math.min(L, r.t)) / L)) : V.lerp(a, b, t);
+    if (!visible(p3)) return;
     bd = d; best = { a, b, ...make() };
   };
   const ctx = id => app.editing == null || app.inEditing(id);
@@ -1854,7 +1926,11 @@ const boxPoint = (b, sg) => { let p = b.c; for (let i = 0; i < 3; i++) p = V.add
 export class ScaleTool extends Tool {
   reset() { this.active = null; this.hover = null; this.cur = null; this.k = 1; this.downAt = null; }
   targets() { return new Set(this.app.selection); }
-  box() { return this.app.selection.size ? targetBox(this.model, this.targets()) : null; }
+  box() {
+    // zaznaczone ściany wspólnej geometrii skalują się jako osobna bryła (wraca do wspólnej po odznaczeniu)
+    if (!this.active && this.app.sub.some(q => q.kind === 'face')) { this.app.liftSub(); this.app.selectionChanged(); }
+    return this.app.selection.size ? targetBox(this.model, this.targets()) : null;
+  }
   grips(b) {
     const out = [];
     for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
@@ -1916,8 +1992,10 @@ export class ScaleTool extends Tool {
     const b = this.box();
     if (b && this.hover) { this.begin(this.hover, b); this.downAt = { x, y }; return; }
     // klik poza uchwytami wybiera inny element (albo odznacza)
-    const id = pickEntity(this.app, x, y), sel = this.app.selection;
-    sel.clear(); if (id != null) this.app.expand(id).forEach(i => sel.add(i));
+    const id = pickEntity(this.app, x, y), sel = this.app.selection, geo = typeof id === 'number' && this.model.shapes.find(q => q.id === id && q.geo);
+    sel.clear(); this.app.sub = [];
+    if (geo) { const hit = this.v.pick(x, y); if (hit && hit.shapeId === id) this.app.sub = subFaces(geo, component(geo, +hit.key.split(':')[1])); }
+    else if (id != null) this.app.expand(id).forEach(i => sel.add(i));
     this.hover = null; this.app.selectionChanged();
   }
   up(e, x, y) {

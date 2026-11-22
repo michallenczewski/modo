@@ -50,11 +50,20 @@ export class Snapper {
     return [...out].slice(0, 400).map(i => { const s = U.segs[i]; return [[s[0], s[1], U.h], [s[2], s[3], U.h]]; });
   }
 
+  // Punkt staje się punktem śledzenia („od punktu”) dopiero, gdy kursor zatrzymał się na nim na chwilę —
+  // samo przejechanie obok nie wystarcza, inaczej linie od przypadkowych punktów łapałyby kursor.
   remember(p) {
-    if (this.tracking.some(t => V.dist(t, p) < 1e-6)) return;
-    this.tracking.unshift(p.slice()); this.tracking.length = Math.min(this.tracking.length, 3);
+    const now = performance.now(), q = this.pend;
+    if (q && V.dist(q.p, p) < 1e-6) { q.last = now; return; }
+    this.promote();
+    this.pend = { p: p.slice(), t0: now, last: now };
   }
-  forget() { this.tracking = []; this.refs = []; this.lockLine = null; }
+  promote() {
+    const q = this.pend; this.pend = null;
+    if (!q || q.last - q.t0 < 250 || this.tracking.some(t => V.dist(t, q.p) < 1e-6)) return;
+    this.tracking.unshift(q.p); this.tracking.length = Math.min(this.tracking.length, 2);
+  }
+  forget() { this.tracking = []; this.refs = []; this.lockLine = null; this.pend = null; }
   // krawędź, nad którą był kursor, staje się odniesieniem dla następnych odcinków (jak „zachęcanie” inferencji w SketchUpie)
   touch(a, b) {
     const L = V.dist(a, b); if (L < 1e-6) return;
@@ -122,6 +131,7 @@ export class Snapper {
       let k = 0;
       for (const [a, b] of segs) { if (k >= 2) break; if (V.dist(a, best.p) < 1e-6 || V.dist(b, best.p) < 1e-6 || V.dist(V.lerp(a, b, 0.5), best.p) < 1e-6) { this.touch(a, b); k++; } }
     }
+    if (!best) this.promote();
     const label = { end: 'Punkt końcowy', mid: 'Środek', cross: 'Przecięcie' };
     // krawędź pod kursorem i ściana pod kursorem — także dla narzędzi związanych z prostą, płaszczyzną albo osią
     const edgeNear = () => {
@@ -189,7 +199,7 @@ export class Snapper {
       const near = [];
       for (const g of this.guideLines(opts.plane)) {
         const q = V.add(g.o, V.mul(g.d, V.dot(V.sub(p, g.o), g.d))), dd = d2(q);
-        if (dd < R_EDGE) near.push({ g, q, dd });
+        if (dd < (g.point ? 5 : R_EDGE)) near.push({ g, q, dd });
       }
       near.sort((a, b) => a.dd - b.dd);
       if (near.length > 1) for (const b of near.slice(1)) {
