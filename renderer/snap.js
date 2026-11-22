@@ -54,7 +54,7 @@ export class Snapper {
     if (this.tracking.some(t => V.dist(t, p) < 1e-6)) return;
     this.tracking.unshift(p.slice()); this.tracking.length = Math.min(this.tracking.length, 3);
   }
-  forget() { this.tracking = []; this.refs = []; }
+  forget() { this.tracking = []; this.refs = []; this.lockLine = null; }
   // krawędź, nad którą był kursor, staje się odniesieniem dla następnych odcinków (jak „zachęcanie” inferencji w SketchUpie)
   touch(a, b) {
     const L = V.dist(a, b); if (L < 1e-6) return;
@@ -64,7 +64,20 @@ export class Snapper {
   }
 
   // opts: { anchor, lockAxis, plane: {o,n}, line: {o,d}, exclude: shapeId, model }
+  // Linie śledzenia: przedłużenia krawędzi, nad którymi był kursor (rysowane przerywaną linią przez app.js),
+  // oraz osie przez ostatnio wskazane punkty. dla płaszczyzny (o, n) — tylko te, które w niej leżą po zrzutowaniu.
+  guideLines(plane) {
+    const out = [];
+    for (const r of this.refs) out.push({ o: r.a, d: r.dir, from: r.b, to: r.a, label: 'Przedłużenie krawędzi', color: REF_COLOR, L: V.dist(r.a, r.b) });
+    for (const T of this.tracking) for (const [name, a] of Object.entries(AXES)) out.push({ o: T, d: a, from: T, to: T, label: 'Od punktu', color: AXIS_COLOR[name], point: true });
+    if (!plane) return out;
+    const { o, n } = plane;
+    return out.filter(g => Math.abs(V.dot(g.d, n)) < 1e-3 && !(g.point && V.dist(g.o, o) < 1e-6)).map(g => ({ ...g, o: V.sub(g.o, V.mul(n, V.dot(V.sub(g.o, o), n))) }));
+  }
+
   find(x, y, opts = {}) {
+    // Shift na linii śledzenia: kursor zostaje na tej linii, a punkty, krawędzie i ściany pod nim tylko wyznaczają miejsce na niej
+    if (this.lockLine && !opts.line) opts = { ...opts, line: this.lockLine, viaLock: true, plane: null };
     const v = this.v, model = opts.model;
     const scr = p => v.toScreen(p);
     const d2 = (p) => { const s = scr(p); return s.behind ? Infinity : Math.hypot(s.x - x, s.y - y); };
@@ -136,21 +149,22 @@ export class Snapper {
     // ograniczenie do prostej (push/pull): punkt rzutujemy na prostą
     if (opts.line) {
       const { o, d } = opts.line;
+      const fin = r => opts.viaLock ? { ...r, label: r.label ? 'Linia śledzenia · ' + r.label.toLowerCase() : 'Na linii śledzenia', gline: opts.line, locked: true, color: REF_COLOR } : r;
       if (best) {
         this.remember(best.p);
         const t = V.dot(V.sub(best.p, o), d);
         const p = V.add(o, V.mul(d, t));
-        return { p, t, type: 'from', label: V.dist(p, best.p) < 1e-6 ? label[best.type] : 'Od punktu', guide: V.dist(p, best.p) < 1e-6 ? null : [best.p, p], ref: best.p, refType: best.type };
+        return fin({ p, t, type: 'from', label: V.dist(p, best.p) < 1e-6 ? label[best.type] : 'Od punktu', guide: V.dist(p, best.p) < 1e-6 ? null : [best.p, p], ref: best.p, refType: best.type });
       }
       // krawędź albo ściana pod kursorem: wyrównanie do niej (np. wypchnięcie do wysokości sąsiedniej bryły)
       const eb = edgeNear(), fh = eb ? null : faceHit(), ref = eb ? eb.p : fh ? fh.point : null;
       if (ref) {
         const t = V.dot(V.sub(ref, o), d), p = V.add(o, V.mul(d, t)), on = V.dist(p, ref) < 1e-6;
-        return { p, t, type: 'from', label: eb ? (on ? 'Na krawędzi' : 'Od krawędzi') : (on ? 'Na ścianie' : 'Od ściany'), guide: on ? null : [ref, p], ref };
+        return fin({ p, t, type: 'from', label: eb ? (on ? 'Na krawędzi' : 'Od krawędzi') : (on ? 'Na ścianie' : 'Od ściany'), guide: on ? null : [ref, p], ref });
       }
       const r = v.onLine(x, y, o, d);
       if (!r) return null;
-      return { p: r.p, t: r.t, type: 'free', label: '' };
+      return fin({ p: r.p, t: r.t, type: opts.viaLock ? 'from' : 'free', label: '' });
     }
 
     // ograniczenie do płaszczyzny (drugi narożnik prostokąta)
@@ -170,7 +184,20 @@ export class Snapper {
         return { p, type: on ? 'edge' : 'from', label: on ? 'Na krawędzi' : 'Od krawędzi', guide: on ? null : [eb.p, p], ref: eb.p, dir: eb.dir };
       }
       const p = v.onPlane(x, y, o, n);
-      return p ? { p, type: 'free', label: '' } : null;
+      if (!p) return null;
+      // linie śledzenia leżące w płaszczyźnie rysowania: kursor przykleja się do najbliższej albo do przecięcia dwóch
+      const near = [];
+      for (const g of this.guideLines(opts.plane)) {
+        const q = V.add(g.o, V.mul(g.d, V.dot(V.sub(p, g.o), g.d))), dd = d2(q);
+        if (dd < R_EDGE) near.push({ g, q, dd });
+      }
+      near.sort((a, b) => a.dd - b.dd);
+      if (near.length > 1) for (const b of near.slice(1)) {
+        const c = closestLines(near[0].g.o, near[0].g.d, b.g.o, b.g.d);
+        if (c && c.gap < 1e-4 && d2(c.p) < R_END) return { p: c.p, type: 'cross', label: 'Przecięcie linii śledzenia', guide: [near[0].g.from, c.p], guideColor: near[0].g.color };
+      }
+      if (near.length) { const { g, q } = near[0]; return { p: q, type: 'from', label: g.label, guide: [V.dist(g.from, q) > V.dist(g.to, q) ? g.to : g.from, q], guideColor: g.color, gline: { o: g.o, d: g.d } }; }
+      return { p, type: 'free', label: '' };
     }
 
     // blokada osi strzałką (albo Shift): wszystko rzutujemy na tę oś
@@ -213,6 +240,11 @@ export class Snapper {
           }
         }
       }
+      // oś od punktu początkowego przecięta z linią śledzenia (przedłużeniem krawędzi)
+      if (ax) for (const r of this.refs) {
+        const q = closestLines(o, AXES[ax.name], r.a, r.dir);
+        if (q && q.gap < 1e-4 && V.dist(q.p, o) > 1e-6 && d2(q.p) < R_END) return { p: q.p, type: 'cross', axis: ax.name, label: 'Przecięcie z linią śledzenia', guide: [q.t < 0 ? r.a : r.b, q.p], guideColor: REF_COLOR };
+      }
       if (ax) return { p: ax.p, type: 'axis', axis: ax.name, label: AXIS_NAME[ax.name] };
 
       // 2b. równolegle albo prostopadle do krawędzi: tej, nad którą był kursor, i tych, które wychodzą z punktu początkowego
@@ -237,7 +269,7 @@ export class Snapper {
     // 2c. przedłużenie krawędzi, nad którą był kursor; wyrównanie „od punktu” wzdłuż osi także bez punktu początkowego
     for (const r of eNear() ? [] : this.refs) {
       const L = V.dist(r.a, r.b), q = v.onLine(x, y, r.a, r.dir); if (!q || (q.t > -1e-6 && q.t < L + 1e-6)) continue;
-      if (d2(q.p) < R_EDGE) return { p: q.p, type: 'from', label: 'Przedłużenie krawędzi', guide: [q.t < 0 ? r.a : r.b, q.p], guideColor: REF_COLOR };
+      if (d2(q.p) < R_EDGE) return { p: q.p, type: 'from', label: 'Przedłużenie krawędzi', guide: [q.t < 0 ? r.a : r.b, q.p], guideColor: REF_COLOR, gline: { o: r.a, d: r.dir } };
     }
     {
       let tb = null;
@@ -249,7 +281,7 @@ export class Snapper {
           if (d < R_AXIS * 0.6 && far > 2 * R_END && (!tb || d < tb.d)) tb = { p: q.p, d, T, name };
         }
       }
-      if (tb && !eNear()) return { p: tb.p, type: 'from', label: 'Od punktu', guide: [tb.T, tb.p], guideColor: AXIS_COLOR[tb.name] };
+      if (tb && !eNear()) return { p: tb.p, type: 'from', label: 'Od punktu', guide: [tb.T, tb.p], guideColor: AXIS_COLOR[tb.name], gline: { o: tb.T, d: AXES[tb.name] } };
     }
 
     // 3. krawędzie

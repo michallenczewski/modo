@@ -276,17 +276,31 @@ function showFlyout(b, fam) {
   // menu przy dolnej krawędzi okna podjeżdża w górę, żeby zmieściły się wszystkie pozycje
   flyEl.style.top = Math.max(8, Math.min(r.top - 5, window.innerHeight - flyEl.offsetHeight - 8)) + 'px';
 }
+// Linie śledzenia: po przejechaniu kursorem po krawędzi zostaje jej przerywane przedłużenie (dwie ostatnie krawędzie).
+// Kursor się do nich przykleja, a przytrzymany Shift blokuje go na linii, na której właśnie jest.
+const TRACE_TOOLS = new Set(['line', 'rect', 'rrect', 'circle', 'polygon', 'arc', 'arc3', 'carc', 'pie', 'move', 'tape', 'dim', 'protractor', 'place', 'section', 'camPos']);
+function drawTrace(c, v) {
+  if (!TRACE_TOOLS.has(toolId)) return;
+  const col = viewer.dark ? '#d48bc6' : '#b0489e', lk = snapper.lockLine;
+  const seg = (a, b, w) => { const A = v.toScreen(a), B = v.toScreen(b); if (A.behind || B.behind) return; c.save(); c.strokeStyle = col; c.lineWidth = w; c.setLineDash(w > 1.2 ? [] : [2, 5]); c.globalAlpha = w > 1.2 ? 0.9 : 0.75; c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke(); c.restore(); };
+  for (const r of snapper.refs) {
+    const L = Math.max(V.dist(r.a, r.b), viewer.pixelSize(r.a) * 900);
+    // w kawałkach, żeby część za kamerą nie gasiła całej linii
+    for (const [o, sg] of [[r.a, -1], [r.b, 1]]) for (let k = 0; k < 6; k++) seg(V.add(o, V.mul(r.dir, sg * L * k / 6)), V.add(o, V.mul(r.dir, sg * L * (k + 1) / 6)), 1);
+  }
+  if (lk) { const L = viewer.pixelSize(lk.o) * 2500; for (let k = -6; k < 6; k++) seg(V.add(lk.o, V.mul(lk.d, L * k / 6)), V.add(lk.o, V.mul(lk.d, L * (k + 1) / 6)), 1.6); }
+}
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
   if (id === 'zoomWin' && toolId !== 'zoomWin') toolBefore = toolId;
   tool.deactivate(); tool = tools[id]; toolId = id; tool.activate();
-  app.lockAxis = null; app.lockDir = null; vcbBuf = '';
+  app.lockAxis = null; app.lockDir = null; vcbBuf = ''; snapper.forget();
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
-  viewer.overlayDraw = (c, v) => { drawSub(c, v); tool.draw(c, v); };
+  viewer.overlayDraw = (c, v) => { drawSub(c, v); drawTrace(c, v); tool.draw(c, v); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
@@ -411,7 +425,7 @@ window.addEventListener('keydown', e => {
     if (!busy && app.sub.length) { app.clearSub(); app.refresh(); renderPanel(); return; }
     if (!busy && app.editSolid != null) { app.exitSolid(); return; }
     if (!busy && app.editing) { app.exitGroup(); return; }
-    tool.cancel(); app.lockAxis = null; app.lockDir = null; app.refresh(); return;
+    tool.cancel(); app.lockAxis = null; app.lockDir = null; snapper.lockLine = null; app.refresh(); return;
   }
   // blokada osi strzałkami (jak w SketchUpie): → czerwona, ← zielona, ↑ niebieska, ↓ zwolnienie
   if (/^Arrow/.test(e.key) && !e.metaKey && !e.ctrlKey) {
@@ -425,7 +439,9 @@ window.addEventListener('keydown', e => {
   // przytrzymany Shift blokuje bieżący kierunek: oś, jeśli kursor jest na osi, albo dowolny kierunek od punktu początkowego
   if (e.key === 'Shift' && !e.repeat && tool.cur && !app.lockAxis && !app.lockDir) {
     const from = tool.lockFrom?.();
-    if (tool.cur.axis) { app.lockAxis = tool.cur.axis; app.lockByShift = true; app.refresh(); }
+    // kursor na linii śledzenia (przedłużenie krawędzi, „od punktu”): Shift trzyma go na tej linii
+    if (tool.cur.gline && !tool.cur.axis && TRACE_TOOLS.has(toolId)) { snapper.lockLine = { o: tool.cur.gline.o.slice(), d: tool.cur.gline.d.slice() }; app.lockByShift = true; app.refresh(); }
+    else if (tool.cur.axis) { app.lockAxis = tool.cur.axis; app.lockByShift = true; app.refresh(); }
     else if (from && V.dist(from, tool.cur.p) > 1e-6) { app.lockDir = V.norm(V.sub(tool.cur.p, from)); app.lockByShift = true; app.refresh(); }
   }
   if (tool.key(e)) { e.preventDefault(); return; }
@@ -447,7 +463,7 @@ window.addEventListener('keydown', e => {
   if (act) { e.preventDefault(); run(act); }
 });
 window.addEventListener('keyup', e => {
-  if (e.key === 'Shift' && app.lockByShift) { app.lockAxis = null; app.lockDir = null; app.lockByShift = false; app.refresh(); }
+  if (e.key === 'Shift' && app.lockByShift) { app.lockAxis = null; app.lockDir = null; snapper.lockLine = null; app.lockByShift = false; app.refresh(); }
 });
 
 function run(act) {

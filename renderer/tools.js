@@ -212,7 +212,30 @@ export class LineTool extends Tool {
 /* ---------- prostokąt ---------- */
 export class RectTool extends Tool {
   reset() { this.p0 = null; this.plane = null; this.cur = null; }
-  hint() { return this.p0 ? 'Kliknij przeciwległy narożnik albo wpisz wymiary, np. <kbd>6;4</kbd>, i <kbd>Enter</kbd>.' : 'Kliknij pierwszy narożnik — na ziemi albo na ścianie bryły.'; }
+  hint() {
+    return this.p0
+      ? 'Kliknij przeciwległy narożnik albo wpisz wymiary, np. <kbd>6;4</kbd>, i <kbd>Enter</kbd>. Prostokąt kładzie się na ścianie, nad którą jest kursor (jeśli pierwszy narożnik na niej leży); <kbd>⇧</kbd> zatrzymuje płaszczyznę, strzałki ją wymuszają: <kbd>↑</kbd> pozioma, <kbd>→</kbd> <kbd>←</kbd> pionowe.'
+      : 'Kliknij pierwszy narożnik — na ziemi albo na ścianie bryły. Po przejechaniu kursorem po krawędzi zostaje linia śledzenia; <kbd>⇧</kbd> trzyma na niej kursor.';
+  }
+  // płaszczyzna o normalnej n przez pierwszy narożnik; boki prostokąta wzdłuż krawędzi ściany, jeśli jest podana
+  setPlane(n, along) {
+    let u = along && Math.abs(V.dot(along, n)) < 1e-6 ? along : Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
+    u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+    this.plane = { o: this.p0, n, u, v: V.cross(n, u) };
+  }
+  // Ściana, na której ma leżeć prostokąt: ta pod kursorem, o ile pierwszy narożnik leży w jej płaszczyźnie
+  // (np. narożnik wspólny dla trzech ścian — wybierasz ścianę, najeżdżając na nią). Poza bryłami — ziemia, gdy narożnik jest na ziemi.
+  pickPlane(x, y, shift) {
+    if (this.app.lockAxis) { const n = AXES[this.app.lockAxis]; if (Math.abs(V.dot(n, this.plane.n)) < 0.999) this.setPlane(n); return; }
+    if (shift || this.app.snapper.lockLine) return;
+    const hit = this.v.pick(x, y);
+    if (hit) {
+      const sh = this.model.shapes.find(q => q.id === hit.shapeId), f = sh && faceByKey(sh, hit.key);
+      if (f && Math.abs(V.dot(V.sub(this.p0, f.verts[0]), f.normal)) < 1e-4 && Math.abs(V.dot(f.normal, this.plane.n)) < 0.999) this.setPlane(f.normal);
+      return;
+    }
+    if (Math.abs(this.p0[2]) < 1e-6 && Math.abs(this.plane.n[2]) < 0.999 && this.v.onPlane(x, y, [0, 0, 0], [0, 0, 1])) this.setPlane([0, 0, 1]);
+  }
   dims() {
     if (!this.p0 || !this.cur) return null;
     const d = V.sub(this.cur.p, this.p0);
@@ -224,6 +247,7 @@ export class RectTool extends Tool {
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   move(e, x, y) {
+    if (this.p0) this.pickPlane(x, y, e.shiftKey);
     this.cur = this.p0 ? this.app.snapper.find(x, y, { model: this.model, plane: this.plane }) : this.app.snapper.find(x, y, { model: this.model });
   }
   down(e, x, y) {
@@ -236,10 +260,8 @@ export class RectTool extends Tool {
         const f = sh && faceByKey(sh, s.face.key);
         if (f && Math.abs(V.dot(V.sub(p0, f.verts[0]), f.normal)) < 1e-4) n = f.normal;
       }
-      let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
-      u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
-      const vv = V.cross(n, u);
-      this.p0 = p0; this.plane = { o: p0, n, u, v: vv };
+      if (this.app.lockAxis) n = AXES[this.app.lockAxis];
+      this.p0 = p0; this.setPlane(n);
       return;
     }
     const d = this.dims(); if (d) this.create(d[0], d[1]);
@@ -248,6 +270,7 @@ export class RectTool extends Tool {
     if (Math.abs(a) < 1e-6 || Math.abs(b) < 1e-6) return;
     this.app.checkpoint();
     makeShape(this.model, { o: this.p0, u: this.plane.u, v: this.plane.v }, [[0, 0], [a, 0], [a, b], [0, b]], 0);
+    this.app.lockAxis = null;
     this.app.changed();
     // zapamiętujemy, żeby po narysowaniu dało się jeszcze wpisać wymiary (jak w SketchUpie)
     this.last = { p0: this.p0, plane: this.plane, a, b, seq: this.app.opSeq };

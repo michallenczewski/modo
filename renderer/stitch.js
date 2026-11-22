@@ -216,6 +216,8 @@ export function stitch(m, prev, limit = 200) {
       if (!F2.length) continue;
       const mine = out.filter(c => !c.keep && !c.parent && !c.cut && (() => { const ip = inner(c.pts); return F2.some(f => inLoop(ip, f.L) && !f.H.some(h => inLoop(ip, h))); })());
       if (!mine.length) continue;
+      // pole na ścianie bryły nigdy nie staje się osobną płaską ścianą (np. reszta ściany wokół narysowanego na niej prostokąta)
+      for (const c of mine) c.cut = true;
       const cuts = new Map();
       for (const c of mine) for (const e of c.edges) if (e.src.some(q => q.line && !(doneOn.get(q.line) || new Set()).has(S))) cuts.set(e, [to3(e.a.p), to3(e.b.p)]);
       if (!cuts.size) { if (mine.some(c => [...c.edges].some(e => e.src.some(q => q.line && doneOn.has(q.line))))) for (const c of mine) c.cut = true; continue; }   // ta bryła jest już podzielona tymi liniami
@@ -225,7 +227,7 @@ export function stitch(m, prev, limit = 200) {
       if (!any) continue;
       keepPaint(test, () => simplify(test));
       for (const k of Object.keys(S)) delete S[k]; Object.assign(S, test);
-      for (const c of mine) { c.cut = true; onSolid.push(c); } split++;
+      for (const c of mine) onSolid.push(c); split++;
     }
     if (!out.some(c => !c.keep) && !out.some(c => c.keep && newFace.has(c.keep))) continue;
     // nowe ściany
@@ -268,7 +270,7 @@ export function stitch(m, prev, limit = 200) {
     if (gone.size) m.shapes = m.shapes.filter(s => !gone.has(s));
     // linie, które w całości leżą na brzegu powstałych albo zachowanych ścian, znikają — ściana ma własne krawędzie
     const used = new Map();
-    for (const c of out) for (const e of c.edges) for (const q of e.src) if (q.line) { if (!used.has(q)) used.set(q, new Set()); used.get(q).add(e); }
+    for (const c of out) if (c.shape || onSolid.includes(c)) for (const e of c.edges) for (const q of e.src) if (q.line) { if (!used.has(q)) used.set(q, new Set()); used.get(q).add(e); }
     // linia tylko częściowo na brzegu ściany (np. przeciągnięta przez całą ścianę i dalej): zostają z niej wolne kawałki
     const dead = new Set(), rest = [];
     for (const [q, set] of used) {
