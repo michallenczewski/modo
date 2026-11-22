@@ -25,18 +25,21 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/solid.js` | Operacje na bryłach przez Manifold (WASM). Każda funkcja może zwrócić `null` — wtedy `csg.js` liczy po staremu drzewami BSP. |
 | `renderer/skp.js` | Import `.skp`: model z OpenSKP → bryły z dowolnych ścian, linie, grupy, komponenty, warstwy, sceny. |
 | `renderer/dwg.js` | Czytanie DWG przez LibreDWG (WASM): baza encji → prosty tekst DXF → `dxf.js`; druga droga to zapis DXF samego LibreDWG. |
+| `renderer/stitch.js` | Łączenie geometrii po narysowaniu: dzielenie linii w miejscach styku, układ płaski krawędzi (`arrange`), ściany z zamkniętych pól, dzielenie ścian linią, otwory, scalanie ścian po usunięciu krawędzi (`healFaces`). |
 | `renderer/textures.js` | Materiały z teksturą dla wiaderka: wzory rysowane w kodzie (cegła, deski, beton, płytki, dachówka, blacha, trawa, żwir), powtarzalne, w prawdziwej skali. |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
 
 ## Model
 
-Szkic to lista **brył**, luźnych **linii** i **prowadnic** (nieskończone linie z taśmy: punkt `o` i kierunek `d`). Bryła to wielokąt w płaszczyźnie (`o`, `u`, `v`) wyciągnięty o `h` wzdłuż `n = u × v`. Płaska ściana (świeży prostokąt albo zamknięty obrys z linii) to bryła o `h = 0`. Bryły są osobne jak grupy w SketchUpie — świadomie nie ma „lepkiej” geometrii, w której ściany się łączą i dzielą. Dzięki temu model jest prosty, a push/pull przewidywalny:
+Szkic to lista **brył**, luźnych **linii** i **prowadnic** (nieskończone linie z taśmy: punkt `o` i kierunek `d`). Bryła to wielokąt w płaszczyźnie (`o`, `u`, `v`) wyciągnięty o `h` wzdłuż `n = u × v`. Płaska ściana (świeży prostokąt albo zamknięty obrys z linii) to bryła o `h = 0`. Bryły są osobne jak grupy w SketchUpie; „lepka” jest geometria płaska — luźne linie i płaskie ściany łączą się i dzielą przy rysowaniu (niżej: „Łączenie geometrii”). Push/pull bryły wyciągniętej jest przewidywalny:
 
 - górna albo dolna ściana zmienia `h` (dolna przesuwa też `o`),
 - boczna ściana przesuwa jedną krawędź wielokąta, a sąsiednie krawędzie się wydłużają,
 - z `Ctrl` (Windows) albo `⌥` (Mac) push/pull robi nową bryłę na wierzchu ściany.
 
-Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę, gdy domkną obrys w jednej płaszczyźnie (`closeLoop` szuka najkrótszego cyklu przez nową linię). Okrąg to wielokąt o 24 bokach z flagą `soft`: krawędzie między jego bokami rysują się tylko jako kontur sylwetki. Przesuwanie i obracanie zmienia `o`, `u`, `v`, `n` bryły (bryła się nie deformuje); kopia dostaje nowe `id`.
+Wielokąt podstawy może mieć otwory (`holes` — pętle zgodne z ruchem wskazówek zegara, materiał zawsze po lewej stronie obiegu); ściany otworu mają klucze `hole:<otwór>:<bok>`, a przy zamianie na siatkę ściana z otworami wchodzi jako trójkąty.
+
+**Łączenie geometrii** (`stitch` w `stitch.js`, wołane z `postEdit` po każdej zmianie; nowe są elementy o id ≥ `prev.next`, najwyżej 200 naraz, w obrębie tej samej grupy). Wzorem jest SketchUp, a sposób liczenia — IngeTrazo (GPL-3.0-or-later, Python; przeniesiony pomysł, nie kod): (1) nowa linia dzieli linie, których dotyka albo które przecina, i sama dzieli się w tych miejscach; (2) linia po ścianie bryły od krawędzi do krawędzi dzieli tę ścianę (`splitByLine`); (3) dla każdej płaszczyzny, w której nowa krawędź styka się z inną, liczony jest układ płaski (`arrange`): wszystkie krawędzie w płaszczyźnie — luźne linie, krawędzie płaskich ścian i brył — są cięte w przecięciach, wolne końce odpadają, a pola obchodzi się półkrawędziami. Pole dodatnie, które zawiera nową krawędź, staje się ścianą; pole w istniejącej ścianie z tej samej części układu dzieli ją (części dziedziczą kolor); osobna część układu leżąca w środku ściany (wyspa) wycina w niej otwór. Linie w całości zużyte na brzegi znikają, z częściowo zużytych zostają wolne kawałki. Polecenia wstawiające gotową geometrię (wklejanie, biblioteka, import, podkład) ustawiają `app.noStitch`. Usunięcie krawędzi między dwiema płaskimi ścianami w jednej płaszczyźnie scala je (`healFaces`). Ściany różnych brył nie łączą się ze sobą — to dalej osobne bryły. Okrąg to wielokąt o 24 bokach z flagą `soft`: krawędzie między jego bokami rysują się tylko jako kontur sylwetki. Przesuwanie i obracanie zmienia `o`, `u`, `v`, `n` bryły (bryła się nie deformuje); kopia dostaje nowe `id`.
 
 **Wycięcia.** Bryła z `op: 'cut'` nie ma własnych ścian: przy budowaniu sceny (`Viewer.rebuild`) odejmuje się od każdej bryły, której prostopadłościan otaczający dotyka. Wynik CSG zachowuje w każdym wielokącie źródło (`shared`: bryła i ściana), więc ściany otworu należą do wycięcia — kliknięcie w nie wybiera wycięcie, a push/pull wydłuża je. Wycięciem staje się tylko bryła przełączona ręcznie (⇧X). Płaska ścianka leżąca na ścianie bryły (`hostFace`) przy wypychaniu zmienia samą bryłę: `PushTool.apply` zamienia bryłę na siatkę i robi sumę (na zewnątrz) albo różnicę (do środka) z wyciągniętą ścianką, po czym ścianka znika. Wycięcia rysuje się jako przerywany obrys (`ghostGroup`), którego nie ma w eksporcie.
 
@@ -53,6 +56,8 @@ Luźne linie (z narzędzia linii i łuku) zamieniają się w płaską ściankę,
 **Kolor i materiał na ścianie.** Bryła ma kolor (`color`), opcjonalną teksturę (`tex` — klucz z `textures.js`) i krycie (`alpha`); pojedyncza ściana może mieć własne w `fc` (klucz ściany → `{ c, t }`). Wiaderko maluje ścianę, z Shiftem całą bryłę; grupy, płaskie ściany i szkło malują się w całości. `Viewer.faceMesh` grupuje trójkąty po materiale (grupy geometrii three.js) i liczy współrzędne tekstury z położenia w świecie, więc wzór ma prawdziwą skalę. W siatkach klucze `p:i` to numery wielokątów, dlatego operacje układające wielokąty na nowo (wypchnięcie, suma i różnica, dzielenie linią) owijają się w `keepPaint`: nowy wielokąt dziedziczy kolor po starym, w którego płaszczyźnie i obrysie leży. Eksport OBJ zna tylko kolor całej bryły.
 
 **Krawędzie ukryte i wygładzone.** Gumka z Shiftem dopisuje krawędź do listy `hid` bryły, z ⌥ / Ctrl do `softs` (odcinki w świecie; przekształcenia bryły je przenoszą — `mapFlags`, `transformMesh`). `edges()` oznacza pasujące krawędzie flagami `hid` i `soft`: ukryta nie jest rysowana, wygładzona tylko jako kontur. „Ukryta geometria” (`Viewer.showHidden`) pokazuje je blado razem z ukrytymi elementami i pozwala je przywrócić (Shift + ⌥ / Ctrl). „Pokaż wszystko” czyści też `hid`.
+
+**Śledzenie krawędzi.** `Snapper.refs` pamięta dwie ostatnie krawędzie, nad którymi był kursor (albo wychodzące z punktu, do którego się przykleił). Przy rysowaniu od punktu początkowego kursor łapie kierunek równoległy i prostopadły do nich oraz do krawędzi wychodzących z punktu początkowego (typ `ref`, magenta; ↓ albo Shift blokuje), a bez punktu początkowego — przedłużenie krawędzi i wyrównanie „od punktu” wzdłuż osi. Kolejność: punkty, osie, równolegle / prostopadle, przedłużenie, od punktu, krawędź, ściana, ziemia; punkt na krawędzi pod kursorem wygrywa z kierunkiem.
 
 **Blokada kierunku.** Przytrzymany Shift w narzędziach z punktem początkowym (linia, przesuń, taśma, wymiar) blokuje oś, jeśli kursor jest na osi, a w innym razie bieżący kierunek od punktu początkowego (`app.lockDir`, w `Snapper.find` opcja `lockDir`). Obrót: przeciągnięcie od środka wyznacza własną oś (`axisDrag`).
 
@@ -88,7 +93,7 @@ Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model,
 
 ## Rysunek
 
-Ściany to zwykłe `MeshLambertMaterial` z cieniami (`VSMShadowMap`, promień rozmycia = „Miękkość”). Ziemia to `ShadowMaterial` — widać na niej tylko cień, reszta to kolor papieru.
+Ściany to zwykłe `MeshLambertMaterial` z cieniami (`PCFShadowMap` — mapa głębi z miękkim filtrem; promień = „Miękkość”; zakres głębi kamery cienia jest ciasno dopasowany do modelu). Wcześniejszy `VSMShadowMap` dawał przy niskim słońcu i dużych modelach kwadratowe plamy na ścianach. Ziemia to `ShadowMaterial` — widać na niej tylko cień, reszta to kolor papieru.
 
 Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jest dzielona na kilka czworokątów rozciągniętych w przestrzeni ekranu. W shaderze:
 - grubość zależy od tego, czy krawędź jest konturem sylwetki (jedna przyległa ściana zwrócona do kamery, druga nie) — kontur jest grubszy,
@@ -124,10 +129,9 @@ Wszystkie leżą w `renderer/vendor/` jako gotowe pliki, żeby program i wersja 
 ## Sygnały, że trzeba wrócić do tematu
 
 - **Wydajność przy dużych modelach** — dziś każda zmiana przebudowuje całą geometrię. Przy setkach brył trzeba przebudowywać tylko zmienione.
-- **Geometria łączona między bryłami** (wspólne krawędzie różnych brył) — dzielenie ścian działa w obrębie jednej bryły (tryb edycji bryły); łączenie brył w jedną to „Suma brył”. Pełna lepka geometria jak w SketchUpie byłaby zmianą modelu.
+- **Geometria łączona między bryłami** (wspólne krawędzie różnych brył) — łączą się luźne linie i płaskie ściany; ściana bryły dzieli się jedną prostą linią od krawędzi do krawędzi, a łamana po ścianie daje osobne ścianki leżące na bryle. Łączenie brył w jedną to „Suma brył”. Pełna lepka geometria w 3D (jeden wspólny zbiór wierzchołków, krawędzi i ścian, jak `core/mesh.py` w IngeTrazo) byłaby zmianą modelu.
 - **Duże modele ze SketchUpa** — powyżej kilkudziesięciu tysięcy ścian przebudowa sceny i cofanie (kopia całego modelu) zaczynają być odczuwalne. Wtedy: przebudowa tylko zmienionych brył i współdzielona geometria kopii komponentu.
 - **Tekstury z plików i ze SketchUpa** — tekstury są tylko wbudowane (rysowane w kodzie); import .skp sprowadza materiały do jednego koloru na bryłę, a eksport OBJ nie zna koloru pojedynczej ściany.
-- **Ściany z otworami** — bryła wyciągnięta ma jeden obrys; „Ściany z linii” nie robi pola z wyspą jako jednej ściany z otworem.
 - **Follow Me** — nie ma; wymaga brył z dowolnego przekroju prowadzonego po ścieżce.
 - **Wiele wycięć w dużych bryłach** — CSG liczy się przy każdej przebudowie sceny (także w trakcie push/pull). Przy dziesiątkach okien w jednej bryle trzeba będzie zapamiętywać wynik i liczyć tylko zmienione bryły.
 - **Bardzo duże podkłady** — przyklejanie korzysta z siatki odcinków (`Snapper.setUnderlay`), rysowanie z jednego `LineSegments` na warstwę. Powyżej ~600 tys. odcinków czytnik przerywa.

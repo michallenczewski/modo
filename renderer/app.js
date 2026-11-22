@@ -4,6 +4,7 @@ import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines } from './model.js';
 import { TEXTURES, textureCanvas } from './textures.js';
+import { stitch } from './stitch.js';
 import { scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -124,6 +125,9 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
     // edytowana grupa i każdy komponent nad nią: pozostałe wystąpienia dostają tę samą zmianę (od środka na zewnątrz)
     for (const g of chainOf(m, app.editing)) if (g.kind === 'comp') syncComponent(m, g.id);
   }
+  // nowe linie i płaskie ściany łączą się z tym, co już jest: dzielą krawędzie, zamykają pola w ściany, dzielą ściany, robią otwory
+  app.lastStitch = null;
+  if (prev && !app.noStitch) { try { app.lastStitch = stitch(m, prev); } catch (e) { console.error('stitch', e); } }
   pruneGroups(m);
   if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();
   if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
@@ -412,6 +416,8 @@ window.addEventListener('keydown', e => {
   if (/^Arrow/.test(e.key) && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     const ax = { ArrowRight: 'x', ArrowLeft: 'y', ArrowUp: 'z', ArrowDown: null }[e.key];
+    // ↓ przy inferencji „równolegle / prostopadle do krawędzi” blokuje ten kierunek (jak w SketchUpie); inaczej zwalnia blokadę
+    if (e.key === 'ArrowDown' && !app.lockDir && !app.lockAxis && tool.cur && tool.cur.type === 'ref' && tool.cur.dir) { app.lockDir = tool.cur.dir.slice(); app.lockByShift = false; app.refresh(); return; }
     app.lockAxis = app.lockAxis === ax ? null : ax; app.lockDir = null; app.lockByShift = false;
     app.refresh(); return;
   }
@@ -728,7 +734,7 @@ function insertItems(item, p) {
   const place = e => { if (e.g != null && gmap.has(e.g)) e.g = gmap.get(e.g); else if (E != null) e.g = E; else delete e.g; if (!same) delete e.tag; };
   for (const s of data.shapes) { s.id = m.next++; place(s); translateShape(s, p); m.shapes.push(s); out.push(s.id); }
   for (const l of data.lines || []) { l.id = m.next++; place(l); l.a = l.a.map((x, k) => x + p[k]); l.b = l.b.map((x, k) => x + p[k]); m.lines.push(l); out.push('l' + l.id); }
-  app.changed();
+  app.noStitch = true; app.changed(); app.noStitch = false;
   app.selection.clear(); out.forEach(i => app.selection.add(i));
   setTool('select'); app.selectionChanged();
 }
@@ -1005,7 +1011,7 @@ app.placeItem = (item, p) => {
   for (const s of data.shapes) { const id = m.next++; smap.set(s.id, id); s.id = id; s.g = s.g != null && gmap.has(s.g) ? gmap.get(s.g) : gid; translateShape(s, p); delete s.tag; m.shapes.push(s); }
   for (const l of data.lines || []) { l.id = m.next++; l.g = l.g != null && gmap.has(l.g) ? gmap.get(l.g) : gid; l.a = l.a.map((x, k) => x + p[k]); l.b = l.b.map((x, k) => x + p[k]); m.lines.push(l); }
   m.groups.push({ id: gid, kind: 'comp', def: 'd' + gid, frame: IDENT(p), name: item.name, p: app.editing ?? undefined });
-  app.changed();
+  app.noStitch = true; app.changed(); app.noStitch = false;
   app.selection.clear(); membersOf(m, gid).forEach(i => app.selection.add(i));
   setTool('select'); app.selectionChanged();
 };
@@ -1300,7 +1306,7 @@ function underlayToLines() {
   }
   app.underlay = null; applyUnderlay(); closePops();
   app.selection.clear(); for (const id of membersOf(m, gid)) app.selection.add(id);
-  app.changed(); app.selectionChanged();
+  app.noStitch = true; app.changed(); app.noStitch = false; app.selectionChanged();
   toast(`Podkład zamieniony na ${made} linii w jednej grupie. Dwuklik wchodzi do grupy; „Ściany z linii” wypełnia zamknięte pola.`, ['Ściany z linii', () => makeFaces()], 9000);
 }
 // zamknięte pola między zaznaczonymi liniami (także w zaznaczonej grupie) stają się płaskimi ścianami
@@ -1700,7 +1706,7 @@ async function importSkp(file) {
     m.shapes.push(...out.shapes); m.lines.push(...out.lines); m.groups.push(...out.groups);
     for (const t of out.tags) { const old = m.tags.find(q => q.name === t.name); if (old) { for (const g of out.groups) if (g.tag === t.id) g.tag = old.id; } else m.tags.push(t); }
     app.scenes.push(...out.scenes);
-    app.changed();
+    app.noStitch = true; app.changed(); app.noStitch = false;
     app.selection.clear(); membersOf(m, out.groups[0].id).forEach(i => app.selection.add(i));
     setTool('select'); app.selectionChanged();
     const empty = before.shapes.length + before.lines.length === 0;

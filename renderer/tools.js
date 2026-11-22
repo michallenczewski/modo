@@ -7,6 +7,7 @@ import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { mapMeshPoints, booleanMesh, isMesh, transformMesh, regionOf, removePolys, polysOnEdge, newell, inPoly, segKey } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
+import { healFaces } from './stitch.js';
 
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
 
@@ -22,9 +23,10 @@ export function drawSeg(c, v, a, b, color = INK, { width = 1.5, dash = null } = 
 }
 export function drawMarker(c, v, s) {
   if (!s) return;
+  if (s.hl) drawSeg(c, v, s.hl[0], s.hl[1], s.color || BLUE, { width: 3 });
   const P = v.toScreen(s.p); if (P.behind) return;
   c.save(); c.lineWidth = 1.4;
-  const col = s.type === 'end' || s.type === 'cross' ? '#4f8a46' : s.type === 'mid' ? '#2f8c8c' : s.type === 'edge' ? '#c0533f' : s.type === 'face' ? BLUE : s.axis ? AXIS_COLOR[s.axis] : BLUE;
+  const col = s.type === 'end' || s.type === 'cross' ? '#4f8a46' : s.type === 'mid' ? '#2f8c8c' : s.type === 'edge' ? '#c0533f' : s.type === 'face' ? BLUE : s.axis ? AXIS_COLOR[s.axis] : s.color || BLUE;
   c.strokeStyle = col; c.fillStyle = '#fff';
   c.beginPath();
   if (s.type === 'end' || s.type === 'from') c.arc(P.x, P.y, 4.5, 0, Math.PI * 2);
@@ -162,8 +164,8 @@ export class LineTool extends Tool {
   reset() { this.anchor = null; this.chain = []; this.ids = []; this.cur = null; }
   hint() {
     return this.anchor
-      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.'
-      : 'Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę.';
+      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Kursor łapie kierunek równoległy i prostopadły do krawędzi, nad którą przed chwilą był.  Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.'
+      : 'Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę, linia przez ścianę dzieli ją, a linia dochodząca do krawędzi dzieli krawędź.';
   }
   vcb() { return { label: 'Długość', value: this.anchor && this.cur ? fmtLength(V.dist(this.anchor, this.cur.p)) : '' }; }
   move(e, x, y) {
@@ -187,11 +189,11 @@ export class LineTool extends Tool {
     const l = { id: this.model.next++, a: this.anchor.slice(), b: p.slice() };
     this.model.lines.push(l);
     this.ids.push(l.id); this.chain.push(p);
-    // zamknięty obrys w jednej płaszczyźnie (także z innymi liniami i łukami) → ściana
-    if (closeLoop(this.model, l)) { this.app.changed(); this.reset(); this.app.lockAxis = null; return; }
     this.anchor = p.slice();
     this.app.lockAxis = null;
     this.app.changed();
+    // linia zamknęła pole w ścianę albo podzieliła ścianę — ciąg linii się kończy (jak w SketchUpie)
+    if (this.app.lastStitch && (this.app.lastStitch.made || !this.model.lines.some(q => q.id === l.id))) this.reset();
   }
   value(str) {
     const L = parseLength(str); if (L == null || !this.anchor || !this.cur) return false;
@@ -201,9 +203,9 @@ export class LineTool extends Tool {
   }
   draw(c, v) {
     const s = this.cur; if (!s) return;
-    if (this.anchor) drawSeg(c, v, this.anchor, s.p, s.axis ? AXIS_COLOR[s.axis] : INK, { width: s.axis ? 2 : 1.6 });
+    if (this.anchor) drawSeg(c, v, this.anchor, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || INK, { width: s.axis || s.color ? 2 : 1.6 });
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label, s.axis ? AXIS_COLOR[s.axis] : s.color || BLUE);
   }
 }
 
@@ -593,12 +595,13 @@ export function mapPoints(s, pts, f) {
   const has = p => pts.some(q => V.dist(p, q) < 1e-5);
   if (vertices(s).every(has)) return transformShape(s, f);
   if (!isMesh(s) && s.h === 0) {
-    const loop = s.pts.map(p => at(s, p[0], p[1], 0)).map(p => has(p) ? f(p) : p), n = newell(loop);
-    if (loop.some(p => Math.abs(V.dot(V.sub(p, loop[0]), n)) > 1e-6)) return s;   // wyszłaby z płaszczyzny
+    const mv = L => L.map(p => at(s, p[0], p[1], 0)).map(p => has(p) ? f(p) : p);
+    const loop = mv(s.pts), holes = (s.holes || []).map(mv), n = newell(loop);
+    if ([loop, ...holes].flat().some(p => Math.abs(V.dot(V.sub(p, loop[0]), n)) > 1e-6)) return s;   // wyszłaby z płaszczyzny
     let u = V.norm(V.sub(loop[1], loop[0])); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
-    const w = V.cross(n, u);
+    const w = V.cross(n, u), back = p => { const d = V.sub(p, s.o); return [V.dot(d, u), V.dot(d, w)]; };
     s.o = loop[0].slice(); s.u = u; s.v = w; s.n = n;
-    s.pts = loop.map(p => { const d = V.sub(p, s.o); return [V.dot(d, u), V.dot(d, w)]; });
+    s.pts = loop.map(back); if (holes.length) s.holes = holes.map(h => h.map(back));
     return normalizeShape(s);
   }
   toMesh(s, facesOf);
@@ -624,7 +627,14 @@ export function deleteFace(m, s, polys) {
 // Usunięcie krawędzi: linia dzieląca ścianę znika i ściana się scala; prawdziwa krawędź zabiera ściany, które się na niej stykają.
 export function deleteEdge(m, s, a, b) {
   if (isMesh(s)) { const k = markOf(s, { a, b }); if (k >= 0) { s.marks = s.marks.filter((_, i) => i !== k); return; } }
-  if (!isMesh(s) && s.h === 0) return flatToLines(m, s, { a, b });
+  if (!isMesh(s) && s.h === 0) {
+    // krawędź między dwiema ścianami w jednej płaszczyźnie: ściany się scalają („goją”); w innym razie ściana znika
+    const L = V.dist(a, b), d = V.norm(V.sub(b, a)), on = p => { const t = V.dot(V.sub(p, a), d); return t > -1e-4 && t < L + 1e-4 && V.dist(V.add(a, V.mul(d, t)), p) < 1e-4; };
+    const other = m.shapes.find(t => t !== s && !isMesh(t) && t.h === 0 && !t.bill && (t.g ?? null) === (s.g ?? null) && !isHidden(m, t) && Math.abs(Math.abs(V.dot(t.n, s.n)) - 1) < 1e-6 && Math.abs(V.dot(V.sub(t.o, s.o), s.n)) < 1e-4
+      && shapeEdges(t).some(e => on(e.a) && on(e.b) || (V.dist(e.a, e.b) > L && [a, b].every(p => { const k = V.norm(V.sub(e.b, e.a)), tt = V.dot(V.sub(p, e.a), k); return tt > -1e-4 && tt < V.dist(e.a, e.b) + 1e-4 && V.dist(V.add(e.a, V.mul(k, tt)), p) < 1e-4; }))));
+    if (other && healFaces(m, s, other, a, b)) return;
+    return flatToLines(m, s, { a, b });
+  }
   toMesh(s, facesOf);
   const idx = new Set(polysOnEdge(s, a, b));
   removePolys(s, (p, i) => idx.has(i));
@@ -1377,7 +1387,7 @@ export class MoveTool extends Tool {
     const s = this.cur; if (!s) return;
     const h = !this.p0 && this.hov;
     if (h && h.kind === 'edge') drawSeg(c, v, h.a, h.b, BLUE, { width: 3 });
-    if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : s.locked ? '#a05fb0' : INK, { width: 1.2, dash: [4, 3] });
+    if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || (s.locked ? '#a05fb0' : INK), { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
     drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? { vertex: 'Wierzchołek', edge: 'Krawędź', face: 'Ściana' }[h.kind] : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);

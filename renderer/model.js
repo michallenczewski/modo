@@ -24,7 +24,7 @@ export const V = {
 };
 
 export const EPS = 1e-6;
-const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
+export const area2 = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
 
 export function newModel() { return { shapes: [], lines: [], guides: [], groups: [], dims: [], texts: [], sections: [], tags: [], next: 1 }; }
 // starsze pliki nie miały prowadnic
@@ -61,7 +61,9 @@ export const at = (s, a, b, c = 0) => [
 export function normalizeShape(s) {
   if (isMesh(s)) return s;
   if (s.h < 0) { s.o = V.add(s.o, V.mul(s.n, s.h)); s.h = -s.h; }
+  // obrys przeciwnie do wskazówek zegara, otwory (s.holes) zgodnie — materiał jest zawsze po lewej stronie obiegu
   if (area2(s.pts) < 0) s.pts = s.pts.slice().reverse();
+  if (s.holes) { s.holes = s.holes.filter(h => h.length >= 3).map(h => area2(h) > 0 ? h.slice().reverse() : h); if (!s.holes.length) delete s.holes; }
   if (s.h < 1e-7) s.h = 0;
   return s;
 }
@@ -76,20 +78,22 @@ export function makeShape(model, plane, pts, h = 0, color = null) {
 // klucze ścian: 'top', 'bottom' (dla płaskiej: 'face'), 'side:i' — bok nad krawędzią i → i+1
 export function faces(s) {
   if (isMesh(s)) return s.polys.map((p, i) => ({ key: 'p:' + i, normal: newell(p), verts: p }));
-  const n = s.pts.length, out = [];
-  const bot = s.pts.map(p => at(s, p[0], p[1], 0));
-  if (s.h === 0) { out.push({ key: 'face', normal: s.n.slice(), verts: bot, poly: s.pts }); return out; }
-  const top = s.pts.map(p => at(s, p[0], p[1], s.h));
-  out.push({ key: 'top', normal: s.n.slice(), verts: top, poly: s.pts });
-  out.push({ key: 'bottom', normal: V.mul(s.n, -1), verts: bot.slice().reverse(), poly: s.pts.slice().reverse() });
+  const n = s.pts.length, out = [], H = s.holes || [];
+  const bot = s.pts.map(p => at(s, p[0], p[1], 0)), hb = H.map(h => h.map(p => at(s, p[0], p[1], 0)));
+  if (s.h === 0) { out.push({ key: 'face', normal: s.n.slice(), verts: bot, poly: s.pts, holes: hb, holes2: H }); return out; }
+  const top = s.pts.map(p => at(s, p[0], p[1], s.h)), ht = H.map(h => h.map(p => at(s, p[0], p[1], s.h)));
+  out.push({ key: 'top', normal: s.n.slice(), verts: top, poly: s.pts, holes: ht, holes2: H });
+  out.push({ key: 'bottom', normal: V.mul(s.n, -1), verts: bot.slice().reverse(), poly: s.pts.slice().reverse(), holes: hb.map(h => h.slice().reverse()), holes2: H.map(h => h.slice().reverse()) });
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     out.push({ key: 'side:' + i, normal: sideNormal(s, i), verts: [bot[i], bot[j], top[j], top[i]] });
   }
+  // ściany otworów: klucz 'hole:<otwór>:<bok>'
+  H.forEach((h, k) => { for (let i = 0; i < h.length; i++) { const j = (i + 1) % h.length; out.push({ key: 'hole:' + k + ':' + i, normal: sideNormal(s, i, h), verts: [hb[k][i], hb[k][j], ht[k][j], ht[k][i]] }); } });
   return out;
 }
-export function sideNormal(s, i) {
-  const p = s.pts[i], q = s.pts[(i + 1) % s.pts.length];
+export function sideNormal(s, i, loop = s.pts) {
+  const p = loop[i], q = loop[(i + 1) % loop.length];
   const e = V.norm(V.add(V.mul(s.u, q[0] - p[0]), V.mul(s.v, q[1] - p[1])));
   return V.norm(V.cross(e, s.n));
 }
@@ -106,22 +110,22 @@ export function faceByKey(s, key) {
 // krawędzie z normalnymi przyległych ścian (do grubości konturu sylwetki)
 export function edges(s) {
   if (isMesh(s)) return meshEdges(s);
-  const n = s.pts.length, out = [];
-  const bot = s.pts.map(p => at(s, p[0], p[1], 0));
-  if (s.h === 0) {
-    for (let i = 0; i < n; i++) out.push({ a: bot[i], b: bot[(i + 1) % n], n1: s.n, n2: null });
-    return flagEdges(s, out);
-  }
-  const top = s.pts.map(p => at(s, p[0], p[1], s.h)), up = s.n, down = V.mul(s.n, -1);
-  const sn = [...Array(n)].map((_, i) => sideNormal(s, i));
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n, k = (i - 1 + n) % n;
-    out.push({ a: top[i], b: top[j], n1: up, n2: sn[i] });
-    out.push({ a: bot[i], b: bot[j], n1: down, n2: sn[i] });
-    // krawędź pionowa między bokami w jednej płaszczyźnie nie jest rysowana; na walcu (s.soft) tylko jako kontur
-    const c = V.dot(sn[k], sn[i]);
-    if (c < 0.9999) out.push({ a: bot[i], b: top[i], n1: sn[k], n2: sn[i], soft: !!s.soft && c > 0.94 });
-  }
+  const out = [], up = s.n, down = V.mul(s.n, -1);
+  // obrys i każdy otwór to pętla; w otworze materiał też jest po lewej, więc wzory są te same
+  [s.pts, ...(s.holes || [])].forEach((L, li) => {
+    const n = L.length, bot = L.map(p => at(s, p[0], p[1], 0));
+    if (s.h === 0) { for (let i = 0; i < n; i++) out.push({ a: bot[i], b: bot[(i + 1) % n], n1: s.n, n2: null }); return; }
+    const top = L.map(p => at(s, p[0], p[1], s.h)), sn = [...Array(n)].map((_, i) => sideNormal(s, i, L));
+    const round = li ? n >= 12 : !!s.soft;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, k = (i - 1 + n) % n;
+      out.push({ a: top[i], b: top[j], n1: up, n2: sn[i] });
+      out.push({ a: bot[i], b: bot[j], n1: down, n2: sn[i] });
+      // krawędź pionowa między bokami w jednej płaszczyźnie nie jest rysowana; na walcu (s.soft) tylko jako kontur
+      const c = V.dot(sn[k], sn[i]);
+      if (c < 0.9999) out.push({ a: bot[i], b: top[i], n1: sn[k], n2: sn[i], soft: round && c > 0.94 });
+    }
+  });
   return flagEdges(s, out);
 }
 // listy krawędzi wygładzonych i ukrytych bryły wyciągniętej leżą w świecie, więc idą razem z nią
@@ -142,8 +146,8 @@ export function onTopOf(p, t) {
 
 export function vertices(s) {
   if (isMesh(s)) return meshVertices(s);
-  const v = s.pts.map(p => at(s, p[0], p[1], 0));
-  if (s.h > 0) for (const p of s.pts) v.push(at(s, p[0], p[1], s.h));
+  const P = [s.pts, ...(s.holes || [])].flat(), v = P.map(p => at(s, p[0], p[1], 0));
+  if (s.h > 0) for (const p of P) v.push(at(s, p[0], p[1], s.h));
   return v;
 }
 
@@ -152,10 +156,10 @@ export function triangulate(s) {
   if (isMesh(s)) return meshTriangles(s);
   return faces(s).map(f => {
     if (f.poly) {
-      const contour = f.poly.map(p => new Vector2(p[0], p[1]));
-      const idx = ShapeUtils.triangulateShape(contour, []);
+      const contour = f.poly.map(p => new Vector2(p[0], p[1])), holes = (f.holes2 || []).map(h => h.map(p => new Vector2(p[0], p[1])));
+      const idx = ShapeUtils.triangulateShape(contour, holes), all = holes.length ? [...f.verts, ...f.holes.flat()] : f.verts;
       // ShapeUtils zwraca trójkąty zgodne z orientacją wielokąta; dla spodu wierzchołki są odwrócone
-      const tris = idx.map(t => t.map(i => f.verts[i]));
+      const tris = idx.map(t => t.map(i => all[i]));
       return { key: f.key, normal: f.normal, tris };
     }
     const [a, b, c, d] = f.verts;
@@ -171,7 +175,13 @@ export function pushPull(s, key, d) {
   if (isMesh(s)) return pushPullMesh(s, +key.split(':')[1], d);
   if (key === 'top' || key === 'face') { s.h += d; normalizeShape(s); return s; }
   if (key === 'bottom') { s.o = V.add(s.o, V.mul(s.n, -d)); s.h += d; normalizeShape(s); return s; }
-  const i = +key.split(':')[1], n = s.pts.length, j = (i + 1) % n;
+  if (key.startsWith('hole:')) { const [, k, e] = key.split(':'); s.holes = s.holes.slice(); s.holes[+k] = pushEdge(s.holes[+k], +e, d); normalizeShape(s); return s; }
+  s.pts = pushEdge(s.pts, +key.split(':')[1], d); normalizeShape(s); return s;
+}
+// bok pętli i → i+1 odsunięty o d na prawo od kierunku obiegu (na zewnątrz materiału); sąsiednie boki się wydłużają
+function pushEdge(pts, i, d) {
+  const s = { pts };
+  const n = s.pts.length, j = (i + 1) % n;
   const p = s.pts[i], q = s.pts[j];
   const e = [q[0] - p[0], q[1] - p[1]], el = Math.hypot(e[0], e[1]) || 1;
   const out = [e[1] / el, -e[0] / el];
@@ -180,8 +190,7 @@ export function pushPull(s, key, d) {
   const a = isect2(p2, e, prev, [p[0] - prev[0], p[1] - prev[1]]) || p2;
   const b = isect2(p2, e, next, [q[0] - next[0], q[1] - next[1]]) || [q[0] + out[0] * d, q[1] + out[1] * d];
   s.pts = s.pts.slice(); s.pts[i] = a; s.pts[j] = b;
-  normalizeShape(s);
-  return s;
+  return s.pts;
 }
 
 // nowa bryła wyciągnięta ze ściany (push/pull z Ctrl / ⌥) — działa dla każdej ściany, także bryły dowolnej
@@ -292,7 +301,8 @@ export function insideDistance(pts, p) {
 
 /* ---------- zamknięte obrysy z luźnych linii ---------- */
 // szuka najkrótszego cyklu przez linię `l` (po końcach innych luźnych linii); gdy leży w jednej płaszczyźnie — tworzy ścianę
-export function closeLoop(model, l) {
+export function closeLoop() { return null; }   // zamykanie obrysów przejął układ płaski (stitch.js)
+function closeLoopOld(model, l) {
   const key = p => p.map(v => Math.round(v * 1e5)).join(',');
   const adj = new Map();
   const add = (k, e) => { let a = adj.get(k); if (!a) adj.set(k, a = []); a.push(e); };
@@ -339,7 +349,7 @@ function signature(s) {
 }
 export function similar(a, b) {
   if (isMesh(a) || isMesh(b)) { if (!isMesh(a) || !isMesh(b) || a.polys.length !== b.polys.length || (a.color || '') !== (b.color || '')) return false; const sz = s => s.polys.map(p => p.length).sort().join(','); const ar = s => Math.round(s.polys.reduce((x, p) => x + p.length, 0)); return sz(a) === sz(b) && ar(a) === ar(b) && Math.abs(meshAreaOf(a) - meshAreaOf(b)) < 1e-3; }
-  if (a.pts.length !== b.pts.length || Math.abs(a.h - b.h) > 1e-4 || (a.op || '') !== (b.op || '') || (a.color || '') !== (b.color || '')) return false;
+  if (a.pts.length !== b.pts.length || (a.holes || []).length !== (b.holes || []).length || Math.abs(a.h - b.h) > 1e-4 || (a.op || '') !== (b.op || '') || (a.color || '') !== (b.color || '')) return false;
   const A = signature(a), B = signature(b), n = A.length;
   for (let k = 0; k < n; k++) { let ok = true; for (let i = 0; i < n && ok; i++) ok = A[i] === B[(i + k) % n]; if (ok) return true; }
   return false;
@@ -353,16 +363,18 @@ export function scaleShape(s, c, k, axis) {
   if (Math.abs(Math.abs(axis ? V.dot(axis, s.n) : 1) - 1) < 1e-3 || Math.abs(axis ? V.dot(axis, s.n) : 1) < 1e-3) mapFlags(s, p => scalePoint(p, c, k, axis));
   if (!axis) {
     s.o = V.add(c, V.mul(V.sub(s.o, c), k)); s.pts = s.pts.map(p => [p[0] * k, p[1] * k]); s.h *= k;
-    if (k < 0) { s.u = V.mul(s.u, -1); s.v = V.mul(s.v, -1); s.pts = s.pts.map(p => [-p[0], -p[1]]); }
+    if (s.holes) s.holes = s.holes.map(h => h.map(p => [p[0] * k, p[1] * k]));
+    if (k < 0) { s.u = V.mul(s.u, -1); s.v = V.mul(s.v, -1); s.pts = s.pts.map(p => [-p[0], -p[1]]); if (s.holes) s.holes = s.holes.map(h => h.map(p => [-p[0], -p[1]])); }
     normalizeShape(s); return true;
   }
   const along = p => V.add(p, V.mul(axis, V.dot(V.sub(p, c), axis) * (k - 1)));
   const dn = V.dot(axis, s.n);
   if (Math.abs(Math.abs(dn) - 1) < 1e-3) { s.o = along(s.o); s.h *= k; normalizeShape(s); return true; }
   if (Math.abs(dn) < 1e-3) {
-    const w = s.pts.map(p => along(at(s, p[0], p[1], 0)));
+    const w = s.pts.map(p => along(at(s, p[0], p[1], 0))), hw = (s.holes || []).map(h => h.map(p => along(at(s, p[0], p[1], 0))));
     s.o = w[0];
-    s.pts = w.map(p => { const d = V.sub(p, s.o); return [V.dot(d, s.u), V.dot(d, s.v)]; });
+    const back = p => { const d = V.sub(p, s.o); return [V.dot(d, s.u), V.dot(d, s.v)]; };
+    s.pts = w.map(back); if (s.holes) s.holes = hw.map(h => h.map(back));
     normalizeShape(s); return true;
   }
   return false;
@@ -438,13 +450,14 @@ export function unmapPoint(F, p) {
 export function transformShape(s, f) {
   if (isMesh(s)) return transformMesh(s, f);
   mapFlags(s, f);
-  const base = s.pts.map(p => at(s, p[0], p[1], 0)), o = f(s.o);
+  const base = s.pts.map(p => at(s, p[0], p[1], 0)), hbase = (s.holes || []).map(h => h.map(p => at(s, p[0], p[1], 0))), o = f(s.o);
   const top = f(at(s, s.pts[0][0], s.pts[0][1], s.h)), b0 = f(base[0]);
   let u = V.norm(V.sub(f(V.add(s.o, s.u)), o)), v = V.sub(f(V.add(s.o, s.v)), o);
   v = V.norm(V.sub(v, V.mul(u, V.dot(v, u))));
   const n = V.cross(u, v);
   s.o = o; s.u = u; s.v = v; s.n = n;
   s.pts = base.map(p => { const d = V.sub(f(p), o); return [V.dot(d, u), V.dot(d, v)]; });
+  if (s.holes) s.holes = hbase.map(h => h.map(p => { const d = V.sub(f(p), o); return [V.dot(d, u), V.dot(d, v)]; }));
   s.h = V.dot(V.sub(top, b0), n);
   normalizeShape(s);
   return s;

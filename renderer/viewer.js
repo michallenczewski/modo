@@ -128,7 +128,9 @@ export class Viewer {
     this.clipPlane = new THREE.Plane(); this.showSectPlanes = true; this.sectSegs = [];
     r.setPixelRatio(window.devicePixelRatio || 1);
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.VSMShadowMap;
+    // Cienie z mapy głębi z miękkim filtrem (PCF). Wcześniejsza metoda VSM trzymała głębię w mało dokładnej teksturze
+    // i przy niskim słońcu albo dużym modelu dawała na ścianach kwadratowe plamy.
+    r.shadowMap.type = THREE.PCFShadowMap;
     r.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
@@ -145,9 +147,9 @@ export class Viewer {
     this.sun = new THREE.DirectionalLight(0xffffff, 1.9);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
-    this.sun.shadow.bias = -0.0004;
-    this.sun.shadow.blurSamples = 16;
-    this.sun.shadow.radius = 6;
+    this.sun.shadow.bias = -0.0002;
+    this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.radius = 3;
     this.scene.add(this.hemi, this.sun, this.sun.target);
 
     this.groundMat = new THREE.ShadowMaterial({ opacity: 0.24, color: 0x3b362c, depthWrite: false });
@@ -595,10 +597,10 @@ export class Viewer {
     this.sun.target.position.copy(ctr);
     this.sun.position.copy(ctr).addScaledVector(new THREE.Vector3(...dir), R * 3);
     const sc = this.sun.shadow.camera;
-    sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 0.1; sc.far = R * 4 + R * 2 / Math.max(Math.sin(Math.max(alt, 0.5) * Math.PI / 180), 0.08);
+    sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = Math.max(0.1, R * 1.9); sc.far = R * 4.1;   // model mieści się w kuli o promieniu R wokół celu; ciasny zakres = dokładna głębia
     sc.updateProjectionMatrix();
     this.sun.castShadow = c.shadows && up;
-    this.sun.shadow.radius = 1 + c.soft * 14;
+    this.sun.shadow.radius = 0.5 + c.soft * 5;
     // nisko nad horyzontem słońce słabnie; ściany w cieniu rozjaśnia światło nieba (suwak „Jasność”)
     const k = up ? Math.min(1, Math.sin(alt * Math.PI / 180) * 2.2 + 0.25) : 0;
     this.sun.intensity = 1.7 * k;

@@ -5,6 +5,7 @@ import { vertices, edges, V, isHidden } from './model.js';
 
 export const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 export const AXIS_COLOR = { x: '#c0533f', y: '#4f8a46', z: '#3f63a8' };
+export const REF_COLOR = '#b0489e';   // równolegle / prostopadle do krawędzi — magenta, jak w SketchUpie
 export const AXIS_NAME = { x: 'Na osi czerwonej', y: 'Na osi zielonej', z: 'Na osi niebieskiej' };
 
 const R_END = 12, R_MID = 10, R_EDGE = 8, R_AXIS = 10;
@@ -13,6 +14,7 @@ export class Snapper {
   constructor(viewer) {
     this.v = viewer;
     this.tracking = [];      // ostatnio wskazane punkty (do wyrównań „od punktu”)
+    this.refs = [];          // ostatnio wskazane krawędzie (do „równolegle”, „prostopadle”, „przedłużenie”)
     this.under = null;       // siatka odcinków podkładu
   }
 
@@ -52,7 +54,14 @@ export class Snapper {
     if (this.tracking.some(t => V.dist(t, p) < 1e-6)) return;
     this.tracking.unshift(p.slice()); this.tracking.length = Math.min(this.tracking.length, 3);
   }
-  forget() { this.tracking = []; }
+  forget() { this.tracking = []; this.refs = []; }
+  // krawędź, nad którą był kursor, staje się odniesieniem dla następnych odcinków (jak „zachęcanie” inferencji w SketchUpie)
+  touch(a, b) {
+    const L = V.dist(a, b); if (L < 1e-6) return;
+    const dir = V.mul(V.sub(b, a), 1 / L);
+    this.refs = this.refs.filter(r => !(Math.abs(Math.abs(V.dot(r.dir, dir)) - 1) < 1e-6 && V.dist(r.a, a) + V.dist(r.b, b) < 1e-6));
+    this.refs.unshift({ a: a.slice(), b: b.slice(), dir }); this.refs.length = Math.min(this.refs.length, 2);
+  }
 
   // opts: { anchor, lockAxis, plane: {o,n}, line: {o,d}, exclude: shapeId, model }
   find(x, y, opts = {}) {
@@ -95,6 +104,11 @@ export class Snapper {
     tryPt([0, 0, 0], 'end');
     if (opts.extraPoints) for (const p of opts.extraPoints) tryPt(p, 'end');
 
+    // krawędzie wychodzące z punktu pod kursorem (albo ta, której to środek) też stają się odniesieniem
+    if (best && (best.type === 'end' || best.type === 'mid')) {
+      let k = 0;
+      for (const [a, b] of segs) { if (k >= 2) break; if (V.dist(a, best.p) < 1e-6 || V.dist(b, best.p) < 1e-6 || V.dist(V.lerp(a, b, 0.5), best.p) < 1e-6) { this.touch(a, b); k++; } }
+    }
     const label = { end: 'Punkt końcowy', mid: 'Środek', cross: 'Przecięcie' };
     // krawędź pod kursorem i ściana pod kursorem — także dla narzędzi związanych z prostą, płaszczyzną albo osią
     const edgeNear = () => {
@@ -105,10 +119,12 @@ export class Snapper {
         const t = Math.max(0, Math.min(L, r.t));
         const p = V.add(a, V.mul(V.norm(V.sub(b, a)), t));
         const d = d2(p);
-        if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)) };
+        if (d < R_EDGE && (!eb || d < eb.d)) eb = { p, d, dir: V.norm(V.sub(b, a)), a, b };
       }
+      if (eb) this.touch(eb.a, eb.b);
       return eb;
     };
+    let ebMemo; const eNear = () => ebMemo === undefined ? (ebMemo = edgeNear()) : ebMemo;
     // ściana innej bryły niż ta, którą właśnie zmieniasz
     // (liczy się tylko bryła, która istniała przed rozpoczęciem operacji — nie jej świeża kopia ani bryła-gospodarz)
     const faceHit = () => {
@@ -198,10 +214,46 @@ export class Snapper {
         }
       }
       if (ax) return { p: ax.p, type: 'axis', axis: ax.name, label: AXIS_NAME[ax.name] };
+
+      // 2b. równolegle albo prostopadle do krawędzi: tej, nad którą był kursor, i tych, które wychodzą z punktu początkowego
+      const refs = this.refs.slice();
+      for (const [a, b] of segs) { if (refs.length > 8) break; if (V.dist(a, o) < 1e-6 || V.dist(b, o) < 1e-6) { const L = V.dist(a, b); if (L > 1e-6) refs.push({ a, b, dir: V.mul(V.sub(b, a), 1 / L), own: true }); } }
+      let rb = null;
+      // punkt na krawędzi pod kursorem ma pierwszeństwo przed kierunkiem (i przy okazji ta krawędź staje się odniesieniem)
+      for (const r of eNear() ? [] : refs) {
+        if (Object.values(AXES).some(a => Math.abs(Math.abs(V.dot(a, r.dir)) - 1) < 1e-4)) continue;   // to już załatwiają osie
+        const perp = [], h = V.cross(r.dir, [0, 0, 1]);
+        if (V.len(h) > 1e-4) { perp.push(V.norm(h)); perp.push(V.norm(V.cross(r.dir, h))); }
+        for (const [c, kind] of [[r.dir, 'par'], ...perp.map(q => [q, 'perp'])]) {
+          if (kind === 'par' && r.own) continue;   // przedłużanie własnej krawędzi to nie „równolegle”
+          const q = v.onLine(x, y, o, c); if (!q || V.dist(q.p, o) < 1e-6) continue;
+          const d = d2(q.p);
+          if (d < R_AXIS && (!rb || d < rb.d)) rb = { p: q.p, d, kind, r, dir: c };
+        }
+      }
+      if (rb) return { p: rb.p, type: 'ref', color: REF_COLOR, label: rb.kind === 'par' ? 'Równolegle do krawędzi' : 'Prostopadle do krawędzi', hl: [rb.r.a, rb.r.b], dir: rb.dir };
+    }
+
+    // 2c. przedłużenie krawędzi, nad którą był kursor; wyrównanie „od punktu” wzdłuż osi także bez punktu początkowego
+    for (const r of eNear() ? [] : this.refs) {
+      const L = V.dist(r.a, r.b), q = v.onLine(x, y, r.a, r.dir); if (!q || (q.t > -1e-6 && q.t < L + 1e-6)) continue;
+      if (d2(q.p) < R_EDGE) return { p: q.p, type: 'from', label: 'Przedłużenie krawędzi', guide: [q.t < 0 ? r.a : r.b, q.p], guideColor: REF_COLOR };
+    }
+    {
+      let tb = null;
+      for (const T of this.tracking) {
+        if (opts.anchor && V.dist(T, opts.anchor) < 1e-6) continue;
+        for (const [name, a] of Object.entries(AXES)) {
+          const q = v.onLine(x, y, T, a); if (!q || Math.abs(q.t) < 1e-6) continue;
+          const d = d2(q.p), far = d2(T);
+          if (d < R_AXIS * 0.6 && far > 2 * R_END && (!tb || d < tb.d)) tb = { p: q.p, d, T, name };
+        }
+      }
+      if (tb && !eNear()) return { p: tb.p, type: 'from', label: 'Od punktu', guide: [tb.T, tb.p], guideColor: AXIS_COLOR[tb.name] };
     }
 
     // 3. krawędzie
-    const eb = edgeNear();
+    const eb = eNear();
     // ściana pod kursorem
     const hit = v.pick(x, y);
     if (eb) return { p: eb.p, type: 'edge', label: 'Na krawędzi', face: hit, dir: eb.dir };

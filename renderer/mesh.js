@@ -59,9 +59,14 @@ export function inPoly(p, poly, n = newell(poly)) {
 // bryła z wyciągniętego wielokąta → bryła dowolna (w miejscu; zachowuje id, kolor, grupę, tag…)
 export function toMesh(s, facesOf) {
   if (isMesh(s)) return s;
-  const fs = facesOf(s), polys = fs.map(f => f.verts.map(v => v.slice()));
-  if (s.fc) { const fc = {}; fs.forEach((f, i) => { if (s.fc[f.key]) fc['p:' + i] = s.fc[f.key]; }); if (Object.keys(fc).length) s.fc = fc; else delete s.fc; }
-  for (const k of ['o', 'u', 'v', 'n', 'pts', 'h']) delete s[k];
+  // ściana z otworami nie jest jednym wielokątem — wchodzi do siatki jako trójkąty (w jednej płaszczyźnie i tak zlewają się w jedną ścianę)
+  const fs = facesOf(s), polys = [], fc = {};
+  for (const f of fs) {
+    const parts = f.holes && f.holes.length ? triangulateHoles(f.verts, f.holes) : [f.verts];
+    for (const q of parts) { if (s.fc && s.fc[f.key]) fc['p:' + polys.length] = s.fc[f.key]; polys.push(q.map(v => v.slice())); }
+  }
+  if (Object.keys(fc).length) s.fc = fc; else delete s.fc;
+  for (const k of ['o', 'u', 'v', 'n', 'pts', 'h', 'holes']) delete s[k];
   s.kind = 'mesh'; s.polys = polys; s.marks = [];
   return s;
 }
