@@ -6,7 +6,7 @@ import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnde
 import { TEXTURES, textureCanvas } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
-import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -345,7 +345,10 @@ const curIcon = document.createElement('div'); curIcon.id = 'curIcon'; curIcon.h
 function toolCursor(id) {
   const on = id !== 'select' && !!IC[id];
   curIcon.dataset.on = on ? '1' : '';
-  if (on) { const icon = IC[id].replace(/currentColor/g, '#1a1a19'); curIcon.innerHTML = `<svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke-linecap="round" stroke-linejoin="round"><g stroke="#fff" stroke-width="3.4" opacity=".92">${icon}</g><g stroke="#1a1a19" stroke-width="1.4">${icon}</g></svg>`; }
+  // tryb kopii (⌥ / Ctrl) to plus przy ikonie narzędzia, a nie osobny znak za kursorem
+  const plus = tools[id]?.copy ? '<path d="M19 -2v5.5M16.25 0.75h5.5"/>' : '';
+  curIcon.dataset.copy = plus ? '1' : '';
+  if (on) { const icon = IC[id].replace(/currentColor/g, '#1a1a19') + plus; curIcon.innerHTML = `<svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke-linecap="round" stroke-linejoin="round" overflow="visible"><g stroke="#fff" stroke-width="3.4" opacity=".92">${icon}</g><g stroke="#1a1a19" stroke-width="1.4">${icon}</g></svg>`; }
   else curIcon.hidden = true;
   return on ? DOT_CURSOR : '';
 }
@@ -361,7 +364,7 @@ function setTool(id) {
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   $('#view').style.cursor = toolCursor(id);
-  viewer.overlayDraw = (c, v) => { drawSub(c, v); drawTrace(c, v); tool.draw(c, v); };
+  viewer.overlayDraw = (c, v) => { drawSub(c, v); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
@@ -420,8 +423,10 @@ view.addEventListener('pointerdown', e => {
   }
   if (e.button === 0) { view.setPointerCapture(e.pointerId); tool.down(e, x, y); app.refresh(); }
 });
+let tipTimer = 0;
 view.addEventListener('pointermove', e => {
   const [x, y] = xy(e); moveCurIcon(e);
+  noteMove(); clearTimeout(tipTimer); tipTimer = setTimeout(() => viewer.redraw(), TIP_DELAY + 20);   // nazwa przyciągania po zatrzymaniu kursora
   if (nav) {
     const dx = x - nav.last.x, dy = y - nav.last.y; nav.last = { x, y }; nav.moved += Math.abs(dx) + Math.abs(dy);
     if (nav.mode === 'orbit' && !e.shiftKey) viewer.orbit(dx, dy, nav.pivot); else viewer.pan(dx, dy, nav.pivot);

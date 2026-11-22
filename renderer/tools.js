@@ -44,12 +44,18 @@ export function drawMarker(c, v, s) {
     if (!R.behind) { c.save(); c.fillStyle = '#fff'; c.strokeStyle = BLUE; c.lineWidth = 1.2; c.beginPath(); c.arc(R.x, R.y, 3.5, 0, Math.PI * 2); c.fill(); c.stroke(); c.restore(); }
   }
 }
+// Sama nazwa przyciągania („Na ścianie”, „Punkt końcowy”…) pokazuje się dopiero, gdy kursor chwilę stoi — jak podpowiedzi
+// w SketchUpie; wymiary w trakcie operacji są widoczne od razu.
+export const TIP_DELAY = 450;
+let movedAt = 0;
+export const noteMove = () => { movedAt = performance.now(); };
+const tip = (s, text = s && s.label) => performance.now() - movedAt >= TIP_DELAY ? text : '';
 export function drawChip(c, x, y, text, color = BLUE) {
   if (!text) return;
   c.save();
   c.font = '11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
   const w = c.measureText(text).width + 16, h = 22;
-  const X = Math.min(x + 18, c.canvas.width / (window.devicePixelRatio || 1) - w - 4), Y = y + 16;
+  const X = Math.min(x + 32, c.canvas.width / (window.devicePixelRatio || 1) - w - 4), Y = y + 8;   // na prawo od ikony narzędzia, nie na niej
   const dark = document.documentElement.dataset.theme === 'dark';
   c.fillStyle = dark ? 'rgba(40,40,39,.96)' : 'rgba(255,255,255,.96)'; c.strokeStyle = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.08)';
   if (dark && (color === BLUE || color === '#4a4945')) color = color === BLUE ? '#9fb3d6' : '#c4c4c1';
@@ -237,7 +243,7 @@ export class LineTool extends Tool {
     const s = this.cur; if (!s) return;
     if (this.anchor) drawSeg(c, v, this.anchor, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || INK, { width: s.axis || s.color ? 2 : 1.6 });
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label, s.axis ? AXIS_COLOR[s.axis] : s.color || BLUE);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, tip(s), s.axis ? AXIS_COLOR[s.axis] : s.color || BLUE);
   }
 }
 
@@ -327,7 +333,7 @@ export class RectTool extends Tool {
     }
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, d ? fmtNum(Math.abs(d[0])) + ' × ' + fmtLength(Math.abs(d[1])) : s.label);
+    drawChip(c, P.x, P.y, d ? fmtNum(Math.abs(d[0])) + ' × ' + fmtLength(Math.abs(d[1])) : tip(s));
   }
 }
 
@@ -462,12 +468,6 @@ export class PushTool extends Tool {
     super.cancel();
   }
   draw(c, v) {
-    // tryb „nowa bryła” (Ctrl / ⌥): plus przy kursorze, jak w SketchUpie
-    if (this.copy && this.mx != null) {
-      c.save(); c.strokeStyle = v.dark ? INK_DARK : INK; c.lineWidth = 1.6; c.lineCap = 'round';
-      const x = this.mx + 14, y = this.my - 12;
-      c.beginPath(); c.moveTo(x - 4, y); c.lineTo(x + 4, y); c.moveTo(x, y - 4); c.lineTo(x, y + 4); c.stroke(); c.restore();
-    }
     if (!this.active || !this.cur) return;
     drawMarker(c, v, this.cur.label ? this.cur : null);
     const P = v.toScreen(this.cur.p);
@@ -783,11 +783,6 @@ const parseCount = str => { const m = String(str).trim().match(/^(?:[x*×](\d+)|
 const parseDivide = str => { const m = String(str).trim().match(/^\/(\d+)$/); return m ? +m[1] : null; };
 const copyKey = app => app.isMac ? '⌥' : 'Ctrl';
 const isCopyKey = (app, e) => (app.isMac && e.key === 'Alt') || (!app.isMac && e.key === 'Control');
-function drawPlus(c, x, y) {
-  if (x == null) return;
-  c.save(); c.strokeStyle = document.documentElement.dataset.theme === 'dark' ? '#e9e9e7' : INK; c.lineWidth = 1.6; c.lineCap = 'round';
-  c.beginPath(); c.moveTo(x + 10, y - 12); c.lineTo(x + 18, y - 12); c.moveTo(x + 14, y - 16); c.lineTo(x + 14, y - 8); c.stroke(); c.restore();
-}
 
 /* ---------- okrąg ---------- */
 export class CircleTool extends Tool {
@@ -829,7 +824,7 @@ export class CircleTool extends Tool {
       drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     }
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? _t('Promień ') + fmtLength(this.r()) : s.label);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? _t('Promień ') + fmtLength(this.r()) : tip(s));
   }
 }
 
@@ -857,7 +852,7 @@ export class PolygonTool extends CircleTool {
       drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     }
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? this.sides + _t(' boków · promień ') + fmtLength(this.r()) : s.label);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.c ? this.sides + _t(' boków · promień ') + fmtLength(this.r()) : tip(s));
   }
 }
 
@@ -904,7 +899,7 @@ export class RotRectTool extends Tool {
     } else if (this.p0) drawSeg(c, v, this.p0, s.p, INK, { width: 1.6 });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p1 ? fmtLength(V.dist(this.p0, this.p1)) + ' × ' + fmtLength(this.w()) : this.p0 ? fmtLength(V.dist(this.p0, s.p)) : s.label);
+    drawChip(c, P.x, P.y, this.p1 ? fmtLength(V.dist(this.p0, this.p1)) + ' × ' + fmtLength(this.w()) : this.p0 ? fmtLength(V.dist(this.p0, s.p)) : tip(s));
   }
 }
 
@@ -978,7 +973,7 @@ export class CenterArcTool extends Tool {
     } else if (this.c) drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p1 ? null : s);
     const Q = v.toScreen(s.p);
-    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 180 / Math.PI) + '°') : this.c ? _t('Promień ') + fmtLength(V.dist(this.c, s.p)) : s.label);
+    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 180 / Math.PI) + '°') : this.c ? _t('Promień ') + fmtLength(V.dist(this.c, s.p)) : tip(s));
   }
 }
 
@@ -1027,7 +1022,7 @@ export class DimTool extends Tool {
     const s = this.cur;
     if (this.b && this.off) drawAnnotations(c, p => v.toScreen(p), { dims: [{ id: 0, a: this.a, b: this.b, off: this.off }], texts: [] }, { dark: v.dark, paper: v.st().paper });
     else if (this.a && s) { drawSeg(c, v, this.a, s.p, INK, { width: 1, dash: [3, 3] }); }
-    if (s && !this.b) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.a ? fmtLength(V.dist(this.a, s.p)) : s.label); }
+    if (s && !this.b) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.a ? fmtLength(V.dist(this.a, s.p)) : tip(s)); }
   }
 }
 
@@ -1074,7 +1069,7 @@ export class ProtractorTool extends CenterArcTool {
     } else if (this.c) drawSeg(c, v, this.c, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p1 ? null : s);
     const Q = v.toScreen(s.p);
-    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 1800 / Math.PI) / 10 + '°').replace('.', ',') : s.label);
+    drawChip(c, Q.x, Q.y, this.p1 ? (Math.round(Math.abs(this.ang) * 1800 / Math.PI) / 10 + '°').replace('.', ',') : tip(s));
   }
 }
 
@@ -1219,7 +1214,7 @@ export class ArcTool extends Tool {
     else if (this.p1) drawSeg(c, v, this.p1, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p2 ? null : s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? _t('Półokrąg · ') : this.tan ? _t('Styczny · ') : '') + _t('wygięcie ') + fmtLength(Math.abs(this.h)) : s.label);
+    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? _t('Półokrąg · ') : this.tan ? _t('Styczny · ') : '') + _t('wygięcie ') + fmtLength(Math.abs(this.h)) : tip(s));
   }
 }
 function rotVec3(v, k, t) { const c = Math.cos(t), s = Math.sin(t); return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c))); }
@@ -1259,7 +1254,7 @@ export class Arc3Tool extends Tool {
     if (this.p2) drawPoly(c, v, this.points(s.p), INK, false, { width: 1.6 });
     else if (this.p1) drawSeg(c, v, this.p1, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, s);
-    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, tip(s));
   }
 }
 
@@ -1292,7 +1287,7 @@ export class FreehandTool extends Tool {
   cancel() { this.reset(); this.app.refresh(); }
   draw(c, v) {
     if (this.pts) { drawPoly(c, v, this.cur ? [...this.pts, this.cur.p] : this.pts, INK, false, { width: 1.6 }); return; }
-    if (this.cur) { drawMarker(c, v, this.cur); const P = v.toScreen(this.cur.p); drawChip(c, P.x, P.y, this.cur.label); }
+    if (this.cur) { drawMarker(c, v, this.cur); const P = v.toScreen(this.cur.p); drawChip(c, P.x, P.y, tip(this.cur)); }
   }
 }
 
@@ -1510,14 +1505,13 @@ export class MoveTool extends Tool {
   key(e) { if (isCopyKey(this.app, e)) { this.copy = !this.copy; if (this.p0 && this.cur) this.apply(V.sub(this.cur.p, this.p0)); this.app.updateHint(); return true; } return false; }
   cancel() { if (this.start) this.app.setModelLive(this.start); super.cancel(); }
   draw(c, v) {
-    if (this.copy) drawPlus(c, this.mx, this.my);
     const s = this.cur; if (!s) return;
     const h = !this.p0 && this.hov;
     if (h && h.kind === 'edge') drawSeg(c, v, h.a, h.b, BLUE, { width: 3 });
     if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : s.color || (s.locked ? '#a05fb0' : INK), { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? { vertex: _t('Wierzchołek'), edge: _t('Krawędź'), face: _t('Ściana') }[h.kind] : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
+    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? tip(s, { vertex: _t('Wierzchołek'), edge: _t('Krawędź'), face: _t('Ściana') }[h.kind]) : tip(s), s.axis ? AXIS_COLOR[s.axis] : BLUE);
   }
 }
 
@@ -1637,7 +1631,6 @@ export class RotateTool extends Tool {
   up() { if (this.axisDrag) { this.axisDrag = false; this.app.updateHint(); } this.downAt = null; }
   cancel() { if (this.start) this.app.setModelLive(this.start); super.cancel(); }
   draw(c, v) {
-    if (this.copy) drawPlus(c, this.mx, this.my);
     const s = this.cur;
     const ctr = this.c || (s && s.p); if (!ctr) return;
     if (this.axisDrag && s) drawSeg(c, v, V.sub(ctr, V.sub(s.p, ctr)), s.p, '#a05fb0', { width: 1.6 });
@@ -1656,7 +1649,7 @@ export class RotateTool extends Tool {
       drawSeg(c, v, ctr, at(0, R * 1.6), INK, { width: 1, dash: [3, 3] });
       drawSeg(c, v, ctr, at(this.ang, R * 1.6), INK, { width: 1.5 });
     } else if (this.c && s && !this.axisDrag) drawSeg(c, v, ctr, s.p, INK, { width: 1, dash: [3, 3] });
-    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : this.axisDrag ? _t('Oś obrotu') : s.label); }
+    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : this.axisDrag ? _t('Oś obrotu') : tip(s)); }
   }
 }
 const fmtDeg = a => (a * 180 / Math.PI).toFixed(1).replace('.', ',') + '°';
@@ -1827,7 +1820,7 @@ export class TapeTool extends Tool {
     } else if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : INK, { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p0 ? fmtLength(this.dist()) : s.label);
+    drawChip(c, P.x, P.y, this.p0 ? fmtLength(this.dist()) : tip(s));
   }
 }
 
