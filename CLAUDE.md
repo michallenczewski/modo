@@ -12,6 +12,7 @@ Tu są tylko zasady. Procedury krok po kroku są w umiejętnościach (`.claude/s
 ## Jak pracujemy
 
 - Przed większą zmianą przeczytaj `ARCHITEKTURA.md`.
+- Każdą zmianę w geometrii (wypychanie, ściany, krawędzie, rysowanie) sprawdź umiejętnością `sprawdziany-modelowania` (`node scripts/sprawdziany.mjs` musi przejść), a zgłoszony błąd modelowania najpierw dopisz jako przypadek.
 - Każdą zmianę widoczną w interfejsie sprawdź w wersji przeglądarkowej — umiejętność `test-w-przegladarce` (polecenia `window.modoTest`). Zmiany w wyświetlaniu, zaznaczaniu, przyciąganiu i cofaniu sprawdź też umiejętnością `sprawdzian-wydajnosci`.
 - Nowy albo zmieniony napis interfejsu: umiejętność `tlumaczenia`; przed zapisem `node scripts/tlumaczenia.mjs` musi przejść.
 - Zmianę zrobioną skryptem albo dużą zmianę daj przed zapisem pomocnikowi `recenzent`.

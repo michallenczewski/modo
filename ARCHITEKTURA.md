@@ -14,6 +14,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/testapi.js` | Stałe polecenia do testów (`window.modoTest`): pusty szkic, wczytanie modelu, prostopadłościan, grupa, zaznaczenie, kamera, liczby modelu, czasy operacji, klatki na sekundę, błędy z konsoli. Opis — umiejętność `test-w-przegladarce`. |
 | `renderer/dev/wieza.js` | Model do sprawdzianu wydajności (wieża w stylu Turning Torso, ok. 2575 grup), budowany zwykłymi poleceniami programu; `modoTest.tower()`. |
 | `scripts/serve-web.js`, `scripts/cdp.mjs`, `scripts/tlumaczenia.mjs` | Wersja przeglądarkowa bez pamięci podręcznej (`npm run web`); polecenia do okna programu uruchomionego z `--remote-debugging-port`; sprawdzenie tłumaczeń. |
+| `scripts/sprawdziany.mjs` | Sprawdziany modelowania bez przeglądarki: przypadki z SketchUpa (pudło, komin, wnęka, otwory, okna, drzwi, bryły obok siebie, ⌥) na rdzeniu geometrii; umiejętność `sprawdziany-modelowania`. |
 | `renderer/viewer.js` | Scena three.js: kamera z osią Z w górę, nawigacja, słońce i cienie, szkicowe krawędzie (shader), eksport PNG, podkład. |
 | `renderer/model.js` | Dane modelu i geometria: bryły, ściany, krawędzie, push/pull, ściana z zamkniętego obrysu. |
 | `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |
