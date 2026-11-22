@@ -168,16 +168,12 @@ function dropLocked() {
 // Zaznaczone pojedyncze ściany i krawędzie brył (klik narzędziem Zaznacz) leżą osobno od zaznaczenia całych
 // elementów: [{ id bryły, kind: 'face' | 'edge', pts, polys | a, b }]. Każda zmiana modelu je czyści.
 app.sub = [];
-function showSub() { viewer.setSubFaces(app.sub.filter(q => q.kind === 'face').flatMap(q => q.polys)); }
+function showSub() { viewer.setSubFaces(app.sub.filter(q => q.kind === 'face').flatMap(q => q.polys)); syncSubEdges(); }
+// zaznaczenie krawędzi bywa podmieniane w wielu miejscach (cofanie, narzędzia) — kreski w 3D nadążają za nim przy każdej klatce
+let shownEdges = null;   // tablica app.sub, dla której kreski są aktualne (zaznaczenie zawsze podmienia się całą tablicą)
+let shownDark = null;
+function syncSubEdges() { if (app.sub === shownEdges && viewer.dark === shownDark) return; shownEdges = app.sub; shownDark = viewer.dark; viewer.setSubEdges(app.sub.filter(q => q.kind === 'edge')); }
 app.clearSub = () => { if (!app.sub.length) return; app.sub = []; showSub(); };
-function drawSub(c, v) {
-  for (const q of app.sub) {
-    if (q.kind !== 'edge') continue;
-    const A = v.toScreen(q.a), B = v.toScreen(q.b); if (A.behind || B.behind) continue;
-    c.save(); c.strokeStyle = viewer.dark ? '#8fa8d8' : '#3f5f99'; c.lineWidth = 3.2; c.lineCap = 'round';
-    c.beginPath(); c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); c.stroke(); c.restore();
-  }
-}
 // Wspólna geometria nie jest obiektem: gdyby trafiła do zaznaczenia w całości (zaznacz wszystko, panel), zamienia się
 // w zaznaczenie wszystkich jej ścian. Ściany i obiekty mogą być zaznaczone razem.
 const isGeo = id => typeof id === 'number' && app.model.shapes.some(s => s.id === id && s.geo);
@@ -364,7 +360,7 @@ function setTool(id) {
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   $('#view').style.cursor = toolCursor(id);
-  viewer.overlayDraw = (c, v) => { drawSub(c, v); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
+  viewer.overlayDraw = (c, v) => { syncSubEdges(); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
@@ -724,7 +720,14 @@ function deleteSelection() {
   if (!app.selection.size && !app.sub.length) return;
   app.checkpoint();
   // ściany i krawędzie (jak w SketchUpie): po usunięciu ściany jej krawędzie zostają
+  const firstLine = app.model.next;
   for (const q of app.sub) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b, true); }
+  // krawędź zaznaczona razem ze ścianą (np. ramką) znika, a nie zostaje linią po usuniętej ścianie
+  const E = app.sub.filter(q => q.kind === 'edge');
+  if (E.length) {
+    const K = (a, b) => [a, b].map(p => p.map(x => Math.round(x * 1e5)).join()).sort().join('|'), gone = new Set(E.map(q => K(q.a, q.b)));
+    app.model.lines = app.model.lines.filter(l => l.id < firstLine || !gone.has(K(l.a, l.b)));
+  }
   removeIds(app.model, app.selection);
   // obrys, który zostaje po usuniętej ścianie, nie może od razu zamknąć się z powrotem w ścianę
   app.selection.clear(); app.noStitch = true; app.changed(); app.noStitch = false;

@@ -74,6 +74,17 @@ void main(){
   vCol = col; vDepth = -vp.z;
   gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);
 }`;
+// Kreska zaznaczenia ma stałą grubość (niezależną od stylu — w stylu „Model” zwykłe kreski mają grubość 0), bez falowania,
+// wydłużania i cienienia z odległości. Głębia: kreska jest przysuwana do kamery o ułamek swojej odległości, ale najwyżej
+// o 15 cm, więc ściany zasłaniają zaznaczone krawędzie z tyłu bryły — z daleka i w rzucie równoległym też.
+const selRepl = [
+  ['  float e = ext * px', '  float e = 0.0 * px'],
+  ['  float amp = wobble * px', '  float amp = 0.0 * px'],
+  ['  float w = (sil ? wSil : (soft > 0.5 ? 0.0 : wIn)) * px * wmul * clamp(L / (26.0 * px), 0.4, 1.0);', '  float w = 2.6 * px * wmul;'],
+  ['  w *= clamp(ppm / 40.0, 0.18, 1.0);\n', ''],
+  ['  gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);', '  vec4 zc = projectionMatrix * vec4(vp.xy, vp.z + min(-vp.z * 0.002, 0.15), 1.0);\n  gl_Position = vec4(s / (0.5 * res) * cp.w, zc.z / zc.w * cp.w, cp.w);'],
+];
+const SEL_VS = selRepl.reduce((v, [a, b]) => { if (!v.includes(a)) throw new Error('SEL_VS: ' + a); return v.replace(a, b); }, EDGE_VS);
 const EDGE_FS = `
 uniform vec3 ink, inkFar, paper; uniform float fade, px, opacity, fogOn, fogNear, fogFar;
 varying float vHalf, vD, vFade, vDepth, vAlpha; varying vec3 vCol;
@@ -708,12 +719,26 @@ export class Viewer {
   }
 
   // zaznaczone pojedyncze ściany (lista wielokątów); krawędzie rysuje nakładka 2D w app.js
+  // zaznaczone krawędzie wspólnej geometrii: grube niebieskie kreski w widoku 3D, więc ściany zasłaniają te z tyłu
+  setSubEdges(list) {
+    if (this.subEdgeMesh) { this.subEdgeMesh.geometry.dispose(); this.scene.remove(this.subEdgeMesh); this.subEdgeMesh = null; }
+    if (!list || !list.length) return this.redraw();
+    // kolor podany wprost (bez przeliczania na barwy liniowe), bo shader kresek nie przelicza go z powrotem
+    const col = (this.dark ? [0x8f, 0xa8, 0xd8] : [0x3f, 0x5f, 0x99]).map(x => x / 255);
+    this.selEdgeMat ||= new THREE.ShaderMaterial({ vertexShader: SEL_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false, uniforms: this.edgeMat.uniforms });
+    const m = new THREE.Mesh(buildEdgeGeometry(list.map(e => ({ a: e.a, b: e.b, n1: [0, 0, 1], n2: [0, 0, -1], col, w: 1 }))), this.selEdgeMat);
+    m.frustumCulled = false; m.renderOrder = 3; this.scene.add(m); this.subEdgeMesh = m;
+    this.redraw();
+  }
   setSubFaces(polys) {
+    // wszystkie zaznaczone ściany w jednym obiekcie (osobny obiekt na ścianę spowalniał obracanie przy tysiącach ścian)
     for (const c of [...this.subGroup.children]) { c.geometry.dispose(); this.subGroup.remove(c); }
-    for (const verts of polys || []) {
-      const pts = []; for (const t of triangulatePoly(verts)) for (const p of t) pts.push(new THREE.Vector3(...p));
-      const m = new THREE.Mesh(new THREE.BufferGeometry().setFromPoints(pts), new THREE.MeshBasicMaterial({ color: 0x3f5f99, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
-      m.renderOrder = 2;
+    const pts = [];
+    for (const verts of polys || []) for (const t of triangulatePoly(verts)) for (const p of t) pts.push(p[0], p[1], p[2]);
+    if (pts.length) {
+      this.subFaceMat ||= new THREE.MeshBasicMaterial({ color: 0x3f5f99, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      const m = new THREE.Mesh(g, this.subFaceMat); m.renderOrder = 2; m.frustumCulled = false;
       this.subGroup.add(m);
     }
     this.needs = true;
@@ -856,6 +881,9 @@ export class Viewer {
     // w eksporcie bez zaznaczenia i bez przygaszenia przy edycji grupy
     const keepSel = [...this.selected], keepEdit = this.editGroup, keepSolid = this.editSolid;
     this.selected.clear(); this.editGroup = null; this.editSolid = null;
+    // zaznaczone ściany i krawędzie też nie trafiają do obrazu
+    const keepSubE = this.subEdgeMesh?.visible, keepSubF = this.subGroup.visible;
+    if (this.subEdgeMesh) this.subEdgeMesh.visible = false; this.subGroup.visible = false;
     const keepDark = this.dark; this.dark = dark; this.rebuild();
     const keepGuides = this.guideGroup.visible; this.guideGroup.visible = guides; this.ghostGroup.visible = false;
     const r = this.renderer, st = this.st();
@@ -883,7 +911,7 @@ export class Viewer {
     if (this.section) { if (!ann) { ann = document.createElement('canvas'); ann.width = W; ann.height = H; } const vc = this.vc(); this.drawSection(ann.getContext('2d'), p => { const q = new THREE.Vector3(p[0], p[1], p[2]).project(vc); return { x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H, behind: q.z > 1 }; }, W / this.w, false); }
     rt.dispose();
     this.scene.background = bg; this.cam.aspect = aspect; this.cam.updateProjectionMatrix();
-    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true;
+    this.showAxes = keepAxes; this.underlayGroup.visible = keepUnder; this.guideGroup.visible = keepGuides; this.ghostGroup.visible = true; if (this.subEdgeMesh) this.subEdgeMesh.visible = keepSubE; this.subGroup.visible = keepSubF;
     keepSel.forEach(i => this.selected.add(i)); this.editGroup = keepEdit; this.editSolid = keepSolid; this.dark = keepDark; this.rebuild();
     this.sun.shadow.mapSize.set(keepMap, keepMap); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
     this.needs = true;

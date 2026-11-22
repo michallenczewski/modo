@@ -148,7 +148,7 @@ export class SelectTool extends Tool {
     if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < 4) return this.click(b.id, b.mode, b.x0, b.y0);
     // od lewej do prawej: tylko to, co w całości w ramce; od prawej do lewej: wszystko, czego ramka dotyka
     const window_ = b.x1 >= b.x0, hits = new Set(boxSelect(this.app, b, window_));
-    // ściany wspólnej geometrii zaznaczają się pojedynczo
+    // ściany i krawędzie wspólnej geometrii zaznaczają się pojedynczo (jak w SketchUpie)
     let faces = [];
     const geo = this.model.shapes.find(q => q.geo && (q.g ?? null) === (this.app.editing ?? null) && !isHidden(this.model, q) && !q.locked);
     if (geo) {
@@ -156,15 +156,17 @@ export class SelectTool extends Tool {
       const X0 = Math.min(b.x0, b.x1), X1 = Math.max(b.x0, b.x1), Y0 = Math.min(b.y0, b.y1), Y1 = Math.max(b.y0, b.y1);
       const scr = new Map(), S = p => { const k = p[0] + ',' + p[1] + ',' + p[2]; let q = scr.get(k); if (!q) scr.set(k, q = this.v.toScreen(p)); return q; };
       const inR = P => !P.behind && P.x >= X0 && P.x <= X1 && P.y >= Y0 && P.y <= Y1;
-      // ramka „dotyka” ściany, gdy obejmuje jej narożnik albo przecina którąś jej krawędź
+      // ramka „dotyka” odcinka, gdy obejmuje jego koniec albo przecina go którymś bokiem
       const cross = (A, B) => { if (A.behind || B.behind) return false; if (inR(A) || inR(B)) return true; const c = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]; for (let i = 0; i < 4; i++) { const [rx, ry] = c[i], [sx, sy] = c[(i + 1) % 4], d = (B.x - A.x) * (sy - ry) - (B.y - A.y) * (sx - rx); if (Math.abs(d) < 1e-9) continue; const t = ((rx - A.x) * (sy - ry) - (ry - A.y) * (sx - rx)) / d, u = ((rx - A.x) * (B.y - A.y) - (ry - A.y) * (B.x - A.x)) / d; if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return true; } return false; };
       faces = subFaces(geo, geo.polys.map((_, i) => i)).filter(f => window_ ? f.pts.every(p => inR(S(p))) : f.polys.some(P => P.some((p, i) => cross(S(p), S(P[(i + 1) % P.length])))));
+      for (const e of shapeEdges(geo)) if (window_ ? inR(S(e.a)) && inR(S(e.b)) : cross(S(e.a), S(e.b))) faces.push({ id: geo.id, kind: 'edge', a: e.a.slice(), b: e.b.slice(), pts: [e.a.slice(), e.b.slice()] });
     }
-    const have = new Set(this.app.sub.filter(q => q.kind === 'face').map(q => q.key)), got = new Set(faces.map(f => f.key));
+    const K = q => q.kind === 'face' ? 'f' + q.key : 'e' + [q.a, q.b].map(p => p.map(x => x.toFixed(5)).join(',')).sort().join('|');
+    const have = new Set(this.app.sub.map(K)), got = new Set(faces.map(K));
     if (b.mode === 'new') { sel.clear(); hits.forEach(i => sel.add(i)); this.app.sub = faces; }
-    else if (b.mode === 'add') { hits.forEach(i => sel.add(i)); this.app.sub = [...this.app.sub, ...faces.filter(f => !have.has(f.key))]; }
-    else if (b.mode === 'sub') { hits.forEach(i => sel.delete(i)); this.app.sub = this.app.sub.filter(q => !(q.kind === 'face' && got.has(q.key))); }
-    else { hits.forEach(i => sel.has(i) ? sel.delete(i) : sel.add(i)); this.app.sub = [...this.app.sub.filter(q => !(q.kind === 'face' && got.has(q.key))), ...faces.filter(f => !have.has(f.key))]; }
+    else if (b.mode === 'add') { hits.forEach(i => sel.add(i)); this.app.sub = [...this.app.sub, ...faces.filter(f => !have.has(K(f)))]; }
+    else if (b.mode === 'sub') { hits.forEach(i => sel.delete(i)); this.app.sub = this.app.sub.filter(q => !got.has(K(q))); }
+    else { hits.forEach(i => sel.has(i) ? sel.delete(i) : sel.add(i)); this.app.sub = [...this.app.sub.filter(q => !got.has(K(q))), ...faces.filter(f => !have.has(K(f)))]; }
     this.app.selectionChanged();
   }
   draw(c) {
