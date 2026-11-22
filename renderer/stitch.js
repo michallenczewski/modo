@@ -38,13 +38,22 @@ export function arrange(segs) {
       A.ts.push(Math.max(0, Math.min(1, t))); B.ts.push(Math.max(0, Math.min(1, s)));
     }
   }
-  const nodes = new Map(), node = p => { const k = K2(p); if (!nodes.has(k)) nodes.set(k, { k, p, out: [] }); return nodes.get(k); };
+  // Węzły: punkty sklejane z dokładnością 0,05 mm (z sąsiednimi komórkami siatki, żeby granica komórki nie rozdzieliła
+  // tego samego punktu). Najpierw końce odcinków — węzeł zachowuje ich dokładne współrzędne, więc wynik nie „pływa”.
+  const nodes = new Map();
+  const node = p => {
+    const ix = Math.round(p[0] * 1e4), iy = Math.round(p[1] * 1e4);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const q = nodes.get((ix + dx) + ',' + (iy + dy)); if (q && Math.hypot(q.p[0] - p[0], q.p[1] - p[1]) < 6e-5) return q; }
+    const k = ix + ',' + iy, q = { k, p, out: [] }; nodes.set(k, q); return q;
+  };
+  for (const s of src) { node(s.a); node(s.b); }
   const edges = new Map(), pieces = new Map();   // pieces: źródło → liczba kawałków
   for (const s of src) {
     const ts = [...new Set(s.ts.map(t => Math.round(t * 1e7) / 1e7))].sort((x, y) => x - y);
     let n = 0;
+    const at = t => t <= 0 ? s.a : t >= 1 ? s.b : [s.a[0] + (s.b[0] - s.a[0]) * t, s.a[1] + (s.b[1] - s.a[1]) * t];
     for (let k = 0; k + 1 < ts.length; k++) {
-      const A = node([s.a[0] + (s.b[0] - s.a[0]) * ts[k], s.a[1] + (s.b[1] - s.a[1]) * ts[k]]), B = node([s.a[0] + (s.b[0] - s.a[0]) * ts[k + 1], s.a[1] + (s.b[1] - s.a[1]) * ts[k + 1]]);
+      const A = node(at(ts[k])), B = node(at(ts[k + 1]));
       if (A === B) continue;
       const key = A.k < B.k ? A.k + '|' + B.k : B.k + '|' + A.k;
       if (!edges.has(key)) edges.set(key, { a: A, b: B, src: [] });
@@ -105,6 +114,7 @@ function tidy(L) {
 const canon = n => (n[2] < -1e-6 || (Math.abs(n[2]) < 1e-6 && (n[1] < -1e-6 || (Math.abs(n[1]) < 1e-6 && n[0] < 0)))) ? V.mul(n, -1) : n;
 const basis = n => { let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n)))); return { u, v: V.cross(n, u) }; };
 const flat = s => !isMesh(s) && s.h === 0 && !s.bill && s.op !== 'cut';
+export { inLoop, inner, tidy };
 
 /* ---------- po narysowaniu ---------- */
 // prev — model sprzed zmiany (nowe są elementy o id ≥ prev.next). Zwraca { made, split } albo null, gdy nic nie zrobiono.

@@ -129,14 +129,22 @@ function sharedSegment(P, Q, marks) {
   }
   return false;
 }
+const regionCache = new WeakMap();
 export function regions(s) {
+  const c = regionCache.get(s.polys); if (c && c.marks === s.marks) return c.r;
   const pl = s.polys.map(planeOf), n = s.polys.length, par = [...Array(n).keys()];
   const find = i => par[i] === i ? i : (par[i] = find(par[i]));
-  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+  // porównujemy tylko wielokąty z tej samej płaszczyzny (kubełki) — inaczej duża geometria liczyłaby się kwadratowo
+  const R = x => Math.round(x * 1e3), buckets = new Map();
+  pl.forEach((q, i) => { const k = R(q.n[0]) + ',' + R(q.n[1]) + ',' + R(q.n[2]) + ',' + Math.round(q.w * 1e2); let a = buckets.get(k); if (!a) buckets.set(k, a = []); a.push(i); });
+  for (const B of buckets.values()) for (let x = 0; x < B.length; x++) for (let y = x + 1; y < B.length; y++) {
+    const i = B[x], j = B[y];
     if (find(i) === find(j) || !coplanar(pl[i], pl[j])) continue;
     if (sharedSegment(s.polys[i], s.polys[j], s.marks)) par[find(i)] = find(j);
   }
-  return s.polys.map((_, i) => find(i));
+  const r = s.polys.map((_, i) => find(i));
+  regionCache.set(s.polys, { marks: s.marks, r });
+  return r;
 }
 export function regionOf(s, pi) { const r = regions(s); return r.map((x, i) => x === r[pi] ? i : -1).filter(i => i >= 0); }
 
@@ -380,12 +388,12 @@ export function mapMeshPoints(s, pts, f) {
 
 export function meshVolume(s) { let v = 0; for (const p of s.polys) for (const t of triangulatePoly(p)) v += V.dot(t[0], V.cross(t[1], t[2])) / 6; return v; }
 export function transformMesh(s, f) {
-  const v0 = meshVolume(s);
+  const o = f([0, 0, 0]), det = V.dot(V.sub(f([1, 0, 0]), o), V.cross(V.sub(f([0, 1, 0]), o), V.sub(f([0, 0, 1]), o)));
   s.polys = s.polys.map(p => p.map(f));
   s.marks = (s.marks || []).map(([a, b]) => [f(a), f(b)]);
   if (s.softs) s.softs = s.softs.map(([a, b]) => [f(a), f(b)]);
   if (s.hid) s.hid = s.hid.map(([a, b]) => [f(a), f(b)]);
-  if (Math.sign(meshVolume(s)) !== Math.sign(v0)) s.polys = s.polys.map(p => p.slice().reverse());   // odbicie lustrzane
+  if (det < 0) s.polys = s.polys.map(p => p.slice().reverse());   // odbicie lustrzane
   return s;
 }
 export function meshArea(s) { return s.polys.reduce((a, p) => a + polyArea(p), 0); }
