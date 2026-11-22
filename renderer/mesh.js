@@ -111,7 +111,7 @@ export function meshVertices(s) {
 
 // ściany: wielokąty w jednej płaszczyźnie, połączone wspólnym odcinkiem, którego nie zajmuje znacznik
 const coplanar = (a, b) => V.dot(a.n, b.n) > 1 - 1e-6 && Math.abs(a.w - b.w) < 1e-5;
-function sharedSegment(P, Q, marks) {
+function sharedSegment(P, Q, marks, blocked) {
   for (let i = 0; i < P.length; i++) {
     const a = P[i], b = P[(i + 1) % P.length], L = V.dist(a, b); if (L < EPS) continue;
     const e = V.mul(V.sub(b, a), 1 / L);
@@ -124,10 +124,36 @@ function sharedSegment(P, Q, marks) {
       if (hi - lo < 1e-5) continue;
       const mid = V.add(a, V.mul(e, (lo + hi) / 2));
       if ((marks || []).some(([m1, m2]) => { const ml = V.dist(m1, m2); if (ml < EPS) return false; const me = V.mul(V.sub(m2, m1), 1 / ml), t = V.dot(V.sub(mid, m1), me); return t > -1e-6 && t < ml + 1e-6 && V.dist(V.add(m1, V.mul(me, t)), mid) < 1e-5; })) continue;
+      if (blocked && blocked(mid)) continue;
       return true;
     }
   }
   return false;
+}
+// Krawędzie ścian w innych płaszczyznach, do szybkiego sprawdzania, czy punkt leży na którejś z nich (siatka kubełków).
+// Krawędź, przy której schodzą się więcej niż dwie ściany (np. górna krawędź wewnętrznej przegrody między dwiema bryłami),
+// rozdziela ściany w jednej płaszczyźnie — jak w SketchUpie dach dwóch brył stojących obok siebie to dwie ściany.
+function edgeGrid(s, pl) {
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const P of s.polys) for (const p of P) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
+  const h = Math.max(1e-3, Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 48), cell = x => Math.floor(x / h), grid = new Map();
+  // krawędź trafia do komórek wzdłuż swojego przebiegu (próbki co pół komórki); pytanie przegląda komórkę punktu i sąsiednie
+  const K = p => cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]);
+  s.polys.forEach((P, k) => P.forEach((a, i) => {
+    const b = P[(i + 1) % P.length], e = { a, b, k }, steps = Math.max(1, Math.ceil(V.dist(a, b) / (h / 2))), seen = new Set();
+    for (let t = 0; t <= steps; t++) {
+      const key = K(V.lerp(a, b, t / steps)); if (seen.has(key)) continue; seen.add(key);
+      let L = grid.get(key); if (!L) grid.set(key, L = []); L.push(e);
+    }
+  }));
+  const near = m => { const out = new Set(), c = m.map(cell); for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) for (const e of grid.get((c[0] + x) + ',' + (c[1] + y) + ',' + (c[2] + z)) || []) out.add(e); return out; };
+  // czy punkt m leży na krawędzi ściany spoza płaszczyzny q
+  return (m, q) => [...near(m)].some(({ a, b, k }) => {
+    if (coplanar(pl[k], q)) return false;
+    const L = V.dist(a, b); if (L < EPS) return false;
+    const e = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(m, a), e);
+    return t > 1e-6 && t < L - 1e-6 && V.dist(V.add(a, V.mul(e, t)), m) < 1e-5;
+  });
 }
 const regionCache = new WeakMap();
 export function regions(s) {
@@ -137,10 +163,11 @@ export function regions(s) {
   // porównujemy tylko wielokąty z tej samej płaszczyzny (kubełki) — inaczej duża geometria liczyłaby się kwadratowo
   const R = x => Math.round(x * 1e3), buckets = new Map();
   pl.forEach((q, i) => { const k = R(q.n[0]) + ',' + R(q.n[1]) + ',' + R(q.n[2]) + ',' + Math.round(q.w * 1e2); let a = buckets.get(k); if (!a) buckets.set(k, a = []); a.push(i); });
+  let onEdge = null;   // budowane dopiero, gdy jest co sprawdzać
   for (const B of buckets.values()) for (let x = 0; x < B.length; x++) for (let y = x + 1; y < B.length; y++) {
     const i = B[x], j = B[y];
     if (find(i) === find(j) || !coplanar(pl[i], pl[j])) continue;
-    if (sharedSegment(s.polys[i], s.polys[j], s.marks)) par[find(i)] = find(j);
+    if (sharedSegment(s.polys[i], s.polys[j], s.marks, m => (onEdge ||= edgeGrid(s, pl))(m, pl[i]))) par[find(i)] = find(j);
   }
   const r = s.polys.map((_, i) => find(i));
   regionCache.set(s.polys, { marks: s.marks, r });
