@@ -158,21 +158,22 @@ export class Snapper {
     }
 
     // blokada osi strzałką (albo Shift): wszystko rzutujemy na tę oś
-    if (opts.anchor && opts.lockAxis) {
-      const a = AXES[opts.lockAxis], o = opts.anchor;
+    // lockDir — dowolny kierunek zatrzymany Shiftem (np. wzdłuż krawędzi), jak blokada inferencji w SketchUpie
+    if (opts.anchor && (opts.lockAxis || opts.lockDir)) {
+      const ax = opts.lockDir ? undefined : opts.lockAxis, a = opts.lockDir || AXES[ax], o = opts.anchor, name = ax ? AXIS_NAME[ax] : 'Zablokowany kierunek';
       if (best) {
         this.remember(best.p);
         const p = V.add(o, V.mul(a, V.dot(V.sub(best.p, o), a)));
-        return { p, type: 'axis', axis: opts.lockAxis, label: AXIS_NAME[opts.lockAxis], guide: V.dist(p, best.p) > 1e-6 ? [best.p, p] : null, locked: true };
+        return { p, type: 'axis', axis: ax, label: name, guide: V.dist(p, best.p) > 1e-6 ? [best.p, p] : null, locked: true };
       }
       // przy zablokowanej osi krawędź albo ściana pod kursorem wyznacza, jak daleko po tej osi
       const eb = edgeNear(), fh = eb ? null : faceHit(), ref = eb ? eb.p : fh ? fh.point : null;
       if (ref) {
         const p = V.add(o, V.mul(a, V.dot(V.sub(ref, o), a)));
-        return { p, type: 'axis', axis: opts.lockAxis, label: eb ? 'Od krawędzi' : 'Od ściany', guide: V.dist(p, ref) > 1e-6 ? [ref, p] : null, locked: true };
+        return { p, type: 'axis', axis: ax, label: eb ? 'Od krawędzi' : 'Od ściany', guide: V.dist(p, ref) > 1e-6 ? [ref, p] : null, locked: true };
       }
       const r = v.onLine(x, y, o, a);
-      if (r) return { p: r.p, type: 'axis', axis: opts.lockAxis, label: AXIS_NAME[opts.lockAxis], locked: true };
+      if (r) return { p: r.p, type: 'axis', axis: ax, label: name, locked: true };
     }
 
     if (best) { this.remember(best.p); return { p: best.p, type: best.type, label: label[best.type], dir: best.dir }; }

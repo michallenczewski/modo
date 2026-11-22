@@ -6,6 +6,7 @@ import { isHidden, triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, box
 import { triangulatePoly, isMesh } from './mesh.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
+import { TEXTURES, textureCanvas } from './textures.js';
 
 /* ---------- style rysunku ---------- */
 export const STYLES = {
@@ -26,7 +27,7 @@ export const styleOf = (name, dark) => dark ? { ...STYLES[name], ...DARK[name] }
 const EDGE_VS = `
 uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar, sectOn; uniform vec4 sect;
 attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul, soft;
-varying float vHalf, vD, vFade; varying vec3 vCol;
+varying float vHalf, vD, vFade, vDepth; varying vec3 vCol;
 void main(){
   vec4 va = modelViewMatrix * vec4(ea, 1.0), vb = modelViewMatrix * vec4(eb, 1.0);
   float nz = -nearZ * 1.001;
@@ -63,16 +64,17 @@ void main(){
   vD = side * (vHalf + px);
   s += nrm * vD;
   vFade = clamp((-vp.z - fadeNear) / max(fadeFar - fadeNear, 0.001), 0.0, 1.0);
-  vCol = col;
+  vCol = col; vDepth = -vp.z;
   gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);
 }`;
 const EDGE_FS = `
-uniform vec3 ink, inkFar; uniform float fade, px, opacity;
-varying float vHalf, vD, vFade; varying vec3 vCol;
+uniform vec3 ink, inkFar, paper; uniform float fade, px, opacity, fogOn, fogNear, fogFar;
+varying float vHalf, vD, vFade, vDepth; varying vec3 vCol;
 void main(){
   float a = clamp(vHalf + 0.5 * px - abs(vD), 0.0, px) / px;
   if (a <= 0.0) discard;
   vec3 c = vCol.r < 0.0 ? mix(ink, inkFar, vFade * fade) : vCol;
+  c = mix(c, paper, fogOn * clamp((vDepth - fogNear) / max(fogFar - fogNear, 0.001), 0.0, 1.0));
   gl_FragColor = vec4(c, a * opacity * (1.0 - 0.55 * vFade * fade));
 }`;
 
@@ -169,7 +171,7 @@ export class Viewer {
       uniforms: {
         res: { value: new THREE.Vector2(1, 1) }, px: { value: 1 }, wSil: { value: 2 }, wIn: { value: 1 }, ext: { value: 8 }, wobble: { value: 1 },
         nearZ: { value: 0.05 }, fadeNear: { value: 10 }, fadeFar: { value: 80 }, ink: { value: new THREE.Color() }, inkFar: { value: new THREE.Color() },
-        fade: { value: 0.8 }, opacity: { value: 1 }, sectOn: { value: 0 }, sect: { value: new THREE.Vector4() }
+        fade: { value: 0.8 }, opacity: { value: 1 }, paper: { value: new THREE.Color() }, fogOn: { value: 0 }, fogNear: { value: 1 }, fogFar: { value: 100 }, sectOn: { value: 0 }, sect: { value: new THREE.Vector4() }
       }
     });
     this.edgeMesh = null;
@@ -248,13 +250,15 @@ export class Viewer {
     this.rebuild(opts);
   }
   rebuild({ highlight } = {}) {
-    for (const c of [...this.modelGroup.children]) { c.geometry.dispose(); if (c.material.dispose && c.material !== this.edgeMat) c.material.dispose(); this.modelGroup.remove(c); }
+    for (const c of [...this.modelGroup.children]) { c.geometry.dispose(); for (const m of [].concat(c.material)) if (m.dispose && m !== this.edgeMat) m.dispose(); this.modelGroup.remove(c); }
     this.meshes = [];
     for (const b of this.bills || []) { b.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== this.edgeMat) o.material.dispose(); }); this.scene.remove(b.group); }
     this.bills = [];
     const st = this.st();
     const paper = new THREE.Color(st.paper);
     const edgeList = [];
+    const lines = st.lines || this.wire;   // w trybie siatki krawędzie są zawsze
+    const GHOST = hex3(this.dark ? '#5d5d5a' : '#b9b5aa');
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
     this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
     const cutters = this.model.shapes.filter(s => s.op === 'cut' && !isHidden(this.model, s) && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
@@ -268,45 +272,42 @@ export class Viewer {
     };
     this.rebuildGhosts(cutters.map(c => c.s));
     for (const s of this.model.shapes) {
-      if (isHidden(this.model, s) || s.op === 'cut') continue;
+      if (s.op === 'cut') continue;
+      if (isHidden(this.model, s)) {
+        // ukryta geometria: schowane bryły widać jako blady obrys
+        if (this.showHidden && lines) for (const e of shapeEdges(s)) edgeList.push({ ...e, col: GHOST, w: 0.7, soft: false });
+        continue;
+      }
       if (s.bill) { this.addBillboard(s, st, paper); continue; }
       const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
       if (cut.length) { this.addCsgMesh(s, subtractAll(polysOf(s), cut.map(c => polysOf(c.s))), edgeList, st, paper); continue; }
-      const pos = [], nor = [], keys = [];
-      for (const f of triangulate(s)) {
-        const n = new THREE.Vector3(...f.normal);
-        for (const tri of f.tris) {
-          const [a, b, c] = tri.map(p => new THREE.Vector3(...p));
-          const g = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-          const ord = g.dot(n) < 0 ? [a, c, b] : [a, b, c];
-          for (const p of ord) { pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); }
-          keys.push(f.key);
-        }
+      const items = [];
+      for (const f of triangulate(s)) for (const tri of f.tris) {
+        const g = V.cross(V.sub(tri[1], tri[0]), V.sub(tri[2], tri[0]));
+        items.push({ tri: V.dot(g, f.normal) < 0 ? [tri[0], tri[2], tri[1]] : tri, n: f.normal, key: f.key, id: s.id });
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
       const sel = this.selected.has(s.id);
       const flat = s.h === 0;
-      const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, flat));
+      const mesh = this.faceMesh(s, items, st, paper, flat);
       mesh.castShadow = !flat && (s.alpha ?? 1) > 0.6; mesh.receiveShadow = true;
       if ((s.alpha ?? 1) < 0.999) mesh.renderOrder = 1;
-      mesh.userData = { shapeId: s.id, keys };
       this.modelGroup.add(mesh); this.meshes.push(mesh);
-      if (st.lines) {
+      if (lines) {
         const col = sel ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
         for (const e of shapeEdges(s)) {
           // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
           if (!isMesh(s) && s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
             const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
-            if (this.model.shapes.some(t => t !== s && !isMesh(t) && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
+            if (!e.hid && !e.soft && this.model.shapes.some(t => t !== s && !isMesh(t) && V.dot(t.n, s.n) > 0.999 && onTopOf(mid, t))) { edgeList.push({ ...e, n1: s.n, col }); continue; }
           }
+          // krawędzie ukryte gumką znikają, wygładzone zostają tylko jako kontur; „ukryta geometria” pokazuje obie blado
+          if (e.hid || (e.soft && this.showHidden)) { if (this.showHidden) edgeList.push({ ...e, col: GHOST, w: 0.7, soft: false }); continue; }
           edgeList.push(s.soft && isMesh(s) ? { ...e, col, soft: true } : { ...e, col });
         }
       }
     }
-    if (st.lines) for (const l of this.model.lines) {
-      if (isHidden(this.model, l)) continue;
+    if (lines) for (const l of this.model.lines) {
+      if (isHidden(this.model, l)) { if (this.showHidden) edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: GHOST, w: 0.7 }); continue; }
       const sel = this.selected.has('l' + l.id);
       edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
     }
@@ -329,7 +330,7 @@ export class Viewer {
     this.section = sec || null;
     const u = this.edgeMat.uniforms;
     this.sectSegs = [];
-    if (!sec) { this.ghostGroup.traverse(o => { if (o.material?.clippingPlanes?.length) { o.material.clippingPlanes = []; o.material.needsUpdate = true; } }); u.sectOn.value = 0; for (const m of this.meshes) if (m.material.clippingPlanes?.length) { m.material.clippingPlanes = []; m.material.needsUpdate = true; } return; }
+    if (!sec) { this.ghostGroup.traverse(o => { if (o.material?.clippingPlanes?.length) { o.material.clippingPlanes = []; o.material.needsUpdate = true; } }); u.sectOn.value = 0; for (const m of this.meshes) for (const q of [].concat(m.material)) if (q.clippingPlanes?.length) { q.clippingPlanes = []; q.needsUpdate = true; } return; }
     const n = V.norm(sec.n), d = V.dot(n, sec.o);
     u.sectOn.value = 1; u.sect.value.set(n[0], n[1], n[2], d);
     this.clipPlane.normal.set(-n[0], -n[1], -n[2]); this.clipPlane.constant = d;
@@ -337,7 +338,7 @@ export class Viewer {
     this.ghostGroup.traverse(o => { if (o.material) { o.material.clippingPlanes = planes; o.material.needsUpdate = true; } });
     const poche = new THREE.MeshBasicMaterial({ color: this.dark ? '#8d897f' : '#4f4c45', side: THREE.BackSide, clippingPlanes: planes });
     for (const m of [...this.meshes]) {
-      m.material.clippingPlanes = planes; m.material.clipShadows = true; m.material.needsUpdate = true;
+      for (const q of [].concat(m.material)) { q.clippingPlanes = planes; q.clipShadows = true; q.needsUpdate = true; }
       const sh = this.model.shapes.find(q => q.id === m.userData.shapeId);
       if (!sh || !isSolid(sh) || (sh.alpha ?? 1) < 0.6) continue;
       const back = new THREE.Mesh(m.geometry, poche); back.userData = { poche: true };
@@ -399,7 +400,7 @@ export class Viewer {
     const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, true));
     mesh.castShadow = true; mesh.receiveShadow = false; mesh.userData = { shapeId: s.id, keys, bill: true };
     const group = new THREE.Group(); group.position.set(o[0], o[1], o[2]); group.add(mesh);
-    if (st.lines) {
+    if (st.lines || this.wire) {
       const col = this.selected.has(s.id) ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
       const list = shapeEdges(s).map(e => ({ a: V.sub(e.a, o), b: V.sub(e.b, o), n1: [0, 0, 0], n2: null, col, w: 2.1 }));
       if (list.length) { const em = new THREE.Mesh(buildEdgeGeometry(list), this.edgeMat); em.frustumCulled = false; em.renderOrder = 2; group.add(em); }
@@ -416,9 +417,9 @@ export class Viewer {
       b.group.updateMatrixWorld(true);
     }
   }
-  colorFor(s, st, paper) {
-    const base = new THREE.Color(s.color || st.wall || DEFAULT_COLOR);
-    if (s.color) base.lerp(paper, st.tint);
+  colorFor(s, st, paper, color = s.color, tex = false) {
+    const base = new THREE.Color(tex ? '#ffffff' : color || st.wall || DEFAULT_COLOR);
+    if (color || tex) base.lerp(paper, tex ? st.tint * 0.5 : st.tint);
     if (this.selected.has(s.id)) base.lerp(new THREE.Color('#9fb3d6'), 0.45);
     if (this.dimmed(s)) base.lerp(paper, 0.6);
     return base;
@@ -426,32 +427,64 @@ export class Viewer {
   // przy edycji grupy reszta modelu jest przygaszona
   dimmed(s) { if (this.editSolid != null) return s.id !== this.editSolid; return this.editGroup != null && !(this.editSet && this.editSet.has(s.g)); }
   // materiał ściany: kolor, przezroczystość (szkło)
-  matFor(s, st, paper, flat) {
+  // fp — kolor i tekstura pojedynczej ściany ({ c, t }); bez niego obowiązuje kolor całej bryły
+  matFor(s, st, paper, flat, fp) {
     // prześwit: wszystkie ściany półprzezroczyste, żeby było widać, co jest w środku i z tyłu
     const a = this.xray ? Math.min(s.alpha ?? 1, 0.32) : s.alpha ?? 1, glass = a < 0.999;
+    const color = fp ? fp.c : s.color, tex = fp ? fp.t : s.tex, map = tex ? this.texture(tex) : null;
     return new THREE.MeshLambertMaterial({
-      color: this.colorFor(s, st, paper), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
+      map, color: this.colorFor(s, st, paper, color, !!map), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
       transparent: glass, opacity: a, depthWrite: !glass,
       polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2
     });
   }
-  // bryła z odjętymi wycięciami: siatka z wielokątów wyniku, krawędzie bez szwów
-  addCsgMesh(s, polys, edgeList, st, paper) {
-    const pos = [], nor = [], keys = [], ids = [];
-    for (const p of polys) {
-      for (let i = 1; i + 1 < p.vs.length; i++) {
-        for (const v of [p.vs[0], p.vs[i], p.vs[i + 1]]) { pos.push(v[0], v[1], v[2]); nor.push(p.n[0], p.n[1], p.n[2]); }
-        keys.push(p.shared.key); ids.push(p.shared.id);
-      }
+  // tekstura materiału (jedna na cały widok), powtarzana w obu kierunkach
+  texture(id) {
+    this.texCache ||= new Map();
+    if (!this.texCache.has(id)) {
+      const cv = textureCanvas(id); if (!cv) { this.texCache.set(id, null); return null; }
+      const t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+      const [w, h] = TEXTURES[id].size; t.repeat.set(1 / w, 1 / h);
+      this.texCache.set(id, t);
+    }
+    return this.texCache.get(id);
+  }
+  // siatka ścian bryły. items: [{ tri, n, key, id }]; ściany z własnym kolorem albo teksturą (s.fc) dostają osobny materiał.
+  // Współrzędne tekstury to metry w płaszczyźnie ściany (poziom i pion świata), więc wzór ma prawdziwą skalę.
+  faceMesh(s, items, st, paper, flat) {
+    const fc = s.fc || null, sig = it => { const f = fc && it.id === s.id && fc[it.key]; return f ? (f.c || '') + '|' + (f.t || '') : ''; };
+    const order = items.map((it, i) => [sig(it), i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]);
+    const pos = [], nor = [], uv = [], keys = [], ids = [], groups = [];
+    for (const [sg, i] of order) {
+      const it = items[i], n = it.n;
+      let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+      const w = V.cross(n, u);
+      if (!groups.length || groups[groups.length - 1].sig !== sg) groups.push({ sig: sg, start: keys.length * 3, count: 0, fp: sg ? fc[it.key] : null });
+      groups[groups.length - 1].count += 3;
+      for (const p of it.tri) { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); uv.push(V.dot(p, u), V.dot(p, w)); }
+      keys.push(it.key); ids.push(it.id);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    const mesh = new THREE.Mesh(geo, this.matFor(s, st, paper, false));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    let mat;
+    if (groups.length <= 1) mat = this.matFor(s, st, paper, flat, groups[0]?.fp);
+    else { mat = groups.map(g => this.matFor(s, st, paper, flat, g.fp)); groups.forEach((g, k) => geo.addGroup(g.start, g.count, k)); }
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData = { shapeId: s.id, keys, ids: ids.some(i => i !== s.id) ? ids : undefined };
+    return mesh;
+  }
+  // bryła z odjętymi wycięciami: siatka z wielokątów wyniku, krawędzie bez szwów
+  addCsgMesh(s, polys, edgeList, st, paper) {
+    const items = [];
+    for (const p of polys) for (let i = 1; i + 1 < p.vs.length; i++) items.push({ tri: [p.vs[0], p.vs[i], p.vs[i + 1]], n: p.n, key: p.shared.key, id: p.shared.id });
+    const mesh = this.faceMesh(s, items, st, paper, false);
     mesh.castShadow = (s.alpha ?? 1) > 0.6; mesh.receiveShadow = true;
-    mesh.userData = { shapeId: s.id, keys, ids };
+    if (!mesh.userData.ids) mesh.userData.ids = items.map(() => s.id);
     this.modelGroup.add(mesh); this.meshes.push(mesh);
-    if (st.lines) { const col = this.selected.has(s.id) ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null; for (const e of resultEdges(polys)) edgeList.push({ ...e, col }); }
+    if (st.lines || this.wire) { const col = this.selected.has(s.id) ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null; for (const e of resultEdges(polys)) edgeList.push({ ...e, col }); }
   }
   // wycięcia widać jako cienkie przerywane obrysy (nie trafiają do eksportu)
   rebuildGhosts(list) {
@@ -510,6 +543,45 @@ export class Viewer {
     this.style = name;
     if (this.model) this.rebuild(); else this.needs = true;
   }
+  // mgła, siatka i ukryta geometria: materiały trzeba zbudować na nowo (mgła jest wkompilowana w shader)
+  setLook(o) {
+    for (const k of ['fog', 'wire', 'showHidden']) if (k in o) this[k] = !!o[k];
+    this.scene.fog = null; this.applyStyleUniforms();
+    this.scene.traverse(q => { for (const m of [].concat(q.material || [])) m.needsUpdate = true; });
+    if (this.model) this.rebuild(); else this.needs = true;
+  }
+  // rozglądanie się z miejsca: kamera obraca się wokół własnego położenia
+  look(dx, dy) {
+    const cam = this.cam, Z = new THREE.Vector3(0, 0, 1), fwd = cam.getWorldDirection(new THREE.Vector3());
+    if (this.twoPoint) this.setTwoPoint(false);
+    const right = new THREE.Vector3().crossVectors(fwd, Z).normalize();
+    const pitch = Math.asin(Math.max(-1, Math.min(1, fwd.z)));
+    let dp = -dy * 0.004; dp = Math.max(-1.5 - pitch, Math.min(1.5 - pitch, dp));
+    fwd.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(Z, -dx * 0.004).multiply(new THREE.Quaternion().setFromAxisAngle(right, dp)));
+    cam.up.set(0, 0, 1); cam.lookAt(cam.position.clone().add(fwd));
+    this.needs = true;
+  }
+  // krok w poziomie: naprzód (f), w bok (r), w górę (u) i obrót wokół pionu
+  walk(f, r, u, turn) {
+    const cam = this.cam, Z = new THREE.Vector3(0, 0, 1), fwd = cam.getWorldDirection(new THREE.Vector3());
+    const h = new THREE.Vector3(fwd.x, fwd.y, 0); if (h.lengthSq() < 1e-9) h.set(0, 1, 0); h.normalize();
+    const right = new THREE.Vector3().crossVectors(h, Z);
+    cam.position.addScaledVector(h, f).addScaledVector(right, r).addScaledVector(Z, u);
+    fwd.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(Z, turn));
+    cam.up.set(0, 0, 1); cam.lookAt(cam.position.clone().add(fwd));
+    this.needs = true;
+  }
+  // kamera w punkcie p; patrzy na punkt `to` albo — bez niego — poziomo w dotychczasową stronę
+  placeCamera(p, to) {
+    if (this.ortho) this.toggleOrtho();
+    if (this.twoPoint) this.setTwoPoint(false);
+    const cam = this.cam, fwd = cam.getWorldDirection(new THREE.Vector3());
+    if (to) fwd.set(to[0] - p[0], to[1] - p[1], to[2] - p[2]); else fwd.setZ(0);
+    if (fwd.lengthSq() < 1e-9) fwd.set(0, 1, 0);
+    fwd.normalize(); if (Math.abs(fwd.z) > 0.999) fwd.set(0, 0.05, fwd.z).normalize();
+    cam.position.set(p[0], p[1], p[2]); cam.up.set(0, 0, 1); cam.lookAt(cam.position.clone().add(fwd));
+    this.needs = true;
+  }
   setSun(cfg) { Object.assign(this.sunCfg, cfg); this.updateSun(); }
   sunInfo() { const c = this.sunCfg; return sunPosition(c.date, c.hour, c.lat, c.lon, c.tz); }
   updateSun() {
@@ -545,7 +617,9 @@ export class Viewer {
     const dpr = this.renderer.getPixelRatio();
     u.res.value.set(w * dpr * scale, h * dpr * scale);
     u.px.value = dpr * scale;
-    u.wSil.value = st.wSil; u.wIn.value = st.wIn; u.ext.value = st.ext; u.wobble.value = st.wobble; u.fade.value = st.fade;
+    // tryb siatki w stylu bez kresek i tak rysuje krawędzie
+    const noLines = this.wire && !st.lines;
+    u.wSil.value = noLines ? 1.3 : st.wSil; u.wIn.value = noLines ? 1 : st.wIn; u.ext.value = st.ext; u.wobble.value = st.wobble; u.fade.value = st.fade;
     u.ink.value.set(st.ink); u.inkFar.value.set(st.inkFar);
     u.nearZ.value = this.cam.near;
     const b = this.model && bounds(this.model);
@@ -553,11 +627,19 @@ export class Viewer {
       const d = this.vc().position.distanceTo(new THREE.Vector3(...b.center));   // w rzucie równoległym kamera stoi daleko
       u.fadeNear.value = Math.max(0.1, d - b.radius * 0.6); u.fadeFar.value = d + b.radius * 1.2;
     }
+    // mgła: od przodu modelu do dobrze za nim, w kolorze papieru (ściany przez scene.fog, krawędzie w shaderze)
+    const near = b ? Math.max(0.1, u.fadeNear.value - b.radius * 0.2) : 10, far = b ? u.fadeFar.value + b.radius * 1.6 : 200;
+    u.paper.value.set(st.paper); u.fogOn.value = this.fog ? 1 : 0; u.fogNear.value = near; u.fogFar.value = far;
+    if (this.fog) { if (!this.scene.fog) this.scene.fog = new THREE.Fog(st.paper, near, far); this.scene.fog.color.set(st.paper); this.scene.fog.near = near; this.scene.fog.far = far; }
+    else if (this.scene.fog) this.scene.fog = null;
   }
   render() {
     const st = this.st();
     this.scene.background = new THREE.Color(st.paper);
     this.axes.visible = this.showAxes;
+    // siatka: same krawędzie, ściany nie są rysowane (kursor dalej je trafia)
+    this.modelGroup.visible = !this.wire;
+    for (const b of this.bills || []) b.group.children[0].visible = !this.wire;
     this.faceBillboards();
     this.applyStyleUniforms();
     this.renderer.render(this.scene, this.vc());

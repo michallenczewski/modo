@@ -8,7 +8,7 @@
 // Wszystkie wymiary w metrach, oś Z w górę.
 
 import { ShapeUtils, Vector2 } from './vendor/three.module.js';
-import { isMesh, toMesh, meshEdges, meshVertices, meshTriangles, pushPullMesh, transformMesh, newell, regionOf, regionLoops } from './mesh.js';
+import { isMesh, toMesh, meshEdges, meshVertices, meshTriangles, pushPullMesh, transformMesh, newell, regionOf, regionLoops, flagEdges } from './mesh.js';
 
 export const V = {
   add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
@@ -110,7 +110,7 @@ export function edges(s) {
   const bot = s.pts.map(p => at(s, p[0], p[1], 0));
   if (s.h === 0) {
     for (let i = 0; i < n; i++) out.push({ a: bot[i], b: bot[(i + 1) % n], n1: s.n, n2: null });
-    return out;
+    return flagEdges(s, out);
   }
   const top = s.pts.map(p => at(s, p[0], p[1], s.h)), up = s.n, down = V.mul(s.n, -1);
   const sn = [...Array(n)].map((_, i) => sideNormal(s, i));
@@ -122,8 +122,10 @@ export function edges(s) {
     const c = V.dot(sn[k], sn[i]);
     if (c < 0.9999) out.push({ a: bot[i], b: top[i], n1: sn[k], n2: sn[i], soft: !!s.soft && c > 0.94 });
   }
-  return out;
+  return flagEdges(s, out);
 }
+// listy krawędzi wygładzonych i ukrytych bryły wyciągniętej leżą w świecie, więc idą razem z nią
+const mapFlags = (s, f) => { for (const k of ['softs', 'hid']) if (s[k]) s[k] = s[k].map(([a, b]) => [f(a), f(b)]); };
 
 // czy punkt leży na górnej ścianie bryły t (do styku brył postawionych jedna na drugiej)
 export function onTopOf(p, t) {
@@ -230,7 +232,7 @@ export function circlePts(r, n = CIRCLE_SEGMENTS, a0 = 0) {
   return pts;
 }
 
-export function translateShape(s, d) { if (isMesh(s)) return transformMesh(s, p => V.add(p, d)); s.o = V.add(s.o, d); return s; }
+export function translateShape(s, d) { if (isMesh(s)) return transformMesh(s, p => V.add(p, d)); mapFlags(s, p => V.add(p, d)); s.o = V.add(s.o, d); return s; }
 export function translateLine(l, d) { l.a = V.add(l.a, d); l.b = V.add(l.b, d); return l; }
 export function translateGuide(g, d) { g.o = V.add(g.o, d); return g; }
 
@@ -240,7 +242,7 @@ export function rotVec(v, k, t) {
   return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c)));
 }
 const rotPt = (p, c, k, t) => V.add(c, rotVec(V.sub(p, c), k, t));
-export function rotateShape(s, c, k, t) { if (isMesh(s)) return transformMesh(s, p => rotPt(p, c, k, t)); s.o = rotPt(s.o, c, k, t); s.u = rotVec(s.u, k, t); s.v = rotVec(s.v, k, t); s.n = rotVec(s.n, k, t); return s; }
+export function rotateShape(s, c, k, t) { if (isMesh(s)) return transformMesh(s, p => rotPt(p, c, k, t)); mapFlags(s, p => rotPt(p, c, k, t)); s.o = rotPt(s.o, c, k, t); s.u = rotVec(s.u, k, t); s.v = rotVec(s.v, k, t); s.n = rotVec(s.n, k, t); return s; }
 export function rotateLine(l, c, k, t) { l.a = rotPt(l.a, c, k, t); l.b = rotPt(l.b, c, k, t); return l; }
 export function rotateGuide(g, c, k, t) { g.o = rotPt(g.o, c, k, t); g.d = rotVec(g.d, k, t); return g; }
 
@@ -348,6 +350,7 @@ export function similar(a, b) {
 // (oś ani prostopadła, ani równoległa do jej podstawy — wtedy bryła przestałaby być prostym wyciągnięciem).
 export function scaleShape(s, c, k, axis) {
   if (isMesh(s)) { transformMesh(s, p => scalePoint(p, c, k, axis)); return true; }
+  if (Math.abs(Math.abs(axis ? V.dot(axis, s.n) : 1) - 1) < 1e-3 || Math.abs(axis ? V.dot(axis, s.n) : 1) < 1e-3) mapFlags(s, p => scalePoint(p, c, k, axis));
   if (!axis) {
     s.o = V.add(c, V.mul(V.sub(s.o, c), k)); s.pts = s.pts.map(p => [p[0] * k, p[1] * k]); s.h *= k;
     if (k < 0) { s.u = V.mul(s.u, -1); s.v = V.mul(s.v, -1); s.pts = s.pts.map(p => [-p[0], -p[1]]); }
@@ -434,6 +437,7 @@ export function unmapPoint(F, p) {
 // bryła przekształcona dowolną funkcją punktów (przesunięcie, obrót, skala, przejście między ramami)
 export function transformShape(s, f) {
   if (isMesh(s)) return transformMesh(s, f);
+  mapFlags(s, f);
   const base = s.pts.map(p => at(s, p[0], p[1], 0)), o = f(s.o);
   const top = f(at(s, s.pts[0][0], s.pts[0][1], s.h)), b0 = f(base[0]);
   let u = V.norm(V.sub(f(V.add(s.o, s.u)), o)), v = V.sub(f(V.add(s.o, s.v)), o);
@@ -527,7 +531,7 @@ function splitFlat(model, s, a, b) {
   if (p1.length < 3 || p2.length < 3) return false;
   s.pts = p1;
   const c = makeShape(model, { o: s.o, u: s.u, v: s.v }, p2, 0, s.color);
-  for (const k of ['g', 'tag', 'alpha', 'soft']) if (s[k] != null) c[k] = s[k];
+  for (const k of ['g', 'tag', 'alpha', 'soft', 'tex']) if (s[k] != null) c[k] = s[k];
   normalizeShape(s);
   return true;
 }
@@ -542,3 +546,85 @@ export function splitByLine(model, s, a, b) {
   return true;
 }
 import { splitMesh as splitMeshFn } from './mesh.js';
+
+/* ---------- ściany z linii (np. po imporcie rysunku CAD) ---------- */
+// Linie leżące w jednej płaszczyźnie są dzielone w miejscach przecięć, a każde zamknięte pole między nimi staje się
+// płaską ścianą. Linie, które w całości trafiły na brzeg jakiejś ściany, znikają (ściana ma własne krawędzie).
+// Zwraca { faces: [bryły], skipped: liczba linii poza płaszczyzną } albo null, gdy linii jest za dużo.
+export function facesFromLines(model, lines, limit = 6000) {
+  if (lines.length < 3) return { faces: [], skipped: 0 };
+  if (lines.length > limit) return null;
+  // płaszczyzna: pierwsze trzy punkty, które nie leżą na jednej prostej
+  const o = lines[0].a; let n = null;
+  const d0 = V.norm(V.sub(lines[0].b, lines[0].a));
+  for (const l of lines) for (const p of [l.a, l.b]) { const c = V.cross(d0, V.sub(p, o)); if (V.len(c) > 1e-6) { n = V.norm(c); break; } if (n) break; }
+  if (!n) return { faces: [], skipped: 0 };
+  if (n[2] < -1e-6 || (Math.abs(n[2]) < 1e-6 && (n[1] < 0 || (Math.abs(n[1]) < 1e-6 && n[0] < 0)))) n = V.mul(n, -1);
+  let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+  const v = V.cross(n, u), to2 = p => { const d = V.sub(p, o); return [V.dot(d, u), V.dot(d, v)]; };
+  const inPlane = p => Math.abs(V.dot(V.sub(p, o), n)) < 1e-4;
+  const src = lines.filter(l => inPlane(l.a) && inPlane(l.b)).map(l => ({ l, a: to2(l.a), b: to2(l.b), ts: [0, 1] })).filter(s => Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) > 1e-6);
+  // podział w przecięciach i w miejscach, gdzie koniec innej linii leży na odcinku
+  for (let i = 0; i < src.length; i++) {
+    const A = src[i], ax = A.b[0] - A.a[0], ay = A.b[1] - A.a[1];
+    const lo = [Math.min(A.a[0], A.b[0]) - 1e-6, Math.min(A.a[1], A.b[1]) - 1e-6], hi = [Math.max(A.a[0], A.b[0]) + 1e-6, Math.max(A.a[1], A.b[1]) + 1e-6];
+    for (let j = i + 1; j < src.length; j++) {
+      const B = src[j];
+      if (Math.max(B.a[0], B.b[0]) < lo[0] || Math.min(B.a[0], B.b[0]) > hi[0] || Math.max(B.a[1], B.b[1]) < lo[1] || Math.min(B.a[1], B.b[1]) > hi[1]) continue;
+      const bx = B.b[0] - B.a[0], by = B.b[1] - B.a[1], den = ax * by - ay * bx;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((B.a[0] - A.a[0]) * by - (B.a[1] - A.a[1]) * bx) / den, s = ((B.a[0] - A.a[0]) * ay - (B.a[1] - A.a[1]) * ax) / den;
+      if (t < -1e-7 || t > 1 + 1e-7 || s < -1e-7 || s > 1 + 1e-7) continue;
+      A.ts.push(Math.max(0, Math.min(1, t))); B.ts.push(Math.max(0, Math.min(1, s)));
+    }
+  }
+  const K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4);
+  const nodes = new Map(), node = p => { const k = K(p); if (!nodes.has(k)) nodes.set(k, { k, p, out: [] }); return nodes.get(k); };
+  const edges = new Map();   // klucz pary węzłów → { a, b, src: [linie] }
+  for (const s of src) {
+    const ts = [...new Set(s.ts.map(t => Math.round(t * 1e7) / 1e7))].sort((x, y) => x - y);
+    for (let k = 0; k + 1 < ts.length; k++) {
+      const p = [s.a[0] + (s.b[0] - s.a[0]) * ts[k], s.a[1] + (s.b[1] - s.a[1]) * ts[k]], q = [s.a[0] + (s.b[0] - s.a[0]) * ts[k + 1], s.a[1] + (s.b[1] - s.a[1]) * ts[k + 1]];
+      const A = node(p), B = node(q); if (A === B) continue;
+      const key = A.k < B.k ? A.k + '|' + B.k : B.k + '|' + A.k;
+      if (!edges.has(key)) edges.set(key, { a: A, b: B, src: [] });
+      edges.get(key).src.push(s);
+    }
+  }
+  // wolne końce nie mogą ograniczać ściany
+  const deg = new Map(); for (const e of edges.values()) for (const x of [e.a, e.b]) deg.set(x, (deg.get(x) || 0) + 1);
+  let cut = true;
+  while (cut) { cut = false; for (const [key, e] of edges) if (deg.get(e.a) < 2 || deg.get(e.b) < 2) { edges.delete(key); deg.set(e.a, deg.get(e.a) - 1); deg.set(e.b, deg.get(e.b) - 1); cut = true; } }
+  // półkrawędzie; w każdym węźle posortowane po kącie
+  const half = [];
+  for (const e of edges.values()) {
+    const h1 = { from: e.a, to: e.b, e }, h2 = { from: e.b, to: e.a, e }; h1.twin = h2; h2.twin = h1;
+    for (const h of [h1, h2]) { h.ang = Math.atan2(h.to.p[1] - h.from.p[1], h.to.p[0] - h.from.p[0]); h.from.out.push(h); half.push(h); }
+  }
+  for (const nd of nodes.values()) nd.out.sort((x, y) => x.ang - y.ang);
+  // następna półkrawędź pola po lewej: w węźle docelowym pierwsza zgodnie z ruchem wskazówek od krawędzi powrotnej
+  const next = h => { const out = h.to.out, i = out.indexOf(h.twin); return out[(i - 1 + out.length) % out.length]; };
+  const faces = [], usedEdges = new Set(), seen = new Set();
+  for (const h0 of half) {
+    if (seen.has(h0)) continue;
+    const loop = []; let h = h0, guard = 0;
+    while (!seen.has(h) && guard++ < 100000) { seen.add(h); loop.push(h); h = next(h); }
+    if (h !== h0 || loop.length < 3) continue;
+    const set = new Set(loop); if (loop.some(q => set.has(q.twin))) continue;   // pole z „mostem” w środku
+    const pts = loop.map(q => q.from.p);
+    if (area2(pts) < 1e-8) continue;   // zewnętrzny obrys (zgodny z ruchem wskazówek) albo pole bez powierzchni
+    const sh = makeShape(model, { o, u, v }, pts, 0);
+    faces.push(sh); for (const q of loop) usedEdges.add(q.e);
+  }
+  if (faces.length) {
+    const pieces = new Map(), usedPieces = new Map();
+    for (const e of edges.values()) for (const s of e.src) pieces.set(s.l, (pieces.get(s.l) || 0) + 1);
+    for (const e of usedEdges) for (const s of e.src) usedPieces.set(s.l, (usedPieces.get(s.l) || 0) + 1);
+    // linia znika tylko wtedy, gdy każdy jej kawałek leży na brzegu ściany i nie został ucięty jako wolny koniec
+    const whole = new Map(); for (const s of src) whole.set(s.l, new Set(s.ts.map(t => Math.round(t * 1e7) / 1e7)).size - 1);
+    const gone = new Set(); for (const [l, k] of usedPieces) if (k === pieces.get(l) && k === whole.get(l)) gone.add(l);
+    model.lines = model.lines.filter(l => !gone.has(l));
+    for (const sh of faces) for (const k of ['g', 'tag']) if (lines[0][k] != null && lines.every(l => l[k] === lines[0][k])) sh[k] = lines[0][k];
+  }
+  return { faces, skipped: lines.length - src.length };
+}

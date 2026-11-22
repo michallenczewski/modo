@@ -2,8 +2,9 @@
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
-import { newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices } from './model.js';
-import { scaleTargets, targetBox, pickEntity, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
+import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines } from './model.js';
+import { TEXTURES, textureCanvas } from './textures.js';
+import { scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -72,6 +73,15 @@ const IC = {
   flipX: '<path d="M8 2.5v11" stroke-dasharray="1.6 1.8"/><path d="M2.5 8h11M4.5 6 2.5 8l2 2M11.5 6l2 2-2 2" stroke="#c0533f"/>',
   flipY: '<path d="M3 3l10 10" stroke-dasharray="1.6 1.8"/><path d="M3.5 12.5l9-9M3.5 9.7v2.8h2.8M9.7 3.5h2.8v2.8" stroke="#4f8a46"/>',
   flipZ: '<path d="M2.5 8h11" stroke-dasharray="1.6 1.8"/><path d="M8 2.5v11M6 4.5 8 2.5l2 2M6 11.5l2 2 2-2" stroke="#3f63a8"/>',
+  freehand: '<path d="M2.5 11.5c1.5-4.5 3-6 4.2-4.6 1.3 1.5-.6 4.4.8 5 1.6.7 2.6-3.6 6-7.4"/>',
+  arc3: '<path d="M2.5 12.5a6.5 6.5 0 0 1 11 0"/><circle cx="2.5" cy="12.5" r="1"/><circle cx="13.5" cy="12.5" r="1"/><circle cx="8" cy="9.6" r="1"/>',
+  look: '<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>',
+  walk: '<circle cx="8.6" cy="2.9" r="1.3"/><path d="M8.3 5.2 6.4 9.2l2.2 1.6.5 3.4M6.4 9.2 4.6 13.6M8.3 5.2l2.4 1.9 1.9.3M8 5.8 5.6 7.2"/>',
+  camPos: '<circle cx="8" cy="3" r="1.3"/><path d="M8 4.8v5M5.6 6.6h4.8M8 9.8l-1.6 3M8 9.8l1.6 3"/><path d="M3 12.2l2 2M5 12.2l-2 2" stroke-width="1.1"/>',
+  fog: '<path d="M2.5 5.5h8M5 8h8.5M2.5 10.5h6M10.5 10.5h3"/>',
+  wire: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2M2.4 11.2 8 8M13.6 11.2 8 8M8 1.8V8" stroke-width="1"/>',
+  hiddenGeo: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z" stroke-dasharray="1.6 1.7"/><circle cx="8" cy="8" r="1.6"/>',
+  makeFaces: '<path d="M2.8 12.8 4.2 4.2l8.6-1.4-1.4 8.6z"/><path d="M5 10.5 10.5 5M5.2 7.6 7.6 5.2M8 10.6l2.6-2.6" stroke-width="1"/>',
   edit: '<path d="M2.5 13.5 3.3 10.4 10.9 2.8a1.2 1.2 0 0 1 1.7 0l.6.6a1.2 1.2 0 0 1 0 1.7L5.6 12.7z"/><path d="M9.6 4.1l2.3 2.3"/>'
 };
 const ic = n => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -82,8 +92,9 @@ const app = {
   model: newModel(),
   undo: [], redo: [],
   selection: new Set(),
-  lockAxis: null, lockByShift: false,
-  paint: '#d9d4c7', paintAlpha: 1,
+  lockAxis: null, lockDir: null, lockByShift: false,
+  paint: '#d9d4c7', paintAlpha: 1, paintTex: null,
+  eyeH: 1.6,   // wysokość oczu kamery (spacer, ustaw kamerę)
   lastPush: null,
   file: { path: null, name: 'Bez nazwy', dirty: false },
   underlay: null,
@@ -139,7 +150,7 @@ function drawSub(c, v) {
   }
 }
 app.selectionChanged = () => { dropLocked(); if (app.selection.size) app.sub = []; showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.(); };
-app.setPaint = (c, a) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; renderSwatches(); };
+app.setPaint = (c, a, t) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; app.paintTex = t || null; renderSwatches(); };
 
 /* ---------- grupy i komponenty ---------- */
 app.editing = null;
@@ -208,17 +219,20 @@ const tools = {
   place: new PlaceTool(app), section: new SectionTool(app), dim: new DimTool(app), text: new TextTool(app), protractor: new ProtractorTool(app),
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
-  orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom'), zoomWin: new ZoomWinTool(app)
+  orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom'), zoomWin: new ZoomWinTool(app),
+  arc3: new Arc3Tool(app), freehand: new FreehandTool(app), look: new LookTool(app), walk: new WalkTool(app), camPos: new CamPosTool(app)
 };
+// po ustawieniu kamery od razu można się rozejrzeć (jak w SketchUpie)
+app.camPosDone = () => { setTool('look'); renderViewChip(); };
 let tool = tools.select, toolId = 'select', toolBefore = 'select';
 // po powiększeniu ramką wraca narzędzie, którym pracowałeś wcześniej
 app.zoomWinDone = () => setTool(toolBefore);
-const TOOL_NAME = { tape: 'Taśma i prowadnice', protractor: 'Kątomierz', dim: 'Wymiar', text: 'Opis', rect: 'Prostokąt', rrect: 'Prostokąt obrócony', circle: 'Okrąg', polygon: 'Wielokąt', arc: 'Łuk przez dwa punkty', carc: 'Łuk ze środka', pie: 'Wycinek koła' };
+const TOOL_NAME = { line: 'Linia', freehand: 'Linia odręczna', arc3: 'Łuk przez trzy punkty', orbit: 'Orbita', look: 'Rozejrzyj się', walk: 'Spacer', camPos: 'Ustaw kamerę', tape: 'Taśma i prowadnice', protractor: 'Kątomierz', dim: 'Wymiar', text: 'Opis', rect: 'Prostokąt', rrect: 'Prostokąt obrócony', circle: 'Okrąg', polygon: 'Wielokąt', arc: 'Łuk przez dwa punkty', carc: 'Łuk ze środka', pie: 'Wycinek koła' };
 // rodziny narzędzi: jeden przycisk na pasku, warianty w wysuwanym menu po najechaniu
-const FAMILIES = { rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'] };
+const FAMILIES = { line: ['line', 'freehand'], rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'arc3', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'], orbit: ['orbit', 'look', 'walk', 'camPos'] };
 const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
-const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['dim', 'Wymiar'], ['section', 'Przekrój'], ['eraser', 'Gumka'], ['paint', 'Kolor bryły'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
+const TOOLBAR = [['select', 'Zaznacz'], null, ['line', 'Linia'], ['rect', 'Prostokąt'], ['circle', 'Okrąg'], ['arc', 'Łuk'], null, ['push', 'Wypchnij / wciśnij'], ['move', 'Przesuń'], ['rotate', 'Obróć'], ['scale', 'Skaluj'], ['offset', 'Odsunięcie'], null, ['tape', 'Taśma'], ['dim', 'Wymiar'], ['section', 'Przekrój'], ['eraser', 'Gumka'], ['paint', 'Kolor i materiał'], 'grow', ['orbit', 'Orbita'], ['pan', 'Przesuń widok'], ['extents', 'Pokaż wszystko']];
 const toolsEl = $('#tools');
 for (const t of TOOLBAR) {
   if (t === null) { toolsEl.insertAdjacentHTML('beforeend', '<div class="hsep"></div>'); continue; }
@@ -254,17 +268,19 @@ function showFlyout(b, fam) {
   flyEl.addEventListener('mouseenter', () => clearTimeout(flyTimer));
   flyEl.querySelectorAll('button').forEach(x => x.addEventListener('click', () => { hideFlyout(); setTool(x.dataset.t); }));
   document.body.append(flyEl);
+  // menu przy dolnej krawędzi okna podjeżdża w górę, żeby zmieściły się wszystkie pozycje
+  flyEl.style.top = Math.max(8, Math.min(r.top - 5, window.innerHeight - flyEl.offsetHeight - 8)) + 'px';
 }
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
   if (id === 'zoomWin' && toolId !== 'zoomWin') toolBefore = toolId;
   tool.deactivate(); tool = tools[id]; toolId = id; tool.activate();
-  app.lockAxis = null; vcbBuf = '';
+  app.lockAxis = null; app.lockDir = null; vcbBuf = '';
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin'].includes(id) ? 'c-draw' : ['orbit', 'pan'].includes(id) ? 'c-grab' : '';
+  $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   viewer.overlayDraw = (c, v) => { drawSub(c, v); tool.draw(c, v); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
@@ -344,6 +360,8 @@ view.addEventListener('pointerup', e => {
   if (e.button === 0) { tool.up(e, x, y); app.refresh(); }
 });
 view.addEventListener('dblclick', e => { const [x, y] = xy(e); tool.dbl(e, x, y); app.refresh(); });
+// potrójny klik: wszystko połączone (narzędzie Zaznacz)
+view.addEventListener('click', e => { if (e.detail === 3 && e.button === 0 && tool.triple) { const [x, y] = xy(e); tool.triple(e, x, y); app.refresh(); } });
 view.addEventListener('contextmenu', e => e.preventDefault());
 view.addEventListener('auxclick', e => e.preventDefault());
 view.addEventListener('pointerleave', () => { viewer.redraw(); });
@@ -388,16 +406,21 @@ window.addEventListener('keydown', e => {
     if (!busy && app.sub.length) { app.clearSub(); app.refresh(); renderPanel(); return; }
     if (!busy && app.editSolid != null) { app.exitSolid(); return; }
     if (!busy && app.editing) { app.exitGroup(); return; }
-    tool.cancel(); app.lockAxis = null; app.refresh(); return;
+    tool.cancel(); app.lockAxis = null; app.lockDir = null; app.refresh(); return;
   }
   // blokada osi strzałkami (jak w SketchUpie): → czerwona, ← zielona, ↑ niebieska, ↓ zwolnienie
   if (/^Arrow/.test(e.key) && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     const ax = { ArrowRight: 'x', ArrowLeft: 'y', ArrowUp: 'z', ArrowDown: null }[e.key];
-    app.lockAxis = app.lockAxis === ax ? null : ax; app.lockByShift = false;
+    app.lockAxis = app.lockAxis === ax ? null : ax; app.lockDir = null; app.lockByShift = false;
     app.refresh(); return;
   }
-  if (e.key === 'Shift' && !e.repeat && tool.cur && tool.cur.axis && !app.lockAxis) { app.lockAxis = tool.cur.axis; app.lockByShift = true; app.refresh(); }
+  // przytrzymany Shift blokuje bieżący kierunek: oś, jeśli kursor jest na osi, albo dowolny kierunek od punktu początkowego
+  if (e.key === 'Shift' && !e.repeat && tool.cur && !app.lockAxis && !app.lockDir) {
+    const from = tool.lockFrom?.();
+    if (tool.cur.axis) { app.lockAxis = tool.cur.axis; app.lockByShift = true; app.refresh(); }
+    else if (from && V.dist(from, tool.cur.p) > 1e-6) { app.lockDir = V.norm(V.sub(tool.cur.p, from)); app.lockByShift = true; app.refresh(); }
+  }
   if (tool.key(e)) { e.preventDefault(); return; }
   // pole wymiarów: cyfry i separatory zaczynają wpisywanie
   const canValue = tool.vcb && tool.vcb();
@@ -417,14 +440,19 @@ window.addEventListener('keydown', e => {
   if (act) { e.preventDefault(); run(act); }
 });
 window.addEventListener('keyup', e => {
-  if (e.key === 'Shift' && app.lockByShift) { app.lockAxis = null; app.lockByShift = false; app.refresh(); }
+  if (e.key === 'Shift' && app.lockByShift) { app.lockAxis = null; app.lockDir = null; app.lockByShift = false; app.refresh(); }
 });
 
 function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;
   if (later) return toast(ACTIONS.find(a => a.id === act).name + ' będzie w kolejnej wersji.');
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
+    case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? 'Mgła włączona' : 'Mgła wyłączona'); break;
+    case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); app.markDirtySoft(); toast(viewer.wire ? 'Siatka: same krawędzie' : 'Ściany widoczne'); break;
+    case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? 'Ukryta geometria widoczna (blado)' : 'Ukryta geometria schowana'); break;
+    case 'makeFaces': makeFaces(); break;
+    case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
     case 'selectInvert': selectInvert(); break;
     case 'copy': copySel(); break;
@@ -501,9 +529,11 @@ function run(act) {
   }
 }
 /* ---------- chowanie brył ---------- */
-const hiddenCount = () => app.model.shapes.filter(s => s.hidden).length + app.model.lines.filter(l => l.hidden).length;
-function setHidden(fn) {
+const hiddenCount = () => app.model.shapes.filter(s => s.hidden).length + app.model.lines.filter(l => l.hidden).length + app.model.shapes.reduce((n, s) => n + (s.hid ? s.hid.length : 0), 0);
+function setHidden(fn, edges) {
   app.checkpoint();
+  // „pokaż wszystko” przywraca też krawędzie ukryte gumką
+  if (edges) for (const s of app.model.shapes) delete s.hid;
   for (const s of app.model.shapes) { const h = fn(s.id, s); if (h !== undefined) s.hidden = h || undefined; }
   for (const l of app.model.lines) { const h = fn('l' + l.id, l); if (h !== undefined) l.hidden = h || undefined; }
   for (const d of app.model.dims) { const h = fn('d' + d.id, d); if (h !== undefined) d.hidden = h || undefined; }
@@ -526,7 +556,7 @@ function hideSimilar() {
   app.selection.clear(); viewer.rebuild(); toast('Ukryto podobne bryły: ' + n);
 }
 function hideSel() { if (!app.selection.size) return; setHidden(id => app.selection.has(id) ? true : undefined); app.selection.clear(); viewer.rebuild(); }
-function unhideAll() { if (!hiddenCount()) return; setHidden(() => false); app.isolated = false; }
+function unhideAll() { if (!hiddenCount()) return; setHidden(() => false, true); app.isolated = false; }
 function toggleCut() {
   const sel = app.model.shapes.filter(s => app.selection.has(s.id) && (s.kind === 'mesh' || s.h > 0));
   if (!sel.length) return toast('Zaznacz bryłę, która ma wycinać (albo przestać wycinać).');
@@ -575,7 +605,12 @@ function solidOp(op) {
 }
 
 function deleteSelection() {
-  if (!app.selection.size && app.sub.length) return toast('Ściany ani krawędzi nie da się usunąć osobno. Dwuklik zaznacza całą bryłę.');
+  if (!app.selection.size && app.sub.length) {
+    // pojedyncza ściana albo krawędź (jak w SketchUpie): bryła zostaje otwartą powłoką
+    const subs = app.sub; app.checkpoint();
+    for (const q of subs) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b); }
+    app.changed(); return;
+  }
   if (!app.selection.size) return;
   app.checkpoint();
   removeIds(app.model, app.selection);
@@ -734,7 +769,7 @@ function openPop(sel, anchor, side) {
   closePops(); if (was) return;
   p.hidden = false;
   const r = anchor.getBoundingClientRect(), w = p.offsetWidth;
-  if (side === 'right') { p.style.left = (r.right + 8) + 'px'; p.style.top = Math.max(8, r.top - 8) + 'px'; }
+  if (side === 'right') { p.style.left = (r.right + 8) + 'px'; p.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - p.offsetHeight - 8)) + 'px'; }
   else { p.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px'; p.style.top = (r.bottom + 6) + 'px'; }
   anchor.classList.add('open');
   if (sel === '#sunPop') renderSun();
@@ -1011,11 +1046,12 @@ function sectionToggle() {
 /* ---------- widok, kamera, sceny ---------- */
 const VIEWS = [['viewIso', 'Izometria'], ['viewTop', 'Góra'], ['viewFront', 'Przód'], ['viewRight', 'Prawy'], ['viewBack', 'Tył'], ['viewLeft', 'Lewy'], ['viewBottom', 'Dół']];
 // polecenia widoku pokazane samymi ikonami (nazwa i skrót w podpowiedzi)
-const VIEW_ICONS = [['viewPrev', 'Poprzedni widok'], ['viewNext', 'Następny widok'], ['zoomWin', 'Powiększ okno (ramką)'], ['extents', 'Pokaż cały model'], ['xray', 'Prześwit']];
+const VIEW_ICONS = [['viewPrev', 'Poprzedni widok'], ['viewNext', 'Następny widok'], ['zoomWin', 'Powiększ okno (ramką)'], ['extents', 'Pokaż cały model'], ['look', 'Rozejrzyj się'], ['walk', 'Spacer'], ['camPos', 'Ustaw kamerę'], ['xray', 'Prześwit'], ['wire', 'Siatka — same krawędzie'], ['fog', 'Mgła'], ['hiddenGeo', 'Ukryta geometria']];
+const VIEW_ON = { xray: () => viewer.xray, wire: () => viewer.wire, fog: () => viewer.fog, hiddenGeo: () => viewer.showHidden };
 const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
 const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
 // okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
-const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej']]];
+const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], ['makeFaces', 'Ściany z zaznaczonych linii']]];
 function renderEditPop() {
   const p = $('#editPop');
   p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
@@ -1030,8 +1066,8 @@ function renderViewPop() {
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
   $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"><span>${n}</span>${k(id)}</button>`).join('');
   $('#viewGrid').querySelectorAll('button').forEach(b => b.addEventListener('click', () => run(b.dataset.a)));
-  $('#viewIcons').innerHTML = VIEW_ICONS.map(i => iconBtn(i, i[0] === 'xray' && viewer.xray)).join('');
-  $('#viewIcons').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (b.dataset.a === 'zoomWin') closePops(); run(b.dataset.a); }));
+  $('#viewIcons').innerHTML = VIEW_ICONS.map(i => iconBtn(i, VIEW_ON[i[0]]?.())).join('');
+  $('#viewIcons').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (['zoomWin', 'look', 'walk', 'camPos'].includes(b.dataset.a)) closePops(); run(b.dataset.a); }));
   const proj = viewer.ortho ? 'ortho' : viewer.twoPoint ? 'two' : 'persp';
   document.querySelectorAll('#projSeg button').forEach(b => b.classList.toggle('on', b.dataset.proj === proj));
   const f = $('#fovRange'); f.value = Math.round(viewer.cam.fov); f.disabled = viewer.ortho; setRangeFill(f);
@@ -1061,7 +1097,7 @@ $('#fovRange').addEventListener('input', e => { viewer.setFov(+e.target.value); 
 $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
-const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
+const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
 function addScene() {
   app.scenes.push({ name: 'Scena ' + (app.scenes.length + 1), ...captureScene() });
   app.scene = app.scenes.length - 1; app.markDirty();
@@ -1073,6 +1109,7 @@ function showScene(i) {
   app.scene = i;
   viewer.setCamera(sc.camera);
   if (sc.style && STYLES[sc.style]) setStyle(sc.style);
+  if ('fog' in sc) viewer.setLook({ fog: sc.fog, wire: sc.wire });
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
@@ -1225,6 +1262,7 @@ $('#underPick').addEventListener('click', () => pickUnderlay());
 $('#underClose').addEventListener('click', () => closePops());
 $('#underReload').addEventListener('click', () => (app.underlay?.path || api.web) ? pickUnderlay(app.underlay?.path) : pickUnderlay());
 $('#underRemove').addEventListener('click', () => { app.underlay = null; applyUnderlay(); renderUnder(); app.markDirty(); });
+$('#underLines').addEventListener('click', () => underlayToLines());
 $('#underH').addEventListener('change', e => {
   const v = parseFloat(e.target.value.replace(',', '.')); if (!isFinite(v) || !app.underlay) return;
   app.underlay.height = v; applyUnderlay(); renderUnder(); app.markDirty();
@@ -1239,15 +1277,64 @@ $('#underUnits').addEventListener('change', e => {
 $('#underOp').addEventListener('input', e => { if (!app.underlay) return; app.underlay.opacity = +e.target.value; setRangeFill(e.target); applyUnderlay(); });
 $('#underSnap').addEventListener('change', e => { if (!app.underlay) return; app.underlay.snap = e.target.checked; snapper.setUnderlay(app.underlay); });
 
+// Podkład zamieniony na prawdziwe linie: grupa z liniami na wysokości podkładu, warstwy rysunku stają się warstwami Modo.
+// Po wejściu do grupy można na nich rysować, a „Ściany z linii” wypełnia zamknięte pola.
+const UNDER_MAX = 20000;
+function underlayToLines() {
+  const u = app.underlay; if (!u) return;
+  const layers = u.layers.filter(L => L.visible && L.segs.length), count = layers.reduce((n, L) => n + L.segs.length / 4, 0);
+  if (!count) return toast('Żadna warstwa podkładu nie jest widoczna.');
+  if (count > UNDER_MAX) return toast(`Widoczne warstwy mają ${count} odcinków — to za dużo na linie do rysowania (do ${UNDER_MAX}). Ukryj zbędne warstwy podkładu i spróbuj ponownie.`);
+  const m = app.model; app.checkpoint();
+  const gid = m.next++; m.groups.push({ id: gid, kind: 'group', name: u.name.replace(/\.(dxf|dwg)$/i, '') });
+  const seen = new Set(); let made = 0;
+  for (const L of layers) {
+    let tag = m.tags.find(t => t.name === L.name); if (!tag) { tag = { id: m.next++, name: L.name }; m.tags.push(tag); }
+    for (let i = 0; i < L.segs.length; i += 4) {
+      const a = [L.segs[i], L.segs[i + 1], u.height], b = [L.segs[i + 2], L.segs[i + 3], u.height];
+      if (V.dist(a, b) < 1e-5) continue;
+      const k = a.concat(b).map(x => Math.round(x * 1e4)).join(','), k2 = b.concat(a).map(x => Math.round(x * 1e4)).join(',');
+      if (seen.has(k) || seen.has(k2)) continue; seen.add(k);
+      m.lines.push({ id: m.next++, a, b, g: gid, tag: tag.id }); made++;
+    }
+  }
+  app.underlay = null; applyUnderlay(); closePops();
+  app.selection.clear(); for (const id of membersOf(m, gid)) app.selection.add(id);
+  app.changed(); app.selectionChanged();
+  toast(`Podkład zamieniony na ${made} linii w jednej grupie. Dwuklik wchodzi do grupy; „Ściany z linii” wypełnia zamknięte pola.`, ['Ściany z linii', () => makeFaces()], 9000);
+}
+// zamknięte pola między zaznaczonymi liniami (także w zaznaczonej grupie) stają się płaskimi ścianami
+function makeFaces() {
+  const m = app.model, lines = m.lines.filter(l => app.selection.has('l' + l.id));
+  if (lines.length < 3) return toast('Zaznacz linie, które tworzą zamknięte pola (albo grupę z liniami z podkładu).');
+  const before = cloneModel(m), r = facesFromLines(m, lines);
+  if (!r) return toast('Za dużo linii naraz. Zaznacz mniejszy fragment rysunku.');
+  if (!r.faces.length) { app.model = before; viewer.setModel(app.model); return toast('Zaznaczone linie nie zamykają żadnego pola w jednej płaszczyźnie.'); }
+  app.undo.push(before); app.redo = []; app.opSeq++;
+  app.selection.clear(); for (const f of r.faces) app.expand(f.id).forEach(i => app.selection.add(i));
+  app.changed(); app.selectionChanged();
+  toast(`Powstało ścian: ${r.faces.length}. Każdą możesz wypchnąć.` + (r.skipped ? ` Pominięte linie poza płaszczyzną: ${r.skipped}.` : ''));
+}
+
 /* ---------- kolor bryły ---------- */
 const PALETTE = [[null, 'biały'], ['#e4dfd3', 'jasny beton'], ['#c9c3b5', 'beton'], ['#8d8980', 'grafit'], ['#c99a7c', 'cegła'], ['#bfa17c', 'drewno'], ['#a9b49a', 'zieleń'], ['#a7b6c2', 'szkło', 0.3]];
+const texThumb = new Map();
 function renderSwatches() {
   const box = $('#swatches'); box.innerHTML = '';
   for (const [c, n, a = 1] of PALETTE) {
-    const b = document.createElement('button'); b.className = 'sw' + ((app.paint || null) === c && Math.abs(app.paintAlpha - a) < 0.01 ? ' on' : '') + (a < 1 ? ' glass' : '');
+    const b = document.createElement('button'); b.className = 'sw' + (!app.paintTex && (app.paint || null) === c && Math.abs(app.paintAlpha - a) < 0.01 ? ' on' : '') + (a < 1 ? ' glass' : '');
     b.style.setProperty('--c', c || DEFAULT_COLOR); b.style.setProperty('--a', a); b.textContent = n;
     b.addEventListener('click', () => { app.setPaint(c, a); setTool('paint'); });
     box.append(b);
+  }
+  // materiały z teksturą: wzór w prawdziwej skali (cegła, deski, płytki…)
+  const tb = $('#texSwatches'); tb.innerHTML = '';
+  for (const [id, T] of Object.entries(TEXTURES)) {
+    if (!texThumb.has(id)) texThumb.set(id, textureCanvas(id).toDataURL());
+    const b = document.createElement('button'); b.className = 'sw tex' + (app.paintTex === id ? ' on' : '');
+    b.style.backgroundImage = `url(${texThumb.get(id)})`; b.innerHTML = `<span>${T.name}</span>`;
+    b.addEventListener('click', () => { app.setPaint(T.avg, 1, id); setTool('paint'); });
+    tb.append(b);
   }
   const dot = toolsEl.querySelector('[data-tool=paint] .dot'); if (dot) dot.style.background = app.paint || DEFAULT_COLOR;
   $('#paintCustom').value = app.paint || '#f6f4ee';
@@ -1354,6 +1441,7 @@ function openContext(x, y, cx, cy) {
     if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? 'Bryła zwykła (nie wycina)' : 'Bryła wycinająca']);
     if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', 'Suma brył'], ['solidIntersect', 'Część wspólna'], ['solidSubtract', 'Odejmij od pierwszej'], ['solidTrim', 'Przytnij pierwszą']);
     items.push(null, ['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej']);
+    if (sel.filter(i => String(i)[0] === 'l').length >= 3) items.push(null, ['makeFaces', 'Ściany z linii']);
     items.push(null, ['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej']);
     items.push(null, ['hideSel', 'Ukryj'], ['hideRest', 'Ukryj resztę'], ['lock', 'Zablokuj'], ['zoomSel', 'Pokaż zaznaczenie'], null, ['delete', 'Usuń']);
   } else {
@@ -1403,7 +1491,7 @@ $('#fileBtn').addEventListener('click', async () => {
 function serialize() {
   return JSON.stringify({
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
-    sun: viewer.sunCfg, axes: viewer.showAxes, units: getUnit(), underlay: app.underlay, scenes: app.scenes
+    sun: viewer.sunCfg, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, eye: app.eyeH, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
 }
 function load(text, name, path) {
@@ -1417,6 +1505,7 @@ function load(text, name, path) {
   if (d.units) { setUnit(d.units); renderUnit(); }
   app.opSeq++;
   viewer.showAxes = d.axes !== false;
+  viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye;
   app.underlay = d.underlay || null; applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();

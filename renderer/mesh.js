@@ -59,7 +59,8 @@ export function inPoly(p, poly, n = newell(poly)) {
 // bryła z wyciągniętego wielokąta → bryła dowolna (w miejscu; zachowuje id, kolor, grupę, tag…)
 export function toMesh(s, facesOf) {
   if (isMesh(s)) return s;
-  const polys = facesOf(s).map(f => f.verts.map(v => v.slice()));
+  const fs = facesOf(s), polys = fs.map(f => f.verts.map(v => v.slice()));
+  if (s.fc) { const fc = {}; fs.forEach((f, i) => { if (s.fc[f.key]) fc['p:' + i] = s.fc[f.key]; }); if (Object.keys(fc).length) s.fc = fc; else delete s.fc; }
   for (const k of ['o', 'u', 'v', 'n', 'pts', 'h']) delete s[k];
   s.kind = 'mesh'; s.polys = polys; s.marks = [];
   return s;
@@ -76,7 +77,7 @@ export function meshTriangles(s) {
 /* ---------- krawędzie i ściany ---------- */
 const edgeCache = new WeakMap();
 export function meshEdges(s) {
-  const c = edgeCache.get(s.polys); if (c && c.marks === s.marks) return c.edges;
+  const c = edgeCache.get(s.polys); if (c && c.marks === s.marks && c.softs === s.softs && c.hid === s.hid) return c.edges;
   const tris = [];
   for (const p of s.polys) for (const t of triangulatePoly(p)) { const n = newell(t); tris.push({ vs: t, n, w: V.dot(n, t[0]), shared: { soft: !!s.soft } }); }
   const edges = resultEdges(tris);
@@ -87,13 +88,15 @@ export function meshEdges(s) {
     const n = f ? newell(f) : [0, 0, 1];
     edges.push({ a, b, n1: n, n2: n });
   }
-  if (s.softs && s.softs.length) {
-    const K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);
-    const key = (p, q) => { const x = K(p), y = K(q); return x < y ? x + '|' + y : y + '|' + x; };
-    const set = new Set(s.softs.map(([p, q]) => key(p, q)));
-    for (const e of edges) if (e.n2 && set.has(key(e.a, e.b))) e.soft = true;
-  }
-  edgeCache.set(s.polys, { marks: s.marks, edges });
+  flagEdges(s, edges);
+  edgeCache.set(s.polys, { marks: s.marks, softs: s.softs, hid: s.hid, edges });
+  return edges;
+}
+// krawędzie wygładzone (s.softs) i ukryte (s.hid) — listy odcinków; pasująca krawędź dostaje flagę
+export const segKey = (p, q) => { const K = v => Math.round(v[0] * 1e4) + ',' + Math.round(v[1] * 1e4) + ',' + Math.round(v[2] * 1e4), x = K(p), y = K(q); return x < y ? x + '|' + y : y + '|' + x; };
+export function flagEdges(s, edges) {
+  if (s.softs && s.softs.length) { const set = new Set(s.softs.map(([p, q]) => segKey(p, q))); for (const e of edges) if (set.has(segKey(e.a, e.b))) e.soft = true; }
+  if (s.hid && s.hid.length) { const set = new Set(s.hid.map(([p, q]) => segKey(p, q))); for (const e of edges) if (set.has(segKey(e.a, e.b))) e.hid = true; }
   return edges;
 }
 export function meshVertices(s) {
@@ -205,6 +208,47 @@ function pointKeeper(s) {
   };
 }
 
+/* ---------- kolor na ścianie ---------- */
+// s.fc: klucz ściany ('p:i') → { c, t } (kolor, tekstura). Po operacji, która układa wielokąty na nowo, nowy wielokąt
+// dziedziczy po starym, w którego płaszczyźnie leży i w którym leży jego punkt wewnętrzny.
+const innerPoint = p => { const t = triangulatePoly(p)[0]; return V.mul(V.add(V.add(t[0], t[1]), t[2]), 1 / 3); };
+export function keepPaint(s, fn) {
+  const old = s.fc ? Object.entries(s.fc).map(([k, v]) => { const p = s.polys[+k.split(':')[1]]; return p ? { p, pl: planeOf(p), v } : null; }).filter(Boolean) : [];
+  const r = fn();
+  if (s.fc) delete s.fc;
+  if (old.length) {
+    const fc = {};
+    s.polys.forEach((p, i) => { const pl = planeOf(p), c = innerPoint(p), o = old.find(q => coplanar(q.pl, pl) && inPoly(c, q.p, q.pl.n)); if (o) fc['p:' + i] = o.v; });
+    if (Object.keys(fc).length) s.fc = fc;
+  }
+  return r;
+}
+// usuwa wielokąty spełniające warunek: bryła staje się otwartą powłoką (jak po usunięciu ściany w SketchUpie)
+export function removePolys(s, test) {
+  const keep = [], fc = {};
+  s.polys.forEach((p, i) => { if (test(p, i)) return; if (s.fc && s.fc['p:' + i]) fc['p:' + keep.length] = s.fc['p:' + i]; keep.push(p); });
+  if (keep.length === s.polys.length) return false;
+  s.polys = keep; if (Object.keys(fc).length) s.fc = fc; else delete s.fc;
+  s.open = true;
+  s.marks = (s.marks || []).filter(([a, b]) => { const m = V.lerp(a, b, 0.5); return s.polys.some(p => Math.abs(V.dot(newell(p), V.sub(m, p[0]))) < 1e-5 && inPolyOrEdge(m, p)); });
+  return true;
+}
+// numery wielokątów, których bok leży na odcinku a–b (razem z całą ścianą, do której należą)
+export function polysOnEdge(s, a, b) {
+  const L = V.dist(a, b); if (L < EPS) return [];
+  const e = V.mul(V.sub(b, a), 1 / L), out = new Set();
+  s.polys.forEach((P, i) => {
+    for (let k = 0; k < P.length; k++) {
+      const c = P[k], d = P[(k + 1) % P.length];
+      const off = p => V.len(V.sub(V.sub(p, a), V.mul(e, V.dot(V.sub(p, a), e))));
+      if (off(c) > 1e-5 || off(d) > 1e-5) continue;
+      const t1 = V.dot(V.sub(c, a), e), t2 = V.dot(V.sub(d, a), e);
+      if (Math.min(L, Math.max(t1, t2)) - Math.max(0, Math.min(t1, t2)) > 1e-5) { for (const j of regionOf(s, i)) out.add(j); return; }
+    }
+  });
+  return [...out];
+}
+
 /* ---------- operacje ---------- */
 // graniastosłup z pętli (w płaszczyźnie o normalnej n) wyciągniętej o d, jako zamknięta bryła do CSG
 function prism(loop, n, d) {
@@ -228,17 +272,25 @@ export function pushPullMesh(s, pi, d) {
   let tool = null;
   if (loops.length === 1) tool = prism(loops[0], n, d);
   else for (const i of idx) { const pr = prism(s.polys[i], n, d); tool = tool ? union(tool, pr) : pr; }
-  const solid = csgPolys(s);
-  const res = d > 0 ? union(solid, tool) : subtract(solid, tool);
-  s.polys = res.map(p => p.vs.map(v => v.slice()));
-  return simplify(s);
+  // kolor wypychanej ściany jedzie razem z nią
+  const paint = s.fc && s.fc['p:' + pi], was = idx.map(i => s.polys[i]), w1 = V.dot(n, s.polys[pi][0]) + d;
+  keepPaint(s, () => {
+    const solid = csgPolys(s);
+    const res = d > 0 ? union(solid, tool) : subtract(solid, tool);
+    s.polys = res.map(p => p.vs.map(v => v.slice()));
+    simplify(s);
+  });
+  if (paint) s.polys.forEach((p, i) => {
+    const pl = planeOf(p); if (V.dot(pl.n, n) < 1 - 1e-6 || Math.abs(pl.w - w1) > 1e-5) return;
+    const c = V.sub(innerPoint(p), V.mul(n, d));
+    if (was.some(q => inPoly(c, q, n))) (s.fc ||= {})['p:' + i] = paint;
+  });
+  return s;
 }
 export function booleanMesh(a, b, op) {
   const A = csgPolys(a), B = csgPolys(b);
   const res = op === 'union' ? union(A, B) : op === 'intersect' ? intersect(A, B) : subtract(A, B);
-  a.polys = res.map(p => p.vs.map(v => v.slice()));
-  a.marks = [];
-  return simplify(a);
+  return keepPaint(a, () => { a.polys = res.map(p => p.vs.map(v => v.slice())); a.marks = []; return simplify(a); });
 }
 
 // linia narysowana po ścianie: jeśli oba końce leżą na brzegu tej samej ściany, a środek w niej — dzieli ją
@@ -270,11 +322,13 @@ export function splitMesh(s, a, b) {
       if (inside && F.length >= 3 && B.length >= 3) { out.push(F, B); } else out.push(t);
     }
   }
-  s.polys = out;
-  s.marks = [...(s.marks || []), [a.slice(), b.slice()]];
-  // sąsiednie ściany dostają te same punkty na wspólnych krawędziach (bryła musi pozostać szczelna)
-  insertPoint(s, a); insertPoint(s, b);
-  simplify(s);
+  keepPaint(s, () => {
+    s.polys = out;
+    s.marks = [...(s.marks || []), [a.slice(), b.slice()]];
+    // sąsiednie ściany dostają te same punkty na wspólnych krawędziach (bryła musi pozostać szczelna)
+    insertPoint(s, a); insertPoint(s, b);
+    simplify(s);
+  });
   return true;
 }
 // wstawia punkt p w każdą krawędź wielokąta, na której leży (wewnątrz odcinka)
@@ -291,18 +345,22 @@ export function insertPoint(s, p) {
 }
 
 // przesunięcie punktów bryły (wierzchołek, krawędź, ściana); wielokąty, które przestałyby być płaskie, dzielimy na trójkąty
-export function moveMeshPoints(s, pts, d) {
+export function moveMeshPoints(s, pts, d) { return mapMeshPoints(s, pts, v => V.add(v, d)); }
+// to samo dla dowolnego przekształcenia punktów (np. obrót zaznaczonej ściany)
+export function mapMeshPoints(s, pts, f) {
   const K = v => v.map(x => Math.round(x * 1e5)).join(','), set = new Set(pts.map(K));
-  const mv = v => set.has(K(v)) ? V.add(v, d) : v.slice();
-  const out = [];
-  for (const p of s.polys) {
-    if (!p.some(v => set.has(K(v)))) { out.push(p); continue; }
+  const mv = v => set.has(K(v)) ? f(v) : v.slice();
+  const out = [], fc = {};
+  s.polys.forEach((p, i) => {
+    const paint = s.fc && s.fc['p:' + i], put = q => { if (paint) fc['p:' + out.length] = paint; out.push(q); };
+    if (!p.some(v => set.has(K(v)))) { put(p); return; }
     const q = p.map(mv), n = newell(q);
     const flat = q.every(v => Math.abs(V.dot(n, V.sub(v, q[0]))) < 1e-6);
-    if (flat) out.push(q); else for (const t of triangulatePoly(p)) out.push(t.map(mv));
-  }
-  s.polys = out;
+    if (flat) put(q); else for (const t of triangulatePoly(p)) put(t.map(mv));
+  });
+  s.polys = out; if (Object.keys(fc).length) s.fc = fc; else delete s.fc;
   s.marks = (s.marks || []).map(([a, b]) => [mv(a), mv(b)]);
+  for (const k of ['softs', 'hid']) if (s[k]) s[k] = s[k].map(([a, b]) => [mv(a), mv(b)]);
   return s;
 }
 
@@ -312,6 +370,7 @@ export function transformMesh(s, f) {
   s.polys = s.polys.map(p => p.map(f));
   s.marks = (s.marks || []).map(([a, b]) => [f(a), f(b)]);
   if (s.softs) s.softs = s.softs.map(([a, b]) => [f(a), f(b)]);
+  if (s.hid) s.hid = s.hid.map(([a, b]) => [f(a), f(b)]);
   if (Math.sign(meshVolume(s)) !== Math.sign(v0)) s.polys = s.polys.map(p => p.slice().reverse());   // odbicie lustrzane
   return s;
 }

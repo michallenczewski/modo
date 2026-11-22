@@ -2,10 +2,10 @@
 // Każde narzędzie dostaje zdarzenia z okna (lewy przycisk; środkowy i kółko obsługuje nawigacja w app.js),
 // rysuje swoje pomoce na nakładce 2D i może przyjmować wymiary wpisane z klawiatury.
 
-import { V, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
+import { V, at, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, transformShape, normalizeShape, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
 import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
-import { moveMeshPoints, booleanMesh, isMesh, transformMesh } from './mesh.js';
+import { mapMeshPoints, booleanMesh, isMesh, transformMesh, regionOf, removePolys, polysOnEdge, newell, inPoly, segKey } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
@@ -73,23 +73,20 @@ class Tool {
 
 /* ---------- zaznacz ---------- */
 export class SelectTool extends Tool {
-  hint() { return 'Klik zaznacza ścianę albo krawędź bryły, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza całą bryłę, a w grupie — wchodzi do środka. Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. Prawy klik — menu.'; }
-  // bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się osobno
-  loose(id) {
-    const s = this.model.shapes.find(q => q.id === id);
-    return !!s && !s.bill && s.op !== 'cut' && !s.locked && !this.app.groupAt(id) && (!this.app.editing || this.app.inEditing(id));
-  }
-  // ściana albo krawędź pod kursorem: { id bryły, kind, pts — punkty do przesunięcia, polys | a, b }
-  subAt(id, x, y) {
-    const e = edgeAt(this.app, x, y);
-    if (e && e.shape && e.edge && (id == null || id === e.id) && this.loose(e.id)) return { id: e.id, kind: 'edge', a: e.edge.a.slice(), b: e.edge.b.slice(), pts: [e.edge.a.slice(), e.edge.b.slice()] };
-    if (typeof id !== 'number' || !this.loose(id)) return null;
-    const s = this.model.shapes.find(q => q.id === id), hit = this.v.pick(x, y);
-    if (!hit || hit.shapeId !== id) return null;
-    const f = faceByKey(s, hit.key); if (!f) return null;
-    const polys = (f.region || [f.verts]).map(p => p.map(q => q.slice())), pts = [];
-    for (const p of polys) for (const q of p) if (!pts.some(r => V.dist(r, q) < 1e-5)) pts.push(q.slice());
-    return { id, kind: 'face', key: hit.key, polys, pts };
+  hint() { return 'Klik zaznacza ścianę albo krawędź bryły, linię albo całą grupę; <kbd>⇧</kbd> dodaje. Dwuklik zaznacza całą bryłę, a w grupie — wchodzi do środka. Potrójny klik zaznacza wszystko, co się z nią styka (linie połączone końcami). Ramka w prawo zaznacza to, co w całości w środku, w lewo — wszystko, czego dotknie. <kbd>Delete</kbd> usuwa też pojedynczą ścianę albo krawędź. Prawy klik — menu.'; }
+  subAt(id, x, y) { return subAt(this.app, id, x, y); }
+  // potrójny klik: wszystko połączone — elementy luzem, które mają wspólny punkt (linie połączone końcami, stykające się bryły)
+  triple(e, x, y) {
+    const id = this.pickAny(x, y); if (id == null || this.app.groupAt(id)) return;
+    if (typeof id !== 'number' && String(id)[0] !== 'l') return;
+    const m = this.model, K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);
+    const ok = (el, i) => !isHidden(m, el) && !el.locked && !this.app.groupAt(i) && (!this.app.editing || this.app.inEditing(i));
+    const items = [...m.shapes.filter(q => q.op !== 'cut' && !q.bill && ok(q, q.id)).map(q => ({ id: q.id, keys: vertices(q).map(K) })), ...m.lines.filter(l => ok(l, 'l' + l.id)).map(l => ({ id: 'l' + l.id, keys: [K(l.a), K(l.b)] }))];
+    const at = new Map(); for (const it of items) for (const k of it.keys) { let a = at.get(k); if (!a) at.set(k, a = []); a.push(it); }
+    const start = items.find(it => it.id === id); if (!start) return;
+    const seen = new Set([start]), queue = [start];
+    while (queue.length) { const it = queue.pop(); for (const k of it.keys) for (const o of at.get(k)) if (!seen.has(o)) { seen.add(o); queue.push(o); } }
+    this.app.sub = []; this.app.selection.clear(); for (const it of seen) this.app.selection.add(it.id); this.app.selectionChanged();
   }
   pickAny(x, y) { return pickEntity(this.app, x, y); }
   move(e, x, y) {
@@ -165,13 +162,14 @@ export class LineTool extends Tool {
   reset() { this.anchor = null; this.chain = []; this.ids = []; this.cur = null; }
   hint() {
     return this.anchor
-      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska. <kbd>Esc</kbd> kończy.'
+      ? 'Kliknij następny punkt albo wpisz długość i <kbd>Enter</kbd>. Strzałki blokują oś: <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona, <kbd>↑</kbd> niebieska; przytrzymany <kbd>⇧</kbd> blokuje bieżący kierunek. <kbd>Esc</kbd> kończy.'
       : 'Kliknij punkt początkowy linii. Zamknięty obrys tworzy ścianę.';
   }
   vcb() { return { label: 'Długość', value: this.anchor && this.cur ? fmtLength(V.dist(this.anchor, this.cur.p)) : '' }; }
   move(e, x, y) {
-    this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.anchor, lockAxis: this.app.lockAxis, extraPoints: this.chain.length > 2 ? [this.chain[0]] : null });
+    this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.anchor, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir, extraPoints: this.chain.length > 2 ? [this.chain[0]] : null });
   }
+  lockFrom() { return this.anchor; }
   down(e, x, y) {
     if (!this.cur) return;
     const p = this.cur.p.slice();
@@ -283,6 +281,7 @@ export class PushTool extends Tool {
     const mod = this.app.isMac ? '⌥' : 'Ctrl';
     return this.active
       ? `Przesuń i kliknij albo wpisz odległość i <kbd>Enter</kbd>. Wskaż inny punkt, żeby wyrównać wysokość. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła, istniejące krawędzie zostają</b>' : 'nowa bryła, istniejące krawędzie zostają'}.`
+      : this.picked() ? 'Zaznaczona ściana: kliknij gdziekolwiek i przesuń, żeby ją wypchnąć, albo wpisz odległość po kliknięciu.'
       : `Kliknij ścianę i przesuń, żeby wypchnąć. Ścianka narysowana na bryle zmienia tę bryłę: wyciągnięta staje się jej częścią, wciśnięta wycina w niej otwór albo wnękę. Po zakończeniu możesz wpisać odległość. Dwuklik powtarza ostatnią. <kbd>${mod}</kbd> — ${this.copy ? '<b>włączone: nowa bryła</b>' : 'nowa bryła, krawędzie zostają'}.`;
   }
   vcb() { return { label: 'Odległość', value: this.active ? fmtLength(this.dist || 0) : this.lastValid() ? fmtLength(this.last.dist) : '' }; }
@@ -294,13 +293,13 @@ export class PushTool extends Tool {
       const hit = this.v.pick(x, y);
       this.hit = hit;
       const s = hit && this.shapeOf(hit.shapeId);
-      this.v.setHoverFace(s ? faceByKey(s, hit.key)?.verts : null);
+      this.v.setHoverFace(this.picked() ? null : s ? faceByKey(s, hit.key)?.verts : null);
       return;
     }
     const A = this.active;
     this.cur = this.app.snapper.find(x, y, { model: A.start, line: { o: A.o, d: A.d }, exclude: A.shapeId, noFace: A.host ? new Set([A.host.shape.id]) : null });
     if (!this.cur) return;
-    this.dist = V.dot(V.sub(this.cur.p, A.o), A.d);
+    this.dist = V.dot(V.sub(this.cur.p, A.o), A.d) - (this.cur.type === 'free' ? A.t0 || 0 : 0);
     this.apply(this.dist);
   }
   apply(d) {
@@ -326,13 +325,20 @@ export class PushTool extends Tool {
     const f = target && faceByKey(target, target.h === 0 ? 'face' : nk);
     this.v.setHoverFace(f ? f.verts : null);
   }
+  // ściana zaznaczona wcześniej narzędziem Zaznacz: wypychasz ją, klikając gdziekolwiek (jak w SketchUpie)
+  picked() { const q = this.app.sub; return q.length === 1 && q[0].kind === 'face' && !this.app.selection.size ? q[0] : null; }
   start(x, y) {
-    const hit = this.hit || this.v.pick(x, y); if (!hit) return false;
+    const pre = this.picked();
+    let hit = this.hit || this.v.pick(x, y);
+    if (pre) { const c = pre.pts.reduce((a, p) => V.add(a, p), [0, 0, 0]); hit = { shapeId: pre.id, key: pre.key, point: V.mul(c, 1 / pre.pts.length), far: true }; this.app.clearSub(); }
+    if (!hit) return false;
     const s = this.shapeOf(hit.shapeId); const f = s && faceByKey(s, hit.key); if (!f) return false;
     let d = f.normal;
     // płaska ściana: ciągniemy w stronę, z której patrzymy
     if (s.h === 0 && V.dot(d, V.sub(this.v.cam.position.toArray(), hit.point)) < 0) d = V.mul(d, -1);
     this.active = { shapeId: s.id, key: hit.key, o: hit.point, d, start: cloneModel(this.model), flip: d !== f.normal, host: s.h === 0 ? hostFace(this.model, s) : null };
+    // kliknięcie z dala od ściany: liczy się ruch kursora od miejsca kliknięcia, nie jego położenie
+    if (hit.far) { const r = this.v.onLine(x, y, hit.point, d); this.active.t0 = r ? r.t : 0; }
     this.dist = 0;
     return true;
   }
@@ -406,7 +412,7 @@ export class PushTool extends Tool {
 
 /* ---------- wiaderko: kolor bryły ---------- */
 export class PaintTool extends Tool {
-  hint() { return `Kliknij bryłę, żeby nadać jej kolor i krycie (szkło). <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor z bryły.`; }
+  hint() { return `Kliknij ścianę bryły, żeby nadać jej kolor albo materiał. <kbd>⇧</kbd> + klik maluje całą bryłę (razem z kryciem — szkło); grupa i płaska ściana malują się w całości. <kbd>${this.app.isMac ? '⌘' : 'Alt'}</kbd> + klik pobiera kolor.`; }
   move(e, x, y) {
     const hit = this.v.pick(x, y);
     const s = hit && this.model.shapes.find(q => q.id === hit.shapeId);
@@ -415,12 +421,25 @@ export class PaintTool extends Tool {
   down(e, x, y) {
     const hit = this.v.pick(x, y); if (!hit) return;
     const s = this.model.shapes.find(q => q.id === (hit.solidId ?? hit.shapeId)); if (!s) return;
-    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint(s.color || null, s.alpha ?? 1); return; }
+    const own = hit.shapeId === s.id && s.fc && s.fc[hit.key];
+    if ((this.app.isMac && e.metaKey) || (!this.app.isMac && e.altKey)) { this.app.setPaint((own ? own.c : s.color) || null, s.alpha ?? 1, (own ? own.t : s.tex) || null); return; }
     // grupa albo komponent (poza edycją) dostaje kolor w całości
     const ids = this.app.expand(s.id).filter(i => typeof i === 'number');
-    const a = this.app.paintAlpha >= 0.999 ? undefined : this.app.paintAlpha;
+    const a = this.app.paintAlpha >= 0.999 ? undefined : this.app.paintAlpha, c = this.app.paint || null, t = this.app.paintTex || null;
+    const whole = e.shiftKey || ids.length > 1 || s.bill || hit.shapeId !== s.id || (!isMesh(s) && s.h === 0) || a !== undefined || (s.alpha ?? 1) < 0.999;
     this.app.checkpoint();
-    for (const id of ids) { const q = this.model.shapes.find(x => x.id === id); if (q) { q.color = this.app.paint; if (a === undefined) delete q.alpha; else q.alpha = a; } }
+    if (whole) for (const id of ids) {
+      const q = this.model.shapes.find(x => x.id === id); if (!q) continue;
+      q.color = c; if (t) q.tex = t; else delete q.tex; delete q.fc;
+      if (a === undefined) delete q.alpha; else q.alpha = a;
+    } else {
+      // pojedyncza ściana (jak w SketchUpie); w bryle dowolnej ściana to wszystkie jej kawałki w jednej płaszczyźnie
+      const keys = isMesh(s) ? regionOf(s, +hit.key.split(':')[1]).map(i => 'p:' + i) : [hit.key];
+      const same = (s.color || null) === c && (s.tex || null) === t;
+      s.fc ||= {};
+      for (const k of keys) { if (same) delete s.fc[k]; else s.fc[k] = { c, t }; }
+      if (!Object.keys(s.fc).length) delete s.fc;
+    }
     this.app.changed();
   }
 }
@@ -550,6 +569,66 @@ export function pickEntity(app, x, y) {
     }
   }
   return best;
+}
+// bryła luzem (nie w grupie, nie wycięcie, nie figura 2D): jej ściany i krawędzie zaznacza się i chwyta osobno
+export function looseSolid(app, id) {
+  const s = app.model.shapes.find(q => q.id === id);
+  return !!s && !s.bill && s.op !== 'cut' && !s.locked && !app.groupAt(id) && (!app.editing || app.inEditing(id));
+}
+// ściana albo krawędź pod kursorem: { id bryły, kind, pts — punkty do przesunięcia, polys | a, b }
+export function subAt(app, id, x, y) {
+  const e = edgeAt(app, x, y);
+  if (e && e.shape && e.edge && (id == null || id === e.id) && looseSolid(app, e.id)) return { id: e.id, kind: 'edge', a: e.edge.a.slice(), b: e.edge.b.slice(), pts: [e.edge.a.slice(), e.edge.b.slice()] };
+  if (typeof id !== 'number' || !looseSolid(app, id)) return null;
+  const s = app.model.shapes.find(q => q.id === id), hit = app.viewer.pick(x, y);
+  if (!hit || hit.shapeId !== id) return null;
+  const f = faceByKey(s, hit.key); if (!f) return null;
+  const polys = (f.region || [f.verts]).map(p => p.map(q => q.slice())), pts = [];
+  for (const p of polys) for (const q of p) if (!pts.some(r => V.dist(r, q) < 1e-5)) pts.push(q.slice());
+  return { id, kind: 'face', key: hit.key, polys, pts, verts: f.verts };
+}
+// Przekształcenie wybranych punktów bryły (wierzchołek, krawędź, ściana). Gdy to wszystkie jej punkty, bryła idzie
+// w całości; płaska ściana zostaje płaską ścianą, jeśli jej punkty dalej leżą w jednej płaszczyźnie; reszta staje się siatką.
+export function mapPoints(s, pts, f) {
+  const has = p => pts.some(q => V.dist(p, q) < 1e-5);
+  if (vertices(s).every(has)) return transformShape(s, f);
+  if (!isMesh(s) && s.h === 0) {
+    const loop = s.pts.map(p => at(s, p[0], p[1], 0)).map(p => has(p) ? f(p) : p), n = newell(loop);
+    if (loop.some(p => Math.abs(V.dot(V.sub(p, loop[0]), n)) > 1e-6)) return s;   // wyszłaby z płaszczyzny
+    let u = V.norm(V.sub(loop[1], loop[0])); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+    const w = V.cross(n, u);
+    s.o = loop[0].slice(); s.u = u; s.v = w; s.n = n;
+    s.pts = loop.map(p => { const d = V.sub(p, s.o); return [V.dot(d, u), V.dot(d, w)]; });
+    return normalizeShape(s);
+  }
+  toMesh(s, facesOf);
+  return mapMeshPoints(s, pts, f);
+}
+// płaska ściana znika, a jej krawędzie (poza `skip`) zostają jako linie
+function flatToLines(m, s, skip) {
+  const same = (p, q) => V.dist(p, q) < 1e-6;
+  for (const e of shapeEdges(s)) {
+    if (skip && ((same(e.a, skip.a) && same(e.b, skip.b)) || (same(e.a, skip.b) && same(e.b, skip.a)))) continue;
+    const l = { id: m.next++, a: e.a.slice(), b: e.b.slice() }; if (s.g != null) l.g = s.g; if (s.tag != null) l.tag = s.tag;
+    m.lines.push(l);
+  }
+  m.shapes = m.shapes.filter(q => q !== s);
+}
+// Usunięcie ściany bryły: zostaje otwarta powłoka (jak Delete na ścianie w SketchUpie); płaska ściana zostawia same krawędzie.
+export function deleteFace(m, s, polys) {
+  if (!isMesh(s) && s.h === 0) return flatToLines(m, s);
+  toMesh(s, facesOf);
+  removePolys(s, p => polys.some(P => P.length === p.length && P.every((v, i) => V.dist(v, p[i]) < 1e-6)));
+  if (!s.polys.length) m.shapes = m.shapes.filter(q => q !== s);
+}
+// Usunięcie krawędzi: linia dzieląca ścianę znika i ściana się scala; prawdziwa krawędź zabiera ściany, które się na niej stykają.
+export function deleteEdge(m, s, a, b) {
+  if (isMesh(s)) { const k = markOf(s, { a, b }); if (k >= 0) { s.marks = s.marks.filter((_, i) => i !== k); return; } }
+  if (!isMesh(s) && s.h === 0) return flatToLines(m, s, { a, b });
+  toMesh(s, facesOf);
+  const idx = new Set(polysOnEdge(s, a, b));
+  removePolys(s, (p, i) => idx.has(i));
+  if (!s.polys.length) m.shapes = m.shapes.filter(q => q !== s);
 }
 export function hoverShape(app, x, y, id = pickEntity(app, x, y)) {
   const s = typeof id === 'number' && app.model.shapes.find(q => q.id === id && !q.bill);
@@ -774,10 +853,11 @@ export class CenterArcTool extends Tool {
 /* ---------- wymiar ---------- */
 export class DimTool extends Tool {
   reset() { this.a = null; this.b = null; this.cur = null; this.off = null; }
+  lockFrom() { return this.b ? null : this.a; }
   hint() { return !this.a ? 'Kliknij pierwszy punkt wymiaru (koniec, środek, krawędź).' : !this.b ? 'Kliknij drugi punkt.' : 'Odsuń linię wymiarową i kliknij — albo wpisz odsunięcie.'; }
   vcb() { return { label: this.b ? 'Odsunięcie' : 'Długość', value: this.b && this.off ? fmtLength(V.len(this.off)) : this.a && this.cur ? fmtLength(V.dist(this.a, this.cur.p)) : '' }; }
   move(e, x, y) {
-    if (!this.b) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.a, lockAxis: this.app.lockAxis }); return; }
+    if (!this.b) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.a, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir }); return; }
     // odsunięcie wzdłuż tej osi (prostopadłej do odcinka), w którą stronę kursor odsuwa się od niego na ekranie
     const ab = V.norm(V.sub(this.b, this.a)), mid = V.lerp(this.a, this.b, 0.5), M = this.v.toScreen(mid), A = this.v.toScreen(this.a), B = this.v.toScreen(this.b);
     let lx = B.x - A.x, ly = B.y - A.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
@@ -935,7 +1015,7 @@ export class PlaceTool extends Tool {
 export class ArcTool extends Tool {
   reset() { this.p1 = null; this.p2 = null; this.plane = null; this.cur = null; this.h = 0; }
   hint() {
-    return !this.p1 ? 'Kliknij początek łuku.' : !this.p2 ? 'Kliknij koniec łuku albo wpisz długość cięciwy.' : 'Przesuń, żeby wygiąć łuk, i kliknij — albo wpisz wysokość wygięcia. Przy połowie cięciwy łuk staje się półokręgiem.';
+    return !this.p1 ? 'Kliknij początek łuku.' : !this.p2 ? 'Kliknij koniec łuku albo wpisz długość cięciwy.' : 'Przesuń, żeby wygiąć łuk, i kliknij — albo wpisz wysokość wygięcia. Łuk przyciąga do półokręgu i do styczności z linią, od której zaczyna.';
   }
   vcb() { return { label: this.p2 ? 'Wygięcie' : 'Długość', value: this.p2 ? fmtLength(Math.abs(this.h)) : this.p1 && this.cur ? fmtLength(V.dist(this.p1, this.cur.p)) : '' }; }
   move(e, x, y) {
@@ -946,7 +1026,27 @@ export class ArcTool extends Tool {
     let h = V.dot(V.sub(this.cur.p, this.p1), m);
     // przyciąganie do półokręgu
     if (Math.abs(Math.abs(h) - L / 2) < 8 * this.v.pixelSize(this.cur.p)) { h = Math.sign(h) * L / 2; this.semi = true; } else this.semi = false;
+    // przyciąganie do styczności z linią albo łukiem, który kończy się w początku lub końcu cięciwy
+    this.tan = false;
+    for (const ht of this.tangents()) if (Math.abs(h - ht) < 8 * this.v.pixelSize(this.cur.p)) { h = ht; this.tan = true; this.semi = false; break; }
     this.h = h;
+  }
+  // wygięcia, przy których łuk jest styczny do linii dochodzącej do jego początku albo końca
+  tangents() {
+    const n = this.plane.n, ch = V.sub(this.p2, this.p1), L = V.len(ch), dir = V.mul(ch, 1 / L), out = [];
+    const ang = t => Math.atan2(V.dot(V.cross(t, dir), n), V.dot(t, dir));   // kąt od t do cięciwy wokół normalnej
+    for (const l of this.model.lines) {
+      if (isHidden(this.model, l)) continue;
+      for (const [end, other, atStart] of [[l.a, l.b, 0], [l.b, l.a, 0]]) {
+        const s1 = V.dist(end, this.p1) < 1e-6, s2 = V.dist(end, this.p2) < 1e-6; if (!s1 && !s2) continue;
+        let t = s1 ? V.sub(end, other) : V.sub(other, end); if (V.len(t) < 1e-9) continue; t = V.norm(t);
+        if (Math.abs(V.dot(t, n)) > 0.02) continue;
+        const a = s1 ? ang(t) : -ang(t);
+        if (Math.abs(a) < 1e-3 || Math.abs(Math.abs(a) - Math.PI) < 1e-3) continue;
+        out.push(-(L / 2) * Math.tan(a / 2));
+      }
+    }
+    return out;
   }
   points() {
     const ch = V.sub(this.p2, this.p1), L = V.len(ch), dir = V.mul(ch, 1 / L), m = V.cross(this.plane.n, dir), h = this.h;
@@ -987,10 +1087,147 @@ export class ArcTool extends Tool {
     else if (this.p1) drawSeg(c, v, this.p1, s.p, INK, { width: 1, dash: [3, 3] });
     drawMarker(c, v, this.p2 ? null : s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? 'Półokrąg · ' : '') + 'wygięcie ' + fmtLength(Math.abs(this.h)) : s.label);
+    drawChip(c, P.x, P.y, this.p2 ? (this.semi ? 'Półokrąg · ' : this.tan ? 'Styczny · ' : '') + 'wygięcie ' + fmtLength(Math.abs(this.h)) : s.label);
   }
 }
 function rotVec3(v, k, t) { const c = Math.cos(t), s = Math.sin(t); return V.add(V.add(V.mul(v, c), V.mul(V.cross(k, v), s)), V.mul(k, V.dot(k, v) * (1 - c))); }
+
+/* ---------- łuk przez trzy punkty ---------- */
+export class Arc3Tool extends Tool {
+  reset() { this.p1 = null; this.p2 = null; this.cur = null; }
+  hint() { return !this.p1 ? 'Kliknij początek łuku.' : !this.p2 ? 'Kliknij punkt, przez który łuk ma przejść.' : 'Kliknij koniec łuku.'; }
+  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
+  // okrąg przez trzy punkty w przestrzeni, od p1 przez p2 do p3
+  points(p3) {
+    const a = V.sub(this.p2, this.p1), b = V.sub(p3, this.p1), ab = V.cross(a, b), d = 2 * V.dot(ab, ab);
+    if (d < 1e-12) return [this.p1, p3];
+    const ctr = V.add(this.p1, V.mul(V.add(V.mul(V.cross(ab, a), V.dot(b, b)), V.mul(V.cross(b, ab), V.dot(a, a))), 1 / d));
+    const n = V.norm(ab), u = V.norm(V.sub(this.p1, ctr)), w = V.cross(n, u), r = V.dist(this.p1, ctr);
+    let a3 = Math.atan2(V.dot(V.sub(p3, ctr), w), V.dot(V.sub(p3, ctr), u)); if (a3 <= 0) a3 += 2 * Math.PI;
+    const k = Math.max(4, Math.round(a3 / (2 * Math.PI) * CIRCLE_SEGMENTS)), pts = [];
+    for (let i = 0; i <= k; i++) { const t = a3 * i / k; pts.push(V.add(ctr, V.add(V.mul(u, r * Math.cos(t)), V.mul(w, r * Math.sin(t))))); }
+    pts[0] = this.p1.slice(); pts[k] = p3.slice();
+    return pts;
+  }
+  down() {
+    if (!this.cur) return;
+    const p = this.cur.p.slice();
+    if (!this.p1) { this.p1 = p; return; }
+    if (!this.p2) { if (V.dist(p, this.p1) > 1e-6) this.p2 = p; return; }
+    if (V.dist(p, this.p1) < 1e-6 || V.dist(p, this.p2) < 1e-6) return;
+    const pts = this.points(p);
+    this.app.checkpoint();
+    let last = null;
+    for (let i = 0; i + 1 < pts.length; i++) { last = { id: this.model.next++, a: pts[i].slice(), b: pts[i + 1].slice() }; this.model.lines.push(last); }
+    if (last) closeLoop(this.model, last);
+    this.app.changed(); this.reset();
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p2) drawPoly(c, v, this.points(s.p), INK, false, { width: 1.6 });
+    else if (this.p1) drawSeg(c, v, this.p1, s.p, INK, { width: 1, dash: [3, 3] });
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, s.label);
+  }
+}
+
+/* ---------- linia odręczna ---------- */
+export class FreehandTool extends Tool {
+  reset() { this.pts = null; this.plane = null; this.cur = null; }
+  hint() { return 'Przeciągnij, żeby narysować linię odręczną — na ziemi albo na ścianie, od której zaczynasz. Skończ w punkcie początkowym, żeby zamknąć obrys w ścianę.'; }
+  move(e, x, y) {
+    if (!this.pts) { this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
+    if (!(e.buttons & 1)) return;
+    const p = this.v.onPlane(x, y, this.plane.o, this.plane.n); if (!p) return;
+    this.cur = { p };
+    if (Math.hypot(x - this.lx, y - this.ly) >= 6) { this.pts.push(p); this.lx = x; this.ly = y; }
+  }
+  down(e, x, y) {
+    if (!this.cur) return;
+    this.plane = planeAt(this.app, this.cur); this.pts = [this.cur.p.slice()]; this.lx = x; this.ly = y; this.x0 = x; this.y0 = y;
+  }
+  up(e, x, y) {
+    const pts = this.pts; this.pts = null;
+    if (!pts || pts.length < 3) { this.app.refresh(); return; }
+    // koniec blisko początku zamyka obrys
+    if (Math.hypot(x - this.x0, y - this.y0) < 12 && pts.length > 4) pts.push(pts[0].slice());
+    this.app.checkpoint();
+    let last = null;
+    for (let i = 0; i + 1 < pts.length; i++) { if (V.dist(pts[i], pts[i + 1]) < 1e-6) continue; last = { id: this.model.next++, a: pts[i].slice(), b: pts[i + 1].slice() }; this.model.lines.push(last); }
+    if (last) closeLoop(this.model, last);
+    this.app.changed(); this.reset();
+  }
+  cancel() { this.reset(); this.app.refresh(); }
+  draw(c, v) {
+    if (this.pts) { drawPoly(c, v, this.cur ? [...this.pts, this.cur.p] : this.pts, INK, false, { width: 1.6 }); return; }
+    if (this.cur) { drawMarker(c, v, this.cur); const P = v.toScreen(this.cur.p); drawChip(c, P.x, P.y, this.cur.label); }
+  }
+}
+
+/* ---------- kamera: rozglądanie, spacer, ustawienie ---------- */
+const fmtEye = app => fmtLength(app.eyeH);
+function setEye(app, str) {
+  const h = parseLength(str); if (h == null || h <= 0) return false;
+  app.eyeH = h; const c = app.viewer.cam; c.position.z = h; app.viewer.redraw();
+  return true;
+}
+export class LookTool extends Tool {
+  hint() { return 'Przeciągnij, żeby rozejrzeć się z miejsca, w którym stoi kamera. Wpisz wysokość oczu i <kbd>Enter</kbd>, żeby ją zmienić.'; }
+  vcb() { return { label: 'Wysokość oczu', value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
+  value(str) { return setEye(this.app, str); }
+  down(e, x, y) { this.last = { x, y }; }
+  move(e, x, y) { if (!this.last || !(e.buttons & 1)) return; this.v.look(x - this.last.x, y - this.last.y); this.last = { x, y }; }
+  up() { this.last = null; }
+}
+// Spacer: przytrzymaj przycisk i odsuń kursor od miejsca kliknięcia — w górę idziesz naprzód, w dół cofasz się,
+// w bok skręcasz; im dalej, tym szybciej. Z Shiftem ruch jest w pionie i w bok.
+export class WalkTool extends Tool {
+  reset() { this.o = null; cancelAnimationFrame(this.raf); this.raf = 0; }
+  hint() { return 'Przytrzymaj przycisk i odsuń kursor od krzyżyka: w górę — naprzód, w dół — w tył, w bok — obrót; im dalej, tym szybciej. <kbd>⇧</kbd> — w górę, w dół i bokiem. Wpisz wysokość oczu i <kbd>Enter</kbd>.'; }
+  vcb() { return { label: 'Wysokość oczu', value: fmtLength(Math.max(0, this.v.cam.position.z)) }; }
+  value(str) { return setEye(this.app, str); }
+  down(e, x, y) {
+    if (this.v.ortho) this.v.toggleOrtho();
+    this.o = { x, y }; this.m = { x, y }; this.shift = e.shiftKey; this.t = performance.now();
+    const step = t => {
+      if (!this.o) return;
+      const dt = Math.min(0.1, (t - this.t) / 1000); this.t = t;
+      const dead = d => Math.abs(d) < 6 ? 0 : d - Math.sign(d) * 6, dx = dead(this.m.x - this.o.x), dy = dead(this.m.y - this.o.y);
+      if (this.shift) this.v.walk(0, dx * 0.02 * dt, -dy * 0.02 * dt, 0);
+      else this.v.walk(-dy * 0.035 * dt, 0, 0, -dx * 0.006 * dt);
+      this.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  move(e, x, y) { if (this.o) { this.m = { x, y }; this.shift = e.shiftKey; } }
+  up() { this.reset(); this.app.refresh(); }
+  draw(c) {
+    if (!this.o) return;
+    c.save(); c.strokeStyle = this.v.dark ? INK_DARK : INK; c.lineWidth = 1.2;
+    c.beginPath(); c.moveTo(this.o.x - 7, this.o.y); c.lineTo(this.o.x + 7, this.o.y); c.moveTo(this.o.x, this.o.y - 7); c.lineTo(this.o.x, this.o.y + 7); c.stroke(); c.restore();
+  }
+}
+// Ustaw kamerę: klik stawia ją nad wskazanym punktem na wysokości oczu; przeciągnięcie — w pierwszym punkcie, patrzy na drugi.
+export class CamPosTool extends Tool {
+  reset() { this.p = null; this.cur = null; this.at = null; }
+  hint() { return 'Kliknij miejsce, w którym ma stanąć kamera (na wysokości oczu) — albo przeciągnij od miejsca kamery do punktu, na który ma patrzeć. Wpisz wysokość oczu i <kbd>Enter</kbd>.'; }
+  vcb() { return { label: 'Wysokość oczu', value: fmtEye(this.app) }; }
+  value(str) { const h = parseLength(str); if (h == null || h <= 0) return false; this.app.eyeH = h; return true; }
+  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model }); }
+  down(e, x, y) { if (this.cur) { this.p = this.cur.p.slice(); this.at = { x, y }; } }
+  up(e, x, y) {
+    if (!this.p) return;
+    const drag = Math.hypot(x - this.at.x, y - this.at.y) > 8 && this.cur && V.dist(this.cur.p, this.p) > 1e-6;
+    if (drag) this.v.placeCamera(this.p, this.cur.p); else this.v.placeCamera(V.add(this.p, [0, 0, this.app.eyeH]));
+    this.reset(); this.app.camPosDone?.();
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    if (this.p) drawSeg(c, v, this.p, s.p, INK, { width: 1.2, dash: [4, 3] });
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.p ? 'Patrz tutaj' : 'Oczy ' + fmtEye(this.app) + ' nad tym punktem');
+  }
+}
 
 /* ---------- przesuń (i kopiuj) ---------- */
 // elementy: zaznaczenie albo to, co pod kursorem przy pierwszym kliknięciu
@@ -1017,28 +1254,45 @@ const duplicate = (m, targets) => duplicateIds(m, targets);
 function moveFrames(m, ids, f) { for (const g of groupsWhollyIn(m, ids)) if (g.frame) g.frame = transformFrame(g.frame, f); }
 
 export class MoveTool extends Tool {
-  reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; this.sub = null; }
+  reset() { this.p0 = null; this.targets = null; this.cur = null; this.start = null; this.sub = null; this.hov = null; }
   hint() {
     const k = copyKey(this.app);
     if (this.app.editSolid != null && !this.p0) return 'Edycja bryły: chwyć wierzchołek, krawędź albo ścianę i przesuń. Strzałki blokują oś, wymiar wpiszesz z klawiatury.';
     if (this.app.sub.length && !this.app.selection.size && !this.p0) return 'Kliknij punkt, za który chwytasz zaznaczoną ścianę albo krawędź — przesunie się tylko ona, a bryła się odkształci.';
-    return this.p0
-      ? `Kliknij punkt docelowy albo wpisz odległość. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`
-      : `Kliknij punkt, za który chwytasz zaznaczenie (albo bryłę pod kursorem). <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    if (this.p0) return `Kliknij punkt docelowy albo wpisz odległość. Strzałki blokują oś, a przytrzymany <kbd>⇧</kbd> — bieżący kierunek${this.app.lockDir ? ' (<b>zablokowany</b>)' : ''}. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}. Po kopii wpisz <kbd>x3</kbd>, żeby zrobić szyk, albo <kbd>/3</kbd>, żeby podzielić odstęp.`;
+    if (this.app.selection.size) return `Kliknij punkt, za który chwytasz zaznaczenie. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    return `Bez zaznaczenia chwytasz to, co pod kursorem: wierzchołek, krawędź albo ścianę bryły (bryła się odkształca), linię albo całą grupę. Żeby przesunąć całą bryłę, zaznacz ją najpierw dwuklikiem. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+  }
+  lockFrom() { return this.p0; }
+  // bez zaznaczenia: wierzchołek, krawędź albo ściana bryły luzem pod kursorem (jak w SketchUpie)
+  grabAt(x, y) {
+    if (this.app.editSolid != null || this.app.selection.size || this.app.sub.length || this.copy) return null;
+    const id = pickEntity(this.app, x, y);
+    if (id != null && typeof id !== 'number') return null;
+    const sub = subAt(this.app, id, x, y); if (!sub) return null;
+    const s = this.model.shapes.find(q => q.id === sub.id), c = this.cur;
+    if (c && c.type === 'end' && vertices(s).some(p => V.dist(p, c.p) < 1e-5)) return { id: sub.id, kind: 'vertex', pts: [c.p.slice()] };
+    return sub;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
   vcb() { return { label: 'Odległość', value: this.p0 && this.cur ? fmtLength(V.dist(this.p0, this.cur.p)) : this.lastValid() ? fmtLength(V.len(this.last.d)) : '' }; }
   move(e, x, y) {
     this.mx = x; this.my = y;
-    if (!this.p0) { if (!this.app.selection.size) hoverShape(this.app, x, y); else this.v.setHoverFace(null); this.cur = this.app.snapper.find(x, y, { model: this.model }); return; }
-    this.cur = this.app.snapper.find(x, y, { model: this.start, anchor: this.p0, lockAxis: this.app.lockAxis, excludeSet: this.copy || this.sub ? null : this.targets });
+    if (!this.p0) {
+      this.cur = this.app.snapper.find(x, y, { model: this.model });
+      this.hov = this.grabAt(x, y);
+      if (this.hov) this.v.setHoverFace(this.hov.kind === 'face' ? this.hov.verts : null);
+      else if (!this.app.selection.size && !this.app.sub.length) hoverShape(this.app, x, y); else this.v.setHoverFace(null);
+      return;
+    }
+    this.cur = this.app.snapper.find(x, y, { model: this.start, anchor: this.p0, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir, excludeSet: this.copy || this.sub ? null : this.targets });
     if (this.cur) this.apply(V.sub(this.cur.p, this.p0));
   }
   apply(d, count = 1, copy = this.copy) {
     const m = cloneModel(this.start);
     if (this.sub) {
       const s = m.shapes.find(q => q.id === this.sub.id);
-      if (s) { toMesh(s, facesOf); moveMeshPoints(s, this.sub.pts, d); }
+      if (s) mapPoints(s, this.sub.pts, p => V.add(p, d));
       this.d = d; this.count = 1; this.result = new Set(); this.app.setModelLive(m); return;
     }
     let sel = this.targets;
@@ -1066,6 +1320,8 @@ export class MoveTool extends Tool {
         sub = { id, pts, what: 'zaznaczenie' };
         this.app.clearSub();
       }
+      if (!sub) sub = this.grabAt(x, y);
+      this.hov = null;
       if (sub) { this.sub = sub; this.targets = new Set(); this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0]; this.v.setHoverFace(null); return; }
       const t = targetsAt(this.app, x, y); if (!t) return;
       this.targets = t; this.p0 = this.cur.p.slice(); this.start = cloneModel(this.model); this.d = [0, 0, 0];
@@ -1119,19 +1375,22 @@ export class MoveTool extends Tool {
   draw(c, v) {
     if (this.copy) drawPlus(c, this.mx, this.my);
     const s = this.cur; if (!s) return;
-    if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : INK, { width: 1.2, dash: [4, 3] });
+    const h = !this.p0 && this.hov;
+    if (h && h.kind === 'edge') drawSeg(c, v, h.a, h.b, BLUE, { width: 3 });
+    if (this.p0) drawSeg(c, v, this.p0, s.p, s.axis ? AXIS_COLOR[s.axis] : s.locked ? '#a05fb0' : INK, { width: 1.2, dash: [4, 3] });
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
-    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
+    drawChip(c, P.x, P.y, this.p0 ? (s.label ? s.label + ' · ' : '') + fmtLength(V.dist(this.p0, s.p)) : h ? { vertex: 'Wierzchołek', edge: 'Krawędź', face: 'Ściana' }[h.kind] : s.label, s.axis ? AXIS_COLOR[s.axis] : BLUE);
   }
 }
 
 /* ---------- obróć ---------- */
 export class RotateTool extends Tool {
-  reset() { this.c = null; this.n = null; this.ref = null; this.targets = null; this.start = null; this.cur = null; this.ang = 0; this.lockN = null; this.freeN = null; }
+  reset() { this.c = null; this.n = null; this.ref = null; this.targets = null; this.start = null; this.cur = null; this.ang = 0; this.lockN = null; this.freeN = null; this.sub = null; this.downAt = null; this.axisDrag = false; }
   hint() {
     const k = copyKey(this.app);
-    if (!this.c) return `Kliknij środek obrotu (na ziemi albo na ścianie). Kątomierz układa się na ścianie pod kursorem — przytrzymaj <kbd>⇧</kbd>, żeby zablokować jego płaszczyznę${this.lockN ? ' (<b>zablokowana</b>)' : ''}. Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    if (!this.c) return `${this.app.sub.length && !this.app.selection.size ? 'Obracasz zaznaczoną ścianę albo krawędź (bryła się skręci). ' : ''}Kliknij środek obrotu (na ziemi albo na ścianie). Kątomierz układa się na ścianie pod kursorem — przytrzymaj <kbd>⇧</kbd>, żeby zablokować jego płaszczyznę${this.lockN ? ' (<b>zablokowana</b>)' : ''}. Przeciągnij od środka, żeby wyznaczyć własną oś obrotu. Strzałki ustawiają oś: <kbd>↑</kbd> niebieska, <kbd>→</kbd> czerwona, <kbd>←</kbd> zielona. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}.`;
+    if (this.axisDrag) return 'Puść przycisk, gdy linia pokazuje oś obrotu.';
     if (!this.ref) return 'Kliknij punkt, od którego liczysz kąt.';
     return `Obróć i kliknij albo wpisz kąt w stopniach. Kątomierz przyciąga co 15°. <kbd>${k}</kbd> — ${this.copy ? '<b>włączone: kopia</b>' : 'kopia'}; po kopii <kbd>x6</kbd> robi szyk.`;
   }
@@ -1150,6 +1409,12 @@ export class RotateTool extends Tool {
       }
       return;
     }
+    // przeciągnięcie od środka wyznacza własną oś obrotu (jak w SketchUpie): oś biegnie wzdłuż przeciągniętej linii
+    if (!this.ref && this.downAt && (e.buttons & 1) && (this.axisDrag || Math.hypot(x - this.downAt.x, y - this.downAt.y) > 8)) {
+      const c = this.app.snapper.find(x, y, { model: this.model, anchor: this.c, lockAxis: this.app.lockAxis });
+      if (c && V.dist(c.p, this.c) > 1e-6) { this.cur = c; this.n = V.norm(V.sub(c.p, this.c)); if (!this.axisDrag) { this.axisDrag = true; this.app.updateHint(); } }
+      return;
+    }
     this.cur = this.app.snapper.find(x, y, { model: this.start || this.model, plane: { o: this.c, n: this.n }, excludeSet: this.ref && !this.copy ? this.targets : null });
     if (!this.cur || !this.ref) return;
     const d = V.sub(this.cur.p, this.c); if (V.len(d) < 1e-9) return;
@@ -1161,6 +1426,12 @@ export class RotateTool extends Tool {
   apply(a, count = 1, copy = this.copy) {
     const m = cloneModel(this.start);
     let sel = this.targets;
+    if (this.sub) {
+      // zaznaczona ściana albo krawędź: obracają się jej punkty, a bryła się skręca
+      const s = m.shapes.find(q => q.id === this.sub.id);
+      if (s) mapPoints(s, this.sub.pts, p => V.add(this.c, rotVec(V.sub(p, this.c), this.n, a)));
+      this.ang = a; this.count = 1; this.result = new Set(); this.app.setModelLive(m); return;
+    }
     if (copy) {
       sel = new Set();
       for (let k = 1; k <= count; k++) {
@@ -1176,10 +1447,17 @@ export class RotateTool extends Tool {
   down(e, x, y) {
     if (!this.cur) return;
     if (!this.c) {
-      const t = targetsAt(this.app, x, y); if (!t) return;
-      this.targets = t;
+      if (this.app.sub.length && !this.app.selection.size) {
+        const id = this.app.sub[0].id, pts = [];
+        for (const q of this.app.sub) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
+        this.sub = { id, pts }; this.targets = new Set(); this.app.clearSub();
+      } else {
+        const t = targetsAt(this.app, x, y); if (!t) return;
+        this.targets = t;
+      }
       const pl = planeAt(this.app, this.cur);
       this.c = this.cur.p.slice(); this.n = this.lockN || pl.n; this.v.setHoverFace(null);
+      this.downAt = { x, y }; this.axisDrag = false;
       return;
     }
     if (!this.ref) {
@@ -1192,15 +1470,15 @@ export class RotateTool extends Tool {
     if (!this.start) return;
     if (Math.abs(this.ang) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
-    this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged();
-    this.last = { start: this.start, targets: this.targets, c: this.c, n: this.n, ref: this.ref, ang: this.ang, copy: this.copy, count: this.count, seq: this.app.opSeq };
+    if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
+    this.last = { start: this.start, targets: this.targets, sub: this.sub, c: this.c, n: this.n, ref: this.ref, ang: this.ang, copy: this.copy, count: this.count, seq: this.app.opSeq };
     this.reset();
   }
   value(str) {
     const n = parseCount(str), dv = parseDivide(str);
     const redo = (a, count) => {
       if (!this.lastValid() || !this.app.revertLast()) return false;
-      const l = this.last; Object.assign(this, { start: l.start, targets: l.targets, c: l.c, n: l.n, ref: l.ref });
+      const l = this.last; Object.assign(this, { start: l.start, targets: l.targets, sub: l.sub, c: l.c, n: l.n, ref: l.ref });
       this.apply(a, count, l.copy); const keep = this.copy; this.copy = l.copy; this.finish(); this.copy = keep; return true;
     };
     if ((n || dv) && this.lastValid() && this.last.copy) return n ? redo(this.last.ang, n) : redo(this.last.ang / dv, dv);
@@ -1211,11 +1489,13 @@ export class RotateTool extends Tool {
     return false;
   }
   key(e) { if (isCopyKey(this.app, e)) { this.copy = !this.copy; if (this.ref) this.apply(this.ang); this.app.updateHint(); return true; } return false; }
+  up() { if (this.axisDrag) { this.axisDrag = false; this.app.updateHint(); } this.downAt = null; }
   cancel() { if (this.start) this.app.setModelLive(this.start); super.cancel(); }
   draw(c, v) {
     if (this.copy) drawPlus(c, this.mx, this.my);
     const s = this.cur;
     const ctr = this.c || (s && s.p); if (!ctr) return;
+    if (this.axisDrag && s) drawSeg(c, v, V.sub(ctr, V.sub(s.p, ctr)), s.p, '#a05fb0', { width: 1.6 });
     const n = this.n || this.lockN || (s ? planeAt(this.app, s).n : [0, 0, 1]);
     // kątomierz: okrąg z podziałką co 15°
     const R = this.v.pixelSize(ctr) * 70;
@@ -1230,19 +1510,87 @@ export class RotateTool extends Tool {
     if (this.ref) {
       drawSeg(c, v, ctr, at(0, R * 1.6), INK, { width: 1, dash: [3, 3] });
       drawSeg(c, v, ctr, at(this.ang, R * 1.6), INK, { width: 1.5 });
-    } else if (this.c && s) drawSeg(c, v, ctr, s.p, INK, { width: 1, dash: [3, 3] });
-    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : s.label); }
+    } else if (this.c && s && !this.axisDrag) drawSeg(c, v, ctr, s.p, INK, { width: 1, dash: [3, 3] });
+    if (s) { drawMarker(c, v, s); const P = v.toScreen(s.p); drawChip(c, P.x, P.y, this.ref ? fmtDeg(this.ang) : this.axisDrag ? 'Oś obrotu' : s.label); }
   }
 }
 const fmtDeg = a => (a * 180 / Math.PI).toFixed(1).replace('.', ',') + '°';
 
 /* ---------- odsunięcie ---------- */
+// zaznaczone linie luzem ułożone w jeden ciąg w jednej płaszczyźnie: { o, u, v, n, pts (2D), closed }
+function lineChain(app) {
+  const m = app.model, ids = [...app.selection];
+  if (ids.length < 2 || ids.some(i => String(i)[0] !== 'l')) return null;
+  const L = m.lines.filter(l => app.selection.has('l' + l.id)); if (L.length !== ids.length) return null;
+  const K = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4), adj = new Map();
+  for (const l of L) for (const [p, q] of [[l.a, l.b], [l.b, l.a]]) { let a = adj.get(K(p)); if (!a) adj.set(K(p), a = []); a.push({ l, p, q }); }
+  if ([...adj.values()].some(a => a.length > 2)) return null;
+  const ends = [...adj.values()].filter(a => a.length === 1), closed = !ends.length;
+  if (!closed && ends.length !== 2) return null;
+  const pts = [], used = new Set();
+  let cur = closed ? [...adj.values()][0][0] : ends[0][0];
+  pts.push(cur.p);
+  while (cur && !used.has(cur.l)) { used.add(cur.l); pts.push(cur.q); cur = (adj.get(K(cur.q)) || []).find(e => !used.has(e.l)); }
+  if (used.size !== L.length) return null;
+  if (closed) pts.pop();
+  let n = newell(closed ? pts : [...pts]);
+  if (pts.every(p => V.len(V.cross(V.sub(p, pts[0]), V.sub(pts[pts.length - 1], pts[0]))) < 1e-9)) return null;   // jedna prosta
+  if (n[2] < -1e-6 || (Math.abs(n[2]) < 1e-6 && (n[1] < 0 || (Math.abs(n[1]) < 1e-6 && n[0] < 0)))) n = V.mul(n, -1);
+  if (pts.some(p => Math.abs(V.dot(V.sub(p, pts[0]), n)) > 1e-4)) return null;
+  let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
+  const w = V.cross(n, u), o = pts[0];
+  return { o, u, v: w, n, closed, pts: pts.map(p => { const d = V.sub(p, o); return [V.dot(d, u), V.dot(d, w)]; }) };
+}
+// ciąg odcinków odsunięty o d w lewo (patrząc wzdłuż ciągu); narożniki przedłużane do przecięcia
+function offsetPath(pts, d, closed) {
+  const n = pts.length, nrm = (p, q) => { const e = [q[0] - p[0], q[1] - p[1]], l = Math.hypot(e[0], e[1]) || 1; return [-e[1] / l, e[0] / l]; }, out = [];
+  for (let i = 0; i < n; i++) {
+    const a = closed || i > 0 ? pts[(i - 1 + n) % n] : null, b = pts[i], c = closed || i < n - 1 ? pts[(i + 1) % n] : null;
+    const n1 = a ? nrm(a, b) : null, n2 = c ? nrm(b, c) : null;
+    if (!n1 || !n2) { const k = n1 || n2; out.push([b[0] + k[0] * d, b[1] + k[1] * d]); continue; }
+    const den = 1 + n1[0] * n2[0] + n1[1] * n2[1];
+    if (den < 0.05) { out.push([b[0] + n1[0] * d, b[1] + n1[1] * d]); continue; }   // zawrócenie o 180°
+    out.push([b[0] + (n1[0] + n2[0]) * d / den, b[1] + (n1[1] + n2[1]) * d / den]);
+  }
+  return out;
+}
+// odległość punktu od ciągu ze znakiem: dodatnia po lewej stronie
+function pathSide(pts, p, closed) {
+  let best = Infinity, sg = 1;
+  for (let i = 0; i < pts.length - (closed ? 0 : 1); i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey || 1;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / L2)), d = Math.hypot(a[0] + ex * t - p[0], a[1] + ey * t - p[1]);
+    if (d < best) { best = d; sg = Math.sign(ex * (p[1] - a[1]) - ey * (p[0] - a[0])) || 1; }
+  }
+  return best * sg;
+}
 export class OffsetTool extends Tool {
-  reset() { this.face = null; this.cur = null; this.d = 0; }
-  hint() { return this.face ? 'Przesuń do środka albo na zewnątrz i kliknij — albo wpisz odległość. Powstaje nowa ściana, którą możesz wypchnąć.' : 'Kliknij ścianę, której obrys chcesz odsunąć.'; }
+  reset() { this.face = null; this.path = null; this.cur = null; this.d = 0; }
+  hint() {
+    if (this.path) return 'Przesuń na jedną albo drugą stronę linii i kliknij — albo wpisz odległość. Powstaną nowe linie równoległe do zaznaczonych.';
+    if (lineChain(this.app)) return 'Zaznaczone linie: kliknij gdziekolwiek i przesuń, żeby je odsunąć.';
+    return this.face ? 'Przesuń do środka albo na zewnątrz i kliknij — albo wpisz odległość. Powstaje nowa ściana, którą możesz wypchnąć.' : 'Kliknij ścianę, której obrys chcesz odsunąć. Zaznacz wcześniej połączone linie, żeby odsunąć same linie.';
+  }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
-  vcb() { return { label: 'Odległość', value: this.face ? fmtLength(Math.abs(this.d)) : this.lastValid() ? fmtLength(Math.abs(this.last.d)) : '' }; }
+  vcb() { return { label: 'Odległość', value: this.face || this.path ? fmtLength(Math.abs(this.d)) : this.lastValid() ? fmtLength(Math.abs(this.last.d)) : '' }; }
+  createPath(d) {
+    const P = this.path; if (Math.abs(d) < 1e-6) return;
+    const pts = offsetPath(P.pts, d, P.closed).map(q => fromPlane(P, q));
+    this.app.checkpoint();
+    let last = null; const ids = [];
+    for (let i = 0; i < pts.length - (P.closed ? 0 : 1); i++) { last = { id: this.model.next++, a: pts[i].slice(), b: pts[(i + 1) % pts.length].slice() }; this.model.lines.push(last); ids.push('l' + last.id); }
+    if (P.closed && last) closeLoop(this.model, last);
+    this.app.changed();
+    this.last = { path: P, d, seq: this.app.opSeq };
+    this.reset();
+  }
   move(e, x, y) {
+    if (this.path) {
+      const P = this.path;
+      this.cur = this.app.snapper.find(x, y, { model: this.model, plane: { o: P.o, n: P.n } });
+      if (this.cur) this.d = pathSide(P.pts, toPlane(P, this.cur.p), P.closed);
+      return;
+    }
     if (!this.face) { const hit = this.v.pick(x, y); const s = hit && this.model.shapes.find(q => q.id === hit.shapeId); this.v.setHoverFace(s ? faceByKey(s, hit.key)?.verts : null); this.cur = null; return; }
     const F = this.face;
     this.cur = this.app.snapper.find(x, y, { model: this.model, plane: { o: F.o, n: F.n } });
@@ -1250,7 +1598,10 @@ export class OffsetTool extends Tool {
     this.d = insideDistance(F.pts, toPlane(F, this.cur.p));
   }
   down(e, x, y) {
+    if (this.path) return this.createPath(this.d);
     if (!this.face) {
+      const chain = lineChain(this.app);
+      if (chain) { this.path = chain; this.d = 0; this.v.setHoverFace(null); this.move(e, x, y); return; }
       const hit = this.v.pick(x, y); if (!hit) return;
       const s = this.model.shapes.find(q => q.id === hit.shapeId), f = s && faceByKey(s, hit.key); if (!f) return;
       const F = facePlane(f);
@@ -1273,11 +1624,19 @@ export class OffsetTool extends Tool {
   }
   value(str) {
     const L = parseLength(str); if (L == null) return false;
+    if (this.path) { this.createPath((Math.sign(this.d) || 1) * Math.abs(L)); return true; }
     if (this.face) { this.create((Math.sign(this.d) || 1) * Math.abs(L)); return true; }
+    if (this.lastValid() && this.last.path && this.app.revertLast()) { this.path = this.last.path; this.createPath(Math.sign(this.last.d) * Math.abs(L)); return true; }
     if (this.lastValid() && this.app.revertLast()) { const l = this.last; this.face = l.face; this.soft = l.soft; this.color = l.color; this.create(Math.sign(l.d) * Math.abs(L)); return true; }
     return false;
   }
   draw(c, v) {
+    if (this.path && this.cur) {
+      const P = this.path;
+      drawPoly(c, v, offsetPath(P.pts, this.d, P.closed).map(q => fromPlane(P, q)), INK, P.closed, { width: 1.6 });
+      const Q = v.toScreen(this.cur.p); drawChip(c, Q.x, Q.y, fmtLength(Math.abs(this.d)));
+      return;
+    }
     if (!this.face || !this.cur) return;
     const pts = offsetPolygon(this.face.pts, this.d);
     if (pts) drawPoly(c, v, pts.map(q => fromPlane(this.face, q)), INK, true, { width: 1.6 });
@@ -1296,7 +1655,8 @@ export class TapeTool extends Tool {
   vcb() { return { label: this.dir ? 'Odstęp' : 'Długość', value: this.p0 && this.cur ? fmtLength(this.dist()) : this.measured != null ? fmtLength(this.measured) : '' }; }
   off() { const d = V.sub(this.cur.p, this.p0); return V.sub(d, V.mul(this.dir, V.dot(d, this.dir))); }
   dist() { return this.dir ? V.len(this.off()) : V.dist(this.p0, this.cur.p); }
-  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.dir ? null : this.p0, lockAxis: this.dir ? null : this.app.lockAxis }); }
+  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.dir ? null : this.p0, lockAxis: this.dir ? null : this.app.lockAxis, lockDir: this.dir ? null : this.app.lockDir }); }
+  lockFrom() { return this.dir ? null : this.p0; }
   down() {
     if (!this.cur) return;
     if (!this.p0) { this.p0 = this.cur.p.slice(); this.dir = (this.cur.type === 'edge' || this.cur.type === 'mid') && this.cur.dir ? this.cur.dir : null; this.measured = null; return; }
@@ -1349,7 +1709,7 @@ export function edgeAt(app, x, y) {
   for (const s of m.shapes) {
     if (isHidden(m, s) || s.locked || !ctx(s.id) || (app.editSolid != null && s.id !== app.editSolid)) continue;
     for (const e of shapeEdges(s)) {
-      if (e.soft) continue;
+      if ((e.soft || e.hid) && !v.showHidden) continue;
       tryEdge(e.a, e.b, () => ({ id: s.id, shape: s, edge: e }));
     }
   }
@@ -1377,37 +1737,33 @@ function markOf(s, e) {
 
 export class EraserTool extends Tool {
   reset() { this.hover = null; this.erasing = false; }
-  hint() { return 'Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Gumka łapie tylko widoczne krawędzie: linia dzieląca ścianę znika i ściana się scala, krawędź płaskiej ściany usuwa ścianę (pozostałe krawędzie zostają), krawędź bryły usuwa bryłę.'; }
-  move(e, x, y) {
-    this.hover = edgeAt(this.app, x, y);
-    if (this.erasing && (e.buttons & 1)) this.erase(x, y);
+  hint() {
+    const k = copyKey(this.app);
+    return `Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Linia dzieląca ścianę znika i ściana się scala, krawędź bryły zabiera ściany, które się na niej stykają, krawędź płaskiej ściany usuwa ścianę (pozostałe krawędzie zostają). <kbd>⇧</kbd> — ukryj krawędź, <kbd>${k}</kbd> — wygładź, <kbd>⇧</kbd><kbd>${k}</kbd> — przywróć (przy włączonej ukrytej geometrii).`;
   }
-  down(e, x, y) { this.erasing = true; this.started = false; this.erase(x, y); }
+  mode(e) { const soft = this.app.isMac ? e.altKey : e.ctrlKey; return e.shiftKey && soft ? 'show' : e.shiftKey ? 'hide' : soft ? 'soft' : 'erase'; }
+  move(e, x, y) {
+    this.hover = edgeAt(this.app, x, y); this.md = this.mode(e);
+    if (this.erasing && (e.buttons & 1)) this.erase(x, y, this.md);
+  }
+  down(e, x, y) { this.erasing = true; this.started = false; this.erase(x, y, this.mode(e)); }
   up() { this.erasing = false; }
-  erase(x, y) {
+  erase(x, y, mode = 'erase') {
     const h = edgeAt(this.app, x, y); if (!h) return;
     const m = this.model, begin = () => { if (!this.started) { this.app.checkpoint(); this.started = true; } };
     const s = h.shape;
-    // linia dzieląca ścianę: znika, a ściana się scala
-    if (s && s.kind === 'mesh') {
-      const k = markOf(s, h.edge);
-      if (k >= 0) { begin(); s.marks = s.marks.filter((_, i) => i !== k); this.hover = null; this.app.changed(); return; }
-    }
-    const grouped = this.app.expand(h.id);
-    // krawędź płaskiej ściany (poza grupą): ściana znika, pozostałe krawędzie zostają jako linie
-    if (s && s.h === 0 && grouped.length === 1) {
-      begin();
-      const same = (p, q) => V.dist(p, q) < 1e-6, e0 = h.edge;
-      for (const e of shapeEdges(s)) {
-        if ((same(e.a, e0.a) && same(e.b, e0.b)) || (same(e.a, e0.b) && same(e.b, e0.a))) continue;
-        const l = { id: m.next++, a: e.a.slice(), b: e.b.slice() }; if (s.g != null) l.g = s.g;
-        m.lines.push(l);
-      }
-      m.shapes = m.shapes.filter(q => q !== s); this.app.selection.delete(s.id);
+    if (mode !== 'erase') {
+      // ukrycie i wygładzenie nie zmieniają geometrii: krawędź trafia na listę bryły, linia luzem dostaje flagę ukrycia
+      if (!s) { const l = m.lines.find(q => 'l' + q.id === h.id); if (l && mode === 'hide') { begin(); l.hidden = true; this.app.selection.delete(h.id); this.hover = null; this.app.changed(); } return; }
+      const key = segKey(h.edge.a, h.edge.b), has = k => (s[k] || []).some(([a, b]) => segKey(a, b) === key);
+      const drop = k => { if (s[k]) { s[k] = s[k].filter(([a, b]) => segKey(a, b) !== key); if (!s[k].length) delete s[k]; } };
+      if (mode === 'show') { if (!has('hid') && !has('softs')) return; begin(); drop('hid'); drop('softs'); }
+      else { const k = mode === 'hide' ? 'hid' : 'softs'; if (has(k)) return; begin(); s[k] = [...(s[k] || []), [h.edge.a.slice(), h.edge.b.slice()]]; }
       this.hover = null; this.app.changed(); return;
     }
-    // w edycji bryły prawdziwej krawędzi nie usuwamy — bryła przestałaby być zamknięta
-    if (s && this.app.editSolid === s.id) { if (!this.warned) { this.warned = true; this.app.toast?.('Tej krawędzi nie da się usunąć bez otwarcia bryły. Gumka w edycji bryły usuwa linie dzielące ściany.'); } return; }
+    const grouped = this.app.expand(h.id);
+    // krawędź bryły luzem: znika razem ze ścianami, które się na niej stykają (linia dzieląca ścianę — sama)
+    if (s && grouped.length === 1) { begin(); deleteEdge(m, s, h.edge.a, h.edge.b); if (!m.shapes.includes(s)) this.app.selection.delete(s.id); this.hover = null; this.app.changed(); return; }
     begin();
     const ids = new Set(grouped);
     removeIds(m, ids);
@@ -1416,7 +1772,7 @@ export class EraserTool extends Tool {
   }
   draw(c, v) {
     const h = this.hover; if (!h || !h.a) return;
-    drawSeg(c, v, h.a, h.b, '#c2452d', { width: 3 });
+    drawSeg(c, v, h.a, h.b, { hide: '#8a857b', soft: '#3f5f99', show: '#4f8a46' }[this.md] || '#c2452d', { width: 3 });
   }
 }
 

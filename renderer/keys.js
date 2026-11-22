@@ -4,11 +4,13 @@
 
 export const ACTIONS = [
   { group: 'Rysowanie', id: 'line', name: 'Linia', keys: ['A'] },
+  { group: 'Rysowanie', id: 'freehand', name: 'Linia odręczna', keys: [] },
   { group: 'Rysowanie', id: 'rect', name: 'Prostokąt', keys: ['D'] },
   { group: 'Rysowanie', id: 'rrect', name: 'Prostokąt obrócony', keys: ['Shift+D'] },
   { group: 'Rysowanie', id: 'circle', name: 'Okrąg', keys: ['V'] },
   { group: 'Rysowanie', id: 'polygon', name: 'Wielokąt foremny', keys: ['Shift+V'] },
   { group: 'Rysowanie', id: 'arc', name: 'Łuk przez dwa punkty', keys: ['B'] },
+  { group: 'Rysowanie', id: 'arc3', name: 'Łuk przez trzy punkty', keys: [] },
   { group: 'Rysowanie', id: 'carc', name: 'Łuk ze środka', keys: ['Shift+B'] },
   { group: 'Rysowanie', id: 'pie', name: 'Wycinek koła', keys: ['Alt+B'] },
   { group: 'Rysowanie', id: 'offset', name: 'Odsunięcie', keys: ['T'] },
@@ -36,7 +38,8 @@ export const ACTIONS = [
   { group: 'Bryły', id: 'solidSubtract', name: 'Odejmij od pierwszej (reszta znika)', keys: [] },
   { group: 'Bryły', id: 'solidTrim', name: 'Przytnij pierwszą (reszta zostaje)', keys: [] },
   { group: 'Edycja', id: 'eraser', name: 'Gumka', keys: ['S'] },
-  { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor bryły)', keys: ['M'] },
+  { group: 'Edycja', id: 'paint', name: 'Wiaderko (kolor i materiał)', keys: ['M'] },
+  { group: 'Edycja', id: 'makeFaces', name: 'Ściany z zaznaczonych linii', keys: [] },
   { group: 'Edycja', id: 'delete', name: 'Usuń zaznaczone', keys: ['Delete', 'Backspace'] },
   { group: 'Edycja', id: 'selectAll', name: 'Zaznacz wszystko', keys: ['Mod+A'] },
   { group: 'Edycja', id: 'selectNone', name: 'Odznacz wszystko', keys: ['Mod+Shift+A'] },
@@ -78,7 +81,13 @@ export const ACTIONS = [
   { group: 'Widok', id: 'pan', name: 'Przesuń widok', keys: ['P'] },
   { group: 'Widok', id: 'zoom', name: 'Powiększ (przeciąganiem)', keys: [] },
   { group: 'Widok', id: 'zoomWin', name: 'Powiększ okno (ramką)', keys: ['Shift+Z'] },
+  { group: 'Widok', id: 'look', name: 'Rozejrzyj się', keys: [] },
+  { group: 'Widok', id: 'walk', name: 'Spacer', keys: [] },
+  { group: 'Widok', id: 'camPos', name: 'Ustaw kamerę', keys: [] },
   { group: 'Widok', id: 'xray', name: 'Prześwit', keys: ['J'] },
+  { group: 'Widok', id: 'wire', name: 'Siatka — same krawędzie', keys: [] },
+  { group: 'Widok', id: 'fog', name: 'Mgła', keys: [] },
+  { group: 'Widok', id: 'hiddenGeo', name: 'Ukryta geometria', keys: [] },
   { group: 'Widok', id: 'style1', name: 'Styl: Szkic', keys: ['Shift+1'] },
   { group: 'Widok', id: 'style2', name: 'Styl: Kreska', keys: ['Shift+2'] },
   { group: 'Widok', id: 'style3', name: 'Styl: Model', keys: ['Shift+3'] },
@@ -96,6 +105,7 @@ export const ACTIONS = [
   { group: 'Plik', id: 'obj', name: 'Eksport OBJ (3ds Max)', keys: ['Mod+Shift+O'] },
   { group: 'Plik', id: 'importSkp', name: 'Importuj model SketchUpa (.skp)', keys: [] },
   { group: 'Plik', id: 'underlay', name: 'Podkład DXF / DWG', keys: ['Mod+Shift+I'] },
+  { group: 'Plik', id: 'underToLines', name: 'Podkład: zamień na linie do rysowania', keys: [] },
   { group: 'Plik', id: 'keys', name: 'Lista skrótów', keys: ['Shift+Slash'] }
 ];
 

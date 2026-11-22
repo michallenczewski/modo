@@ -150,16 +150,18 @@
     <div class="hr"></div>
     <div class="row lbl"><span class="grow">Warstwy</span><span class="num" id="underCount"></span></div>
     <div id="underLayers"></div>
+    <div class="row"><button class="tb soft" id="underLines" title="Widoczne warstwy stają się prawdziwymi liniami, na których można rysować i z których powstają ściany">Zamień na linie</button><span class="grow"></span></div>
     <div class="row"><button class="tb soft" id="underReload">Wczytaj ponownie</button><span class="grow"></span><button class="tb" id="underRemove">Usuń podkład</button></div>
   </div>
 </section>
 
-<section id="paintPop" class="pop" role="dialog" aria-label="Kolor bryły" hidden>
-  <div class="row"><span class="ttl grow">Kolor bryły</span></div>
+<section id="paintPop" class="pop" role="dialog" aria-label="Kolor i materiał" hidden>
+  <div class="row"><span class="ttl grow">Kolor i materiał</span></div>
   <div id="swatches"></div>
+  <div id="texSwatches"></div>
   <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
   <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
-  <div class="lbl note">Przezroczyste bryły (szkło) są przezroczyste także w eksporcie PNG.</div>
+  <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>
 </section>
 
 <div id="menu" class="menu" role="menu" hidden></div>
