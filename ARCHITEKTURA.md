@@ -131,6 +131,10 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 - kolor jaśnieje w głębi,
 - krawędzie przecinające płaszczyznę bliską kamery są przycinane w shaderze.
 
+**Duże modele.** `Viewer.rebuild` nie tworzy siatki na bryłę: ściany wszystkich brył trafiają do kilku wspólnych paczek (`batches`, jedna na rodzaj materiału: krycie, tekstura, strona, cień), a kolor ściany jest kolorem wierzchołków. Osobne siatki brył (`meshes`) istnieją tylko po to, żeby trafiał w nie kursor (`pick`), i nie są rysowane. Geometria ścian i dane kresek każdej bryły są pamiętane w `shapeCache`, dopóki bryła się nie zmieni (porównanie tablic, a po cofnięciu — skrótu treści `shapeSig`). Zaznaczenie zmienia tylko kolory (`reselect`). Przy aktywnym przekroju działa starsza ścieżka: siatka na bryłę.
+
+**Szkło i kreski.** Kreski rysują się dwa razy: najpierw blado pod szkłem (`underMesh`), potem szkło, potem sama głębia szkła (`addGlassDepth`) i na końcu kreski w pełni — już tylko te, których żadna szyba nie zasłania. Kreski modelu oglądanego z daleka cienieją i bledną (`ppm` w shaderze).
+
 Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
 ## Render przez Gemini

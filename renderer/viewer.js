@@ -87,38 +87,59 @@ void main(){
 // (każda krawędź jest dzielona na odcinki, żeby linia mogła lekko falować — patrz buildEdgeGeometry)
 
 // seg — na ile odcinków dzielona jest każda krawędź (falowanie kreski); przy bardzo wielu krawędziach mniej, żeby widok nie ważył milionów trójkątów
-function buildEdgeGeometry(list, SEG = list.length > 30000 ? 1 : list.length > 8000 ? 2 : 6) {
-  // list: [{ a, b, n1, n2, col:[r,g,b]|null, w }]
-  const nQ = list.length * SEG, nV = nQ * 4;
-  const A = k => new Float32Array(nV * k);
-  const ea = A(3), eb = A(3), n1 = A(3), n2 = A(3), col = A(3), pos = A(3), t = A(1), side = A(1), seed = A(1), hasN2 = A(1), wmul = A(1), soft = A(1);
-  const idx = new Uint32Array(nQ * 6);
-  let v = 0, q = 0;
+const EDGE_ATTRS = [['position', 3], ['ea', 3], ['eb', 3], ['n1', 3], ['n2', 3], ['col', 3], ['t', 1], ['side', 1], ['seed', 1], ['hasN2', 1], ['wmul', 1], ['soft', 1]];
+const segFor = n => n > 30000 ? 1 : n > 8000 ? 2 : 6;
+// dane kresek dla listy krawędzi: [{ a, b, n1, n2, col:[r,g,b]|null, w }] → tablice atrybutów (bez indeksów)
+function edgeBlock(list, SEG) {
+  const nV = list.length * SEG * 4, B = { seg: SEG, nV };
+  for (const [n, k] of EDGE_ATTRS) B[n] = new Float32Array(nV * k);
+  const { ea, eb, n1, n2, col, position: pos, t, side, seed, hasN2, wmul, soft } = B;
+  let v = 0;
   for (let k = 0; k < list.length; k++) {
-    const E = list[k];
-    const sd = Math.abs(Math.sin((E.a[0] * 12.9898 + E.a[1] * 78.233 + E.b[0] * 37.719 + E.b[2] * 4.581 + E.b[1] * 1.37) * 43758.5453)) % 1;
-    for (let s = 0; s < SEG; s++) {
-      const t0 = s / SEG, t1 = (s + 1) / SEG;
-      for (const [tv, sv] of [[t0, -1], [t0, 1], [t1, -1], [t1, 1]]) {
-        ea.set(E.a, v * 3); eb.set(E.b, v * 3); n1.set(E.n1, v * 3); if (E.n2) n2.set(E.n2, v * 3);
-        col.set(E.col || [-1, -1, -1], v * 3);
-        pos.set(V.lerp(E.a, E.b, tv), v * 3);
-        t[v] = tv; side[v] = sv; seed[v] = sd; hasN2[v] = E.n2 ? 1 : 0; wmul[v] = E.w || 1; soft[v] = E.soft ? 1 : 0;
-        v++;
-      }
-      const b = v - 4;
-      idx.set([b, b + 2, b + 1, b + 1, b + 2, b + 3], q * 6); q++;
+    const E = list[k], a = E.a, b = E.b, c = E.col, m1 = E.n1, m2 = E.n2, w = E.w || 1, sf = E.soft ? 1 : 0;
+    const sd = Math.abs(Math.sin((a[0] * 12.9898 + a[1] * 78.233 + b[0] * 37.719 + b[2] * 4.581 + b[1] * 1.37) * 43758.5453)) % 1;
+    for (let s = 0; s < SEG; s++) for (let q = 0; q < 4; q++) {
+      const tv = (s + (q >> 1)) / SEG, i = v * 3;
+      ea[i] = a[0]; ea[i + 1] = a[1]; ea[i + 2] = a[2]; eb[i] = b[0]; eb[i + 1] = b[1]; eb[i + 2] = b[2];
+      n1[i] = m1[0]; n1[i + 1] = m1[1]; n1[i + 2] = m1[2]; if (m2) { n2[i] = m2[0]; n2[i + 1] = m2[1]; n2[i + 2] = m2[2]; }
+      if (c) { col[i] = c[0]; col[i + 1] = c[1]; col[i + 2] = c[2]; } else { col[i] = -1; col[i + 1] = -1; col[i + 2] = -1; }
+      pos[i] = a[0] + (b[0] - a[0]) * tv; pos[i + 1] = a[1] + (b[1] - a[1]) * tv; pos[i + 2] = a[2] + (b[2] - a[2]) * tv;
+      t[v] = tv; side[v] = q & 1 ? 1 : -1; seed[v] = sd; hasN2[v] = m2 ? 1 : 0; wmul[v] = w; soft[v] = sf;
+      v++;
     }
   }
+  return B;
+}
+// kreski całego widoku z kawałków: [{ list, col, cache }] — kawałek bryły, która się nie zmieniła, ma gotowe dane w `cache.eb`
+// (każda krawędź jest dzielona na odcinki, żeby kreska mogła lekko falować; przy bardzo wielu krawędziach odcinków jest mniej)
+function joinEdges(chunks, total) {
+  const SEG = segFor(total), nV = total * SEG * 4, out = {};
+  for (const [n, k] of EDGE_ATTRS) out[n] = new Float32Array(nV * k);
+  let v = 0;
+  for (const ch of chunks) {
+    if (!ch.list.length) continue;
+    let B = ch.cache && ch.cache.eb;
+    if (!B || B.seg !== SEG) { B = edgeBlock(ch.list, SEG); if (ch.cache) ch.cache.eb = B; }
+    for (const [n, k] of EDGE_ATTRS) out[n].set(B[n], v * k);
+    if (ch.col) { const c = ch.col, arr = out.col; for (let i = v * 3, e = (v + B.nV) * 3; i < e; i += 3) { arr[i] = c[0]; arr[i + 1] = c[1]; arr[i + 2] = c[2]; } }
+    v += B.nV;
+  }
+  const nQ = total * SEG, idx = new Uint32Array(nQ * 6);
+  for (let q = 0, b = 0, i = 0; q < nQ; q++, b += 4) { idx[i++] = b; idx[i++] = b + 2; idx[i++] = b + 1; idx[i++] = b + 1; idx[i++] = b + 2; idx[i++] = b + 3; }
   const g = new THREE.BufferGeometry();
-  const at = (n, arr, k) => g.setAttribute(n, new THREE.BufferAttribute(arr, k));
-  at('position', pos, 3); at('ea', ea, 3); at('eb', eb, 3); at('n1', n1, 3); at('n2', n2, 3); at('col', col, 3);
-  at('t', t, 1); at('side', side, 1); at('seed', seed, 1); at('hasN2', hasN2, 1); at('wmul', wmul, 1); at('soft', soft, 1);
+  for (const [n, k] of EDGE_ATTRS) g.setAttribute(n, new THREE.BufferAttribute(out[n], k));
   g.setIndex(new THREE.BufferAttribute(idx, 1));
   g.userData.seg = SEG;
   return g;
 }
+const buildEdgeGeometry = list => joinEdges([{ list }], list.length);
 
+// skrót treści bryły: suma kontrolna wierzchołków i zapis pozostałych pól, od których zależy jej wygląd
+function shapeSig(s) {
+  let sum = 0, n = 0;
+  if (s.polys) for (const p of s.polys) for (const v of p) { n++; sum += (v[0] * 1.37 + v[1] * 2.11 + v[2] * 3.07) * (n % 251 + 1); }
+  return n + '|' + sum + '|' + JSON.stringify([s.pts, s.fc, s.softs, s.hid, s.marks, s.o, s.u, s.v, s.h, s.holes, s.alpha, s.soft, s.color, s.tex, s.open]);
+}
 const hex3 = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
 
 export class Viewer {
@@ -260,18 +281,20 @@ export class Viewer {
     this.rebuild(opts);
   }
   rebuild({ highlight } = {}) {
-    for (const c of [...this.modelGroup.children]) { if (!c.geometry.userData.cached) c.geometry.dispose(); for (const m of [].concat(c.material)) if (m.dispose && m !== this.edgeMat) m.dispose(); this.modelGroup.remove(c); }
+    for (const c of [...this.modelGroup.children]) { if (!c.geometry.userData.cached) c.geometry.dispose(); for (const m of [].concat(c.material)) if (m.dispose && m !== this.edgeMat && !c.userData.depthOnly) m.dispose(); this.modelGroup.remove(c); }
     // Geometria ścian każdej bryły jest pamiętana, dopóki bryła się nie zmieni — zaznaczenie albo zmiana stylu
     // przebudowuje wtedy tylko materiały, a nie dziesiątki tysięcy trójkątów.
     this.shapeCache ||= new Map(); const live = new Set();
     this.edgeIndex = [];   // które krawędzie (zakres w liście) należą do której bryły albo linii — do szybkiej zmiany koloru przy zaznaczaniu
     this._bounds = bounds(this.model);
+    this._sunB = this.model.lines.length ? null : this._bounds;   // zasięg cienia: same bryły
     this.meshes = [];
     for (const b of this.bills || []) { b.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== this.edgeMat) o.material.dispose(); }); this.scene.remove(b.group); }
     this.bills = [];
     const st = this.st();
     const paper = new THREE.Color(st.paper);
-    const edgeList = [];
+    const chunks = []; let edgeList = [], done = 0;   // kreski: kawałki gotowe (z pamięci brył) i lista luzem
+    const flush = () => { if (edgeList.length) { chunks.push({ list: edgeList }); done += edgeList.length; edgeList = []; } }, count = () => done + edgeList.length;
     const lines = st.lines || this.wire;   // w trybie siatki krawędzie są zawsze
     const GHOST = hex3(this.dark ? '#5d5d5a' : '#b9b5aa');
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
@@ -287,6 +310,10 @@ export class Viewer {
     };
     this._cutters = cutters.map(c => c.s);
     this.rebuildGhosts(this._cutters);
+    // Ściany wszystkich brył trafiają do kilku wspólnych paczek (jedna na rodzaj materiału), więc karta graficzna dostaje
+    // parę poleceń zamiast tysięcy. Osobne siatki brył zostają tylko do trafiania kursorem. Przy przekroju — po staremu.
+    const batch = !(this.model.sections || []).some(q => q.on && !q.hidden), packs = new Map();
+    this.batches = batch ? [] : null;
     for (const s of this.model.shapes) {
       if (s.op === 'cut') continue;
       if (isHidden(this.model, s)) {
@@ -302,7 +329,10 @@ export class Viewer {
       const flat = s.h === 0;
       const stamp = [s.polys, s.pts, s.fc, s.softs, s.hid, s.marks, s.o, s.u, s.v, s.h, s.holes, s.alpha, s.soft];
       let cache = this.shapeCache.get(s.id); live.add(s.id);
-      if (!cache || cache.stamp.some((x, i) => x !== stamp[i])) {
+      // po cofnięciu model jest kopią: tablice są nowe, ale treść większości brył ta sama — wtedy wystarczy porównać skrót treści
+      let sig = null;
+      if (cache && cache.stamp.some((x, i) => x !== stamp[i]) && (sig = shapeSig(s)) === cache.sig) cache.stamp = stamp;
+      if (!cache || cache.stamp !== stamp && cache.stamp.some((x, i) => x !== stamp[i])) {
         if (cache) for (const part of cache.parts) part.geo.dispose();
         const items = [], sm = this.smoother(s);
         for (const f of triangulate(s)) for (const tri of f.tris) {
@@ -311,7 +341,7 @@ export class Viewer {
         }
         // szkło (krycie poniżej 0,6) idzie do osobnej siatki, która nie rzuca cienia — reszta bryły rzuca go normalnie
         const alphaOf = it => { const f = s.fc && s.fc[it.key]; return (f && f.a) ?? s.alpha ?? 1; };
-        cache = { stamp, parts: [] };
+        cache = { stamp, sig: sig ?? shapeSig(s), parts: [] };
         for (const glass of [false, true]) {
           const list = items.filter(it => (alphaOf(it) < 0.6) === glass); if (!list.length) continue;
           const part = this.faceGeo(s, list); part.glass = glass; part.geo.userData.cached = true; cache.parts.push(part);
@@ -319,16 +349,36 @@ export class Viewer {
         this.shapeCache.set(s.id, cache);
       }
       for (const part of cache.parts) {
+        if (batch) {
+          let dbl = flat || !!s.open;
+          const gs = part.groups.length ? part.groups : [{ start: 0, count: part.geo.attributes.position.count, fp: null }];
+          for (const g of gs) {
+            const fp = g.fp, a0 = (fp && fp.a) ?? s.alpha ?? 1, a = this.xray ? Math.min(a0, 0.32) : a0, glass = a < 0.999, tex = (fp ? fp.t : s.tex) || '';
+            if (glass) dbl = true;
+            const two = flat || glass || !!s.open, cast = !flat && !part.glass, key = a + '|' + tex + '|' + two + '|' + flat + '|' + cast;
+            let pk = packs.get(key); if (!pk) packs.set(key, pk = { a, glass, tex, two, flat, cast, items: [], n: 0 });
+            pk.items.push({ s, geo: part.geo, start: g.start, count: g.count, fp }); pk.n += g.count;
+          }
+          this.pickMats ||= [new THREE.MeshBasicMaterial({ side: THREE.FrontSide }), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })];
+          const mesh = new THREE.Mesh(part.geo, this.pickMats[dbl ? 1 : 0]);
+          mesh.userData = { shapeId: s.id, keys: part.keys, ids: part.ids, glass: part.glass };
+          this.meshes.push(mesh);
+          continue;
+        }
         const mesh = this.meshFrom(s, part, st, paper, flat);
         mesh.castShadow = !flat && !part.glass; mesh.receiveShadow = true;
         if (part.glass || (s.alpha ?? 1) < 0.999) mesh.renderOrder = 1;
         mesh.userData.glass = part.glass;
         this.modelGroup.add(mesh); this.meshes.push(mesh);
       }
-      const e0 = edgeList.length;
+      const e0 = count();
       if (lines) {
         const col = sel ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
-        for (const e of shapeEdges(s)) {
+        if (isMesh(s) && !this.showHidden) {
+          // krawędzie bryły, która się nie zmieniła, są pamiętane razem z jej ścianami
+          if (!cache.el) { cache.el = []; for (const e of shapeEdges(s)) if (!e.hid) cache.el.push(s.soft ? { ...e, soft: true } : e); }
+          flush(); chunks.push({ list: cache.el, col, cache }); done += cache.el.length;
+        } else for (const e of shapeEdges(s)) {
           // krawędź dolna bryły postawionej na innej bryle to styk, nie kontur — rysujemy ją cienko
           if (!isMesh(s) && s.h > 0 && V.dot(e.n1, s.n) < -0.999) {
             const mid = V.sub(V.lerp(e.a, e.b, 0.5), V.mul(e.n2, 0.01));   // odrobinę do środka, nie na samym brzegu
@@ -339,26 +389,61 @@ export class Viewer {
           edgeList.push(s.soft && isMesh(s) ? { ...e, col, soft: true } : { ...e, col });
         }
       }
-      this.edgeIndex.push({ id: s.id, a: e0, b: edgeList.length, k: sel ? 1 : this.dimmed(s) ? 2 : 0 });
+      this.edgeIndex.push({ id: s.id, a: e0, b: count(), k: sel ? 1 : this.dimmed(s) ? 2 : 0 });
     }
     if (lines) for (const l of this.model.lines) {
-      this.edgeIndex.push({ id: 'l' + l.id, a: edgeList.length, b: edgeList.length + (isHidden(this.model, l) ? 0 : 1), k: this.selected.has('l' + l.id) ? 1 : 0 });
+      this.edgeIndex.push({ id: 'l' + l.id, a: count(), b: count() + (isHidden(this.model, l) ? 0 : 1), k: this.selected.has('l' + l.id) ? 1 : 0 });
       if (isHidden(this.model, l)) { if (this.showHidden) edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: GHOST, w: 0.7 }); continue; }
       const sel = this.selected.has('l' + l.id);
       edgeList.push({ a: l.a, b: l.b, n1: [0, 0, 1], n2: null, col: sel ? hex3('#3f5f99') : null, w: 0.9 });
     }
     for (const [id, c] of this.shapeCache) if (!live.has(id)) { for (const part of c.parts) part.geo.dispose(); this.shapeCache.delete(id); }
+    let anyGlass = this.meshes.some(m => m.renderOrder === 1);
+    for (const pk of packs.values()) {
+      const pos = new Float32Array(pk.n * 3), nor = new Float32Array(pk.n * 3), uv = new Float32Array(pk.n * 2), col = new Float32Array(pk.n * 3), ranges = [];
+      const map = pk.tex ? this.texture(pk.tex) : null; let at = 0;
+      for (const it of pk.items) {
+        const A = it.geo.attributes;
+        pos.set(A.position.array.subarray(it.start * 3, (it.start + it.count) * 3), at * 3);
+        nor.set(A.normal.array.subarray(it.start * 3, (it.start + it.count) * 3), at * 3);
+        uv.set(A.uv.array.subarray(it.start * 2, (it.start + it.count) * 2), at * 2);
+        const r = { s: it.s, c: it.fp ? it.fp.c : it.s.color, tex: !!map, a: at, n: it.count, k: this.selected.has(it.s.id) ? 1 : this.dimmed(it.s) ? 2 : 0 };
+        const c = this.colorFor(it.s, st, paper, r.c, r.tex);
+        for (let i = at * 3, e = (at + it.count) * 3; i < e; i += 3) { col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+        ranges.push(r); at += it.count;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+        map, vertexColors: true, side: pk.two ? THREE.DoubleSide : THREE.FrontSide, transparent: pk.glass, opacity: pk.a, depthWrite: !pk.glass,
+        polygonOffset: true, polygonOffsetFactor: pk.flat ? 0.5 : 1.5, polygonOffsetUnits: pk.flat ? 1 : 2
+      }));
+      mesh.castShadow = pk.cast; mesh.receiveShadow = true; mesh.frustumCulled = false;
+      if (pk.glass) { mesh.renderOrder = 1; anyGlass = true; this.addGlassDepth(mesh); }
+      this.modelGroup.add(mesh); this.batches.push({ mesh, ranges });
+    }
     if (this.edgeMesh) { this.edgeMesh.geometry.dispose(); this.scene.remove(this.edgeMesh); this.edgeMesh = null; }
     if (this.backMesh) { this.scene.remove(this.backMesh); this.backMesh = null; }
-    if (edgeList.length) {
-      this.edgeMesh = new THREE.Mesh(buildEdgeGeometry(edgeList), this.edgeMat);
+    if (this.underMesh) { this.scene.remove(this.underMesh); this.underMesh = null; }
+    flush();
+    if (done) {
+      this.edgeMesh = new THREE.Mesh(joinEdges(chunks, done), this.edgeMat);
       this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
       this.scene.add(this.edgeMesh);
+      // Szkło: kreski rysują się dwa razy. Najpierw blado, pod szkłem (szyba je potem przykrywa swoim kolorem),
+      // a po szkle jeszcze raz w pełni — ale tylko te, których żadna szyba nie zasłania. Dzięki temu widać, co jest za szybą, a co przed nią.
+      if (anyGlass) {
+        this.underMat ||= new THREE.ShaderMaterial({ vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false, uniforms: { ...this.edgeMat.uniforms, opacity: { value: 0.5 } } });
+        this.underMesh = new THREE.Mesh(this.edgeMesh.geometry, this.underMat);
+        this.underMesh.frustumCulled = false; this.underMesh.renderOrder = 0.5;
+        this.scene.add(this.underMesh);
+      }
       // krawędzie tylne: te same kreski narysowane drugi raz, blado, tylko tam, gdzie zasłania je ściana
       if (this.backEdges) {
         this.backMat ||= new THREE.ShaderMaterial({ vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false, depthFunc: THREE.GreaterDepth, uniforms: { ...this.edgeMat.uniforms, opacity: { value: 0.3 } } });
         this.backMesh = new THREE.Mesh(this.edgeMesh.geometry, this.backMat);
-        this.backMesh.frustumCulled = false; this.backMesh.renderOrder = 2;
+        this.backMesh.frustumCulled = false; this.backMesh.renderOrder = 0.6;
         this.scene.add(this.backMesh);
       }
     }
@@ -369,12 +454,29 @@ export class Viewer {
     this.needs = true;
   }
 
+  // szyba po narysowaniu koloru zapisuje jeszcze samą głębię — po to, żeby drugi przebieg kresek wiedział, co jest za nią
+  addGlassDepth(mesh) {
+    this.glassDepthMat ||= [THREE.FrontSide, THREE.DoubleSide].map(side => new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, transparent: true, side, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 }));
+    const d = new THREE.Mesh(mesh.geometry, this.glassDepthMat[1]);
+    d.renderOrder = 1.5; d.frustumCulled = mesh.frustumCulled; d.userData = { depthOnly: true };
+    this.modelGroup.add(d);
+  }
+
   // Zmieniło się tylko zaznaczenie: zamiast przebudowy całej sceny poprawiamy kolory materiałów i kresek.
   // (Figury 2D, bryły wycinające i ukryta geometria mają własne zależności od zaznaczenia — wtedy pełna przebudowa.)
   reselect() {
     if (!this.model || !this.meshes || !this.edgeIndex || this.showHidden || (this.bills && this.bills.length) || (this._cutters && this._cutters.length) || this.section) return this.rebuild();
     const st = this.st(), paper = new THREE.Color(st.paper), byId = new Map(); for (const s of this.model.shapes) byId.set(s.id, s);
-    for (const mesh of this.meshes) {
+    for (const b of this.batches || []) {
+      const attr = b.mesh.geometry.attributes.color, arr = attr.array; let dirty = false;
+      for (const r of b.ranges) {
+        const k = this.selected.has(r.s.id) ? 1 : this.dimmed(r.s) ? 2 : 0; if (k === r.k) continue; r.k = k; dirty = true;
+        const c = this.colorFor(r.s, st, paper, r.c, r.tex);
+        for (let i = r.a * 3, e = (r.a + r.n) * 3; i < e; i += 3) { arr[i] = c.r; arr[i + 1] = c.g; arr[i + 2] = c.b; }
+      }
+      if (dirty) attr.needsUpdate = true;
+    }
+    for (const mesh of this.batches ? [] : this.meshes) {
       const ud = mesh.userData, s = byId.get(ud.shapeId); if (!s || !ud.fps) continue;
       [].concat(mesh.material).forEach((mt, k) => { const fp = ud.fps[k]; mt.color.copy(this.colorFor(s, st, paper, fp ? fp.c : s.color, !!mt.map)); });
     }
@@ -678,7 +780,7 @@ export class Viewer {
     const up = alt > 0;
     const dir = sunVector(Math.max(alt, 0.5), az);
     // mapa cieni obejmuje tylko bryły — duży podkład z okolicą rozmyłby cienie
-    const b = (this.model && this.model.shapes.length && bounds({ shapes: this.model.shapes, lines: [] })) || { center: [0, 0, 0], radius: 25 };
+    const b = (this.model && this.model.shapes.length && (this._sunB ||= bounds({ shapes: this.model.shapes, lines: [] }))) || { center: [0, 0, 0], radius: 25 };
     const R = b.radius * 1.4 + 4, ctr = new THREE.Vector3(...b.center);
     this.sun.target.position.copy(ctr);
     this.sun.position.copy(ctr).addScaledVector(new THREE.Vector3(...dir), R * 3);
