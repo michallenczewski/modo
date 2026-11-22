@@ -714,7 +714,8 @@ export function deleteFace(m, s, polys) {
   if (!s.polys.length) m.shapes = m.shapes.filter(q => q !== s);
 }
 // Usunięcie krawędzi: linia dzieląca ścianę znika i ściana się scala; prawdziwa krawędź zabiera ściany, które się na niej stykają.
-export function deleteEdge(m, s, a, b) {
+// tidy: nie zostawiaj krawędzi po ścianach, które znikły razem z wymazaną krawędzią (gumka sprząta po sobie)
+export function deleteEdge(m, s, a, b, tidy) {
   if (isMesh(s)) { const k = markOf(s, { a, b }); if (k >= 0) { s.marks = s.marks.filter((_, i) => i !== k); return; } }
   if (!isMesh(s) && s.h === 0) {
     // krawędź między dwiema ścianami w jednej płaszczyźnie: ściany się scalają („goją”); w innym razie ściana znika
@@ -724,7 +725,7 @@ export function deleteEdge(m, s, a, b) {
     if (other && healFaces(m, s, other, a, b)) return;
     return flatToLines(m, s, { a, b });
   }
-  if (s.geo) return keepEdges(m, s, eraseFaces(s, polysOnEdge(s, a, b), [a, b]));
+  if (s.geo) { const left = eraseFaces(s, polysOnEdge(s, a, b), [a, b]); return keepEdges(m, s, tidy ? [] : left); }
   toMesh(s, facesOf);
   const idx = new Set(polysOnEdge(s, a, b));
   removePolys(s, (p, i) => idx.has(i));
@@ -1852,7 +1853,7 @@ export class EraserTool extends Tool {
   reset() { this.hover = null; this.erasing = false; }
   hint() {
     const k = copyKey(this.app);
-    return `Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Linia dzieląca ścianę znika i ściana się scala, krawędź bryły zabiera ściany, które się na niej stykają, krawędź płaskiej ściany usuwa ścianę (pozostałe krawędzie zostają). <kbd>⇧</kbd> — ukryj krawędź, <kbd>${k}</kbd> — wygładź, <kbd>⇧</kbd><kbd>${k}</kbd> — przywróć (przy włączonej ukrytej geometrii).`;
+    return `Kliknij krawędź albo linię, żeby ją usunąć; przeciągnij, żeby usuwać kolejne. Linia dzieląca ścianę znika i ściana się scala; krawędź zabiera ściany, które się na niej stykają, razem z krawędziami, które zostałyby po nich luzem. Żeby zostawić sam obrys, zaznacz ścianę i naciśnij <kbd>Delete</kbd>. <kbd>⇧</kbd> — ukryj krawędź, <kbd>${k}</kbd> — wygładź, <kbd>⇧</kbd><kbd>${k}</kbd> — przywróć (przy włączonej ukrytej geometrii).`;
   }
   mode(e) { const soft = this.app.isMac ? e.altKey : e.ctrlKey; return e.shiftKey && soft ? 'show' : e.shiftKey ? 'hide' : soft ? 'soft' : 'erase'; }
   move(e, x, y) {
@@ -1876,7 +1877,7 @@ export class EraserTool extends Tool {
     }
     const grouped = this.app.expand(h.id);
     // krawędź bryły luzem: znika razem ze ścianami, które się na niej stykają (linia dzieląca ścianę — sama)
-    if (s && grouped.length === 1) { begin(); deleteEdge(m, s, h.edge.a, h.edge.b); if (!m.shapes.includes(s)) this.app.selection.delete(s.id); this.hover = null; this.app.changed(); return; }
+    if (s && grouped.length === 1) { begin(); deleteEdge(m, s, h.edge.a, h.edge.b, true); if (!m.shapes.includes(s)) this.app.selection.delete(s.id); this.hover = null; this.app.changed(); return; }
     begin();
     const ids = new Set(grouped);
     removeIds(m, ids);

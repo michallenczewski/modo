@@ -84,6 +84,7 @@ const IC = {
   wire: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2M2.4 11.2 8 8M13.6 11.2 8 8M8 1.8V8" stroke-width="1"/>',
   hiddenGeo: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z" stroke-dasharray="1.6 1.7"/><circle cx="8" cy="8" r="1.6"/>',
   intersect: '<path d="M2.5 6.5h7v7h-7z"/><path d="M6.5 2.5h7v7h-7z"/><path d="M6.5 6.5h3v3" stroke="#b0489e" stroke-width="1.8"/>',
+  cleanLines: '<path d="M2.5 13.5h11" stroke-dasharray="2 2"/><path d="M4 10.5 10.5 4M10.5 4h-3M10.5 4v3"/><path d="M11 9.5l3 3M14 9.5l-3 3" stroke="#c0533f"/>',
   makeFaces: '<path d="M2.8 12.8 4.2 4.2l8.6-1.4-1.4 8.6z"/><path d="M5 10.5 10.5 5M5.2 7.6 7.6 5.2M8 10.6l2.6-2.6" stroke-width="1"/>',
   edit: '<path d="M2.5 13.5 3.3 10.4 10.9 2.8a1.2 1.2 0 0 1 1.7 0l.6.6a1.2 1.2 0 0 1 0 1.7L5.6 12.7z"/><path d="M9.6 4.1l2.3 2.3"/>'
 };
@@ -513,9 +514,10 @@ function run(act) {
   switch (act) {
     case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
     case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? 'Mgła włączona' : 'Mgła wyłączona'); break;
-    case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); app.markDirtySoft(); toast(viewer.wire ? 'Siatka: same krawędzie' : 'Ściany widoczne'); break;
+    case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); syncLook(); app.markDirtySoft(); toast(viewer.wire ? 'Siatka: same krawędzie' : 'Ściany widoczne'); break;
     case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? 'Ukryta geometria widoczna (blado)' : 'Ukryta geometria schowana'); break;
     case 'makeFaces': makeFaces(); break;
+    case 'cleanLines': cleanLines(); break;
     case 'intersect': intersectSel(); break;
     case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
@@ -531,7 +533,7 @@ function run(act) {
     case 'unlockAll': unlockAll(); break;
     case 'viewPrev': viewStep(-1); break;
     case 'viewNext': viewStep(1); break;
-    case 'xray': viewer.xray = !viewer.xray; viewer.rebuild(); viewer.redraw(); renderViewPop(); toast(viewer.xray ? 'Prześwit włączony' : 'Prześwit wyłączony'); break;
+    case 'xray': viewer.xray = !viewer.xray; viewer.rebuild(); viewer.redraw(); renderViewPop(); syncLook(); toast(viewer.xray ? 'Prześwit włączony' : 'Prześwit wyłączony'); break;
     case 'saveCopy': saveCopy(); break;
     case 'revert': revertSketch(); break;
     case 'updateCheck': checkUpdate(); break;
@@ -673,9 +675,10 @@ function deleteSelection() {
   if (!app.selection.size && !app.sub.length) return;
   app.checkpoint();
   // ściany i krawędzie (jak w SketchUpie): po usunięciu ściany jej krawędzie zostają
-  for (const q of app.sub) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b); }
+  for (const q of app.sub) { const s = app.model.shapes.find(x => x.id === q.id); if (!s) continue; if (q.kind === 'face') deleteFace(app.model, s, q.polys); else deleteEdge(app.model, s, q.a, q.b, true); }
   removeIds(app.model, app.selection);
-  app.selection.clear(); app.changed();
+  // obrys, który zostaje po usuniętej ścianie, nie może od razu zamknąć się z powrotem w ścianę
+  app.selection.clear(); app.noStitch = true; app.changed(); app.noStitch = false;
 }
 // po cofnięciu albo ponowieniu: bryły wyjęte do polecenia wracają do wspólnej geometrii
 function regeo() { for (const s of app.model.shapes) delete s.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } }
@@ -825,6 +828,10 @@ function setStyle(s) {
   $('#pngStyle').textContent = 'styl: ' + STYLES[s].name;
 }
 document.querySelectorAll('#styleSeg button').forEach(b => b.addEventListener('click', () => { setStyle(b.dataset.style); }));
+// prześwit (wszystkie krawędzie widać przez ściany) i siatka (same krawędzie) — pod ręką obok stylu
+const lookBtns = [['xrayBtn', 'xray', 'Prześwit — krawędzie widać przez ściany', () => viewer.xray], ['wireBtn', 'wire', 'Siatka — same krawędzie', () => viewer.wire]];
+function syncLook() { for (const [id, , , on] of lookBtns) $('#' + id).classList.toggle('on', !!on()); }
+for (const [id, act, name] of lookBtns) { const b = $('#' + id); b.innerHTML = ic(act); b.setAttribute('aria-label', name); { const k = keysFor(act, app.keys.over)[0]; b.title = name + (k ? ' (' + prettyCombo(k, isMac) + ')' : ''); } b.addEventListener('click', () => run(act)); }
 
 /* ---------- okienka ---------- */
 function openPop(sel, anchor, side) {
@@ -1114,7 +1121,7 @@ const VIEW_ON = { xray: () => viewer.xray, wire: () => viewer.wire, fog: () => v
 const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
 const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
 // okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
-const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], ['makeFaces', 'Ściany z zaznaczonych linii'], ['intersect', 'Przetnij ściany brył']]];
+const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], ['makeFaces', 'Ściany z zaznaczonych linii'], ['intersect', 'Przetnij ściany brył'], ['cleanLines', 'Usuń luźne krawędzie']]];
 function renderEditPop() {
   const p = $('#editPop');
   p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
@@ -1380,6 +1387,26 @@ function intersectSel() {
   const left = app.model.lines.filter(l => !lines0.has(l)).length;
   toast(`Krawędzie przecięcia: ${segs.length}. Ściany są podzielone wzdłuż nich` + (left ? `; ${left} zostało jako luźne linie.` : '.'));
 }
+// „Usuń luźne krawędzie”: linie z wolnym końcem (niezaczepionym o inną linię ani o krawędź ściany) znikają, po kolei aż do
+// skutku — czyli całe wiszące ciągi. Zamknięte obrysy i linie zaczepione obydwoma końcami zostają. Z zaznaczeniem — tylko zaznaczone.
+function cleanLines() {
+  const m = app.model, G = app.editing ?? null, only = [...app.selection].some(i => String(i)[0] === 'l') ? app.selection : null;
+  const edges = m.shapes.filter(s => (s.g ?? null) === G && !isHidden(m, s)).flatMap(s => edgesOf(s).map(e => [e.a, e.b]));
+  const onEdge = p => edges.some(([a, b]) => { const L = V.dist(a, b); if (L < 1e-9) return false; const d = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(p, a), d); return t > -1e-5 && t < L + 1e-5 && V.dist(V.add(a, V.mul(d, t)), p) < 1e-5; });
+  let lines = m.lines.filter(l => (l.g ?? null) === G && !l.locked && !isHidden(m, l)), gone = new Set(), again = true;
+  while (again) {
+    again = false;
+    for (const l of lines) {
+      if (gone.has(l) || (only && !only.has('l' + l.id))) continue;
+      const free = p => !onEdge(p) && !lines.some(o => o !== l && !gone.has(o) && (V.dist(o.a, p) < 1e-5 || V.dist(o.b, p) < 1e-5));
+      if (free(l.a) || free(l.b)) { gone.add(l); again = true; }
+    }
+  }
+  if (!gone.size) return toast('Nie ma luźnych krawędzi z wolnym końcem.');
+  app.checkpoint(); m.lines = m.lines.filter(l => !gone.has(l)); for (const l of gone) app.selection.delete('l' + l.id);
+  app.noStitch = true; app.changed(); app.noStitch = false; app.selectionChanged();
+  toast('Usunięte luźne krawędzie: ' + gone.size);
+}
 // zamknięte pola między zaznaczonymi liniami (także w zaznaczonej grupie) stają się płaskimi ścianami
 function makeFaces() {
   const m = app.model, lines = m.lines.filter(l => app.selection.has('l' + l.id));
@@ -1534,7 +1561,7 @@ function openContext(x, y, cx, cy) {
     items.push(['paste', 'Wklej'], ['pasteInPlace', 'Wklej w tym samym miejscu'], null);
     items.push(['selectAll', 'Zaznacz wszystko'], ['unhideAll', 'Pokaż ukryte']);
     if (lockedCount()) items.push(['unlockAll', 'Odblokuj wszystko']);
-    items.push(['extents', 'Pokaż cały model'], null, ['clearGuides', 'Usuń wszystkie prowadnice']);
+    items.push(['extents', 'Pokaż cały model'], null, ['cleanLines', 'Usuń luźne krawędzie'], ['clearGuides', 'Usuń wszystkie prowadnice']);
   }
   while (items.length && !items[items.length - 1]) items.pop();
   const m = $('#ctxMenu');
@@ -1591,7 +1618,7 @@ function load(text, name, path) {
   if (d.units) { setUnit(d.units); renderUnit(); }
   app.opSeq++;
   viewer.showAxes = d.axes !== false;
-  viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye;
+  viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye; syncLook();
   app.underlay = d.underlay || null; applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
