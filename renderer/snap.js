@@ -14,6 +14,7 @@ export class Snapper {
   constructor(viewer) {
     this.v = viewer;
     this.tracking = [];      // ostatnio wskazane punkty (do wyrównań „od punktu”)
+    this.spheres = new WeakMap();   // kule otaczające brył (do odsiewania przy dużych modelach)
     this.refs = [];          // ostatnio wskazane krawędzie (do „równolegle”, „prostopadle”, „przedłużenie”)
     this.under = null;       // siatka odcinków podkładu
   }
@@ -102,8 +103,23 @@ export class Snapper {
     const ex = opts.excludeSet;
     const segs = [];
     if (model) {
+      // Przy dużych modelach liczą się tylko bryły w pobliżu promienia kursora: kula otaczająca bryłę (pamiętana, dopóki
+      // bryła się nie zmieni) musi leżeć bliżej promienia niż zasięg przyklejania.
+      const ray = v.ray(x, y), ro = ray.origin, rd = ray.direction, big = model.shapes.length > 150;
+      const near = s => {
+        let c = this.spheres.get(s); const key = s.polys || s.pts;
+        if (!c || c.key !== key || c.o !== s.o || c.h !== s.h) {
+          const P = vertices(s); if (!P.length) return false;
+          const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (const p of P) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
+          c = { key, o: s.o, h: s.h, c: V.lerp(lo, hi, 0.5), r: V.dist(lo, hi) / 2 }; this.spheres.set(s, c);
+        }
+        const w = [c.c[0] - ro.x, c.c[1] - ro.y, c.c[2] - ro.z], t = w[0] * rd.x + w[1] * rd.y + w[2] * rd.z;
+        const d = Math.hypot(w[0] - rd.x * t, w[1] - rd.y * t, w[2] - rd.z * t);
+        return d <= c.r + v.pixelSize(c.c) * (R_END + 4);
+      };
       for (const s of model.shapes) {
         if (isHidden(model, s) || s.id === opts.exclude || (ex && ex.has(s.id))) continue;
+        if (big && !near(s)) continue;
         for (const p of vertices(s)) tryPt(p, 'end');
         for (const e of edges(s)) { tryPt(V.lerp(e.a, e.b, 0.5), 'mid', V.norm(V.sub(e.b, e.a))); segs.push([e.a, e.b]); }
       }

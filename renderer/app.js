@@ -114,7 +114,11 @@ viewer.selected = app.selection;
 viewer.setModel(app.model);
 
 app.opSeq = 0;   // licznik zmian: narzędzie może poprawić wpisanym wymiarem tylko swoją ostatnią operację
-app.checkpoint = () => { app.undo.push(cloneModel(app.model)); if (app.undo.length > 200) app.undo.shift(); app.redo = []; app.opSeq++; };
+// Cofanie to kopie całego modelu, więc głębokość historii zależy od jego wagi: mały szkic pamięta 200 kroków,
+// model z dziesiątkami tysięcy ścian — kilka (inaczej historia zajmowałaby gigabajty pamięci).
+const undoDepth = () => { let w = 0; for (const s of app.model.shapes) w += s.polys ? s.polys.length : 6; return Math.max(6, Math.min(200, Math.round(300000 / Math.max(1, w)))); };
+const trimUndo = () => { const n = undoDepth(); while (app.undo.length > n) app.undo.shift(); while (app.redo.length > n) app.redo.shift(); };
+app.checkpoint = () => { app.undo.push(cloneModel(app.model)); trimUndo(); app.redo = []; app.opSeq++; };
 // cofnięcie ostatniej operacji bez zapisywania jej do „ponów” (przed powtórzeniem jej z nowym wymiarem)
 app.revertLast = () => { if (!app.undo.length) return false; app.model = app.undo.pop(); viewer.setModel(app.model); app.opSeq++; return true; };
 // autozapis: `seq` rośnie przy każdej zmianie, `saved` to stan ostatnio zapisany w kopii; `key` wyróżnia to okno
@@ -147,7 +151,7 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
 }
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
-app.commitLive = start => { app.clearSub(); unlockAxis(); app.undo.push(start); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
+app.commitLive = start => { app.clearSub(); unlockAxis(); app.undo.push(start); trimUndo(); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
 app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
 // zablokowane elementy nie mogą trafić do zaznaczenia żadną drogą (ramka, panel, „zaznacz wszystko”)
 function dropLocked() {
@@ -175,7 +179,7 @@ app.selectionChanged = () => {
   for (const id of [...app.selection]) if (isGeo(id)) { const s = app.model.shapes.find(q => q.id === id); app.selection.delete(id); app.sub = [...app.sub.filter(q => q.id !== id), ...subFaces(s, s.polys.map((_, i) => i))]; }
   // bryła wyjęta do polecenia na obiektach, która przestała być zaznaczona, wraca do wspólnej geometrii
   if (app.model.shapes.some(q => q.apart && !app.selection.has(q.id))) { for (const q of app.model.shapes) if (q.apart && !app.selection.has(q.id)) delete q.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } viewer.setModel(app.model); }
-  showSub(); viewer.rebuild(); app.refresh(); app.renderViewChip?.();
+  showSub(); viewer.reselect(); app.refresh(); app.renderViewChip?.();
 };
 // Polecenia działające na całych obiektach (grupa, ukryj, kopiuj, skaluj…): zaznaczone ściany wspólnej geometrii są
 // wyjmowane do osobnej bryły, która zostaje zaznaczona. Po odznaczeniu wraca do wspólnej geometrii (postEdit).
