@@ -1,7 +1,17 @@
 // Przyklejanie kursora (inferencje jak w SketchUpie): końce i środki krawędzi, krawędzie, ściany, ziemia,
 // osie od punktu początkowego, wyrównanie „od punktu” do niedawno wskazanych punktów, blokada osi strzałkami.
 
-import { vertices, edges, V, isHidden } from './model.js';
+import { vertices, edges, V, isHidden, faceByKey } from './model.js';
+import { isMesh, newell } from './mesh.js';
+// Punkt trafienia ściany z karty graficznej ma dokładność ~1e-7 — dociskamy go do dokładnej płaszczyzny ściany z modelu,
+// żeby to, co narysowane na ścianie, leżało dokładnie na niej (inaczej zostają drzazgi i ściany „prawie” płaskie).
+function onFace(m, hit) {
+  const s = m && m.shapes.find(q => q.id === hit.shapeId); if (!s) return hit.point;
+  const i = String(hit.key).startsWith('p:') ? +hit.key.split(':')[1] : -1;
+  const P = isMesh(s) ? s.polys[i] : faceByKey(s, hit.key)?.verts; if (!P || P.length < 3) return hit.point;
+  const n = newell(P), d = V.dot(V.sub(hit.point, P[0]), n);
+  return Math.abs(d) < 1e-3 ? V.sub(hit.point, V.mul(n, d)) : hit.point;
+}
 
 import { _t } from './i18n.js';
 export const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
@@ -316,7 +326,7 @@ export class Snapper {
     // ściana pod kursorem
     const hit = v.pick(x, y);
     if (eb) return { p: eb.p, type: 'edge', label: _t('Na krawędzi'), face: hit, dir: eb.dir };
-    if (hit) return { p: hit.point, type: 'face', label: _t('Na ścianie'), face: hit };
+    if (hit) return { p: onFace(model || v.model, hit), type: 'face', label: _t('Na ścianie'), face: hit };
 
     // 4. ziemia
     const g = v.onPlane(x, y, [0, 0, 0], [0, 0, 1]);

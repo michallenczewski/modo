@@ -78,7 +78,20 @@ export function addFace(s, outer, holes = [], paint = null) {
   const have = new Map(); for (const p of s.polys) for (const v of p) have.set(VK(v), v);
   const weld = L => L.map(p => (have.get(VK(p)) || p).slice());
   outer = weld(outer); holes = holes.map(weld);
-  const n = newell(outer), w = V.dot(n, outer[0]);
+  let n = newell(outer), w = V.dot(n, outer[0]);
+  // Ściana narysowana na istniejącej ścianie trafia dokładnie w jej płaszczyznę. Punkty z kliknięć odstają od ściany
+  // o ułamki (~1e-7, dokładność karty graficznej), każdy o inną wartość — bez dociśnięcia zostają drzazgi i ściany
+  // „prawie” płaskie, które psują następne kroki (wypychanie, podział na ściany).
+  // (tylko gdy każdy punkt nowej ściany leży od tamtej płaszczyzny najwyżej o szum — prawie równoległa ściana daleko
+  // stąd, np. z importu, nie może przechylić nowej)
+  const off = (q, p) => Math.abs(V.dot(q.n, p) - q.w);
+  const host = s.polys.map(planeOf).find(q => Math.abs(Math.abs(V.dot(q.n, n)) - 1) < 1e-6 && [outer, ...holes].every(L => L.every(p => off(q, p) < 1e-5)));
+  if (host) {
+    const q = host, side = V.dot(q.n, n) < 0 ? -1 : 1;
+    const put = p => have.get(VK(p)) || V.sub(p, V.mul(q.n, V.dot(q.n, p) - q.w));
+    outer = outer.map(put); holes = holes.map(h => h.map(put));
+    n = V.mul(q.n, side); w = q.w * side;
+  }
   const idx = []; s.polys.forEach((p, i) => { if (inPlane(p, n, w)) idx.push(i); });
   const pieces = () => holes.length ? triangulateHoles(outer, holes) : [outer.map(p => p.slice())];
   const push = list => { const fc = { ...(s.fc || {}) }; let k = s.polys.length; for (const p of list) { if (paint) fc['p:' + k] = paint; k++; } setPolys(s, [...s.polys, ...list], fc); };

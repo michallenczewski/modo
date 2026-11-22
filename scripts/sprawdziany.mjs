@@ -16,8 +16,9 @@ const { absorb } = await import(R + 'geo.js');
 const { regions, regionOf, meshVolume, newell, inPoly } = await import(R + 'mesh.js');
 
 /* ---------- szkic i kroki ---------- */
+let ostatni = null;   // szkic bieżącego przypadku (do wspólnych kontroli)
 class Szkic {
-  constructor() { this.m = newModel(); }
+  constructor() { this.m = newModel(); ostatni = this; }
   get geo() { return this.m.shapes.find(s => s.geo) || null; }
   // jak postEdit w app.js
   edit(fn) { const prev = cloneModel(this.m); fn(this.m); stitch(this.m, prev, 200); absorb(this.m, null); return this; }
@@ -26,6 +27,12 @@ class Szkic {
   rectXY(x, y, z, a, b) { return this.rect([x, y, z], [1, 0, 0], [0, 1, 0], a, b); }
   rectXZ(x, y, z, a, b) { return this.rect([x, y, z], [1, 0, 0], [0, 0, 1], a, b); }   // na ścianie y = const
   rectYZ(x, y, z, a, b) { return this.rect([x, y, z], [0, 1, 0], [0, 0, 1], a, b); }   // na ścianie x = const
+  // czworokąt z czterech punktów 3D (jak z kliknięć myszą — mogą być minimalnie poza płaszczyzną ściany)
+  quad(a, b, c, d) {
+    const u = V.norm(V.sub(b, a)), w0 = V.sub(d, a), n = V.norm(V.cross(u, w0)), v = V.cross(n, u);
+    const to = p => [V.dot(V.sub(p, a), u), V.dot(V.sub(p, a), v)];
+    return this.edit(m => makeShape(m, { o: a, u, v }, [a, b, c, d].map(to), 0));
+  }
   circle(o, u, v, r, n = 24) { return this.edit(m => makeShape(m, { o, u, v }, circlePts(r, n), 0)); }
   line(a, b) { return this.edit(m => m.lines.push({ id: m.next++, a, b })); }
   // ściana pod punktem p (opcjonalnie zwrócona w stronę n): indeks wielokąta
@@ -54,9 +61,12 @@ class Szkic {
   faceArea(p, n) { const s = this.geo, i = this.faceAt(p, n); if (i < 0) return 0; return regionOf(s, i).reduce((a, j) => a + polyArea(s.polys[j]), 0); }
   // domknięcie: każdy odcinek krawędzi (po podziale na wszystkich wierzchołkach) użyty tyle samo razy w obie strony
   get open() { return openEdges(this.geo); }
+  // śmieci: wielokąty o zerowym polu (punkty na jednej prostej) i podwójne wielokąty — sprawdzane w każdym przypadku
+  get junk() { const s = this.geo; if (!s) return 0; const seen = new Set(); let n = 0; for (const P of s.polys) { const k = P.map(p => p.map(x => Math.round(x * 1e5)).join(',')).sort().join(';'); let L = 0; for (let i = 0; i < P.length; i++) L = Math.max(L, V.dist(P[i], P[(i + 1) % P.length])); if (polyArea(P) <= Math.max(1e-9, 1e-6 * L * L) || seen.has(k)) n++; seen.add(k); } return n; }
 }
 const onBorder = (p, P) => P.some((a, i) => { const b = P[(i + 1) % P.length], L = V.dist(a, b); if (L < 1e-9) return false; const e = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(p, a), e); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(a, V.mul(e, t)), p) < 1e-6; });
-function polyArea(P) { const n = newell(P); let s = [0, 0, 0]; for (let i = 0; i < P.length; i++) s = V.add(s, V.cross(P[i], P[(i + 1) % P.length])); return Math.abs(V.dot(s, n)) / 2; }
+// (długość sumy iloczynów wektorowych — działa też dla wielokąta z punktów na jednej prostej, gdzie normalnej nie ma)
+function polyArea(P) { let s = [0, 0, 0]; for (let i = 0; i < P.length; i++) s = V.add(s, V.cross(P[i], P[(i + 1) % P.length])); return V.len(s) / 2; }
 function openEdges(s) {
   if (!s) return 0;
   const K = p => p.map(x => Math.round(x * 1e5)).join(','), pts = new Map();
@@ -202,6 +212,29 @@ przypadek('dom z dachem — okno i drzwi', 'Pudło, linia kalenicy przesunięta 
   return { 'objętość domu': [v0, 72 + 18], objętość: [s.volume, 90 - 0.3 - 0.6], otwarte: [s.open, 0], 'tył okna': [s.has([4, 0.3, 1.5], mY), true], 'tył drzwi': [s.has([1.5, 0.3, 1], mY), true], 'stara ściana drzwi': [s.has([1.5, 0, 1]), false] };
 });
 
+przypadek('drzwi, potem okno obok', 'Prostokąt drzwi od podłogi, potem prostokąt okna obok (oba przed wciśnięciem) — tak rysował Michał 22.11.2026.', () => {
+  const s = dom(); s.rectXZ(1, 0, 0, 1, 2); s.rectXZ(3, 0, 1, 1, 1.05);
+  const f1 = s.faces; s.push([3.5, 0, 1.5], -0.3, mY); s.push([1.5, 0, 1], -0.3, mY);
+  return { 'ściany po narysowaniu': [f1, 8], objętość: [s.volume, 72 - 0.315 - 0.6], otwarte: [s.open, 0], ściany: [s.faces, 15] };
+});
+
+// liczby z okna programu (22.11.2026): ściana y ≈ 2,1741246, a narożniki narysowanych prostokątów odstają od niej o ~1e-7
+// i każdy o inną wartość — tak zwraca je przyciąganie do ściany (dokładność karty graficznej)
+przypadek('krzywe liczby z myszy — drzwi i okno', 'Dom Michała: drzwi i okno narysowane punktami minimalnie poza ścianą, potem wciśnięte.', () => {
+  const Y = 2.1741246285270037, s = new Szkic().rectXY(-0.7489504364185677, Y, 0, 17.03506532244527 + 0.7489504364185677, 19.82594116633527 - Y);
+  wyciagnij(s, [8, 10, 0], 11.609957863303794);
+  const D = [4.5289013048765625, 8.143057443013351, 0, 8.314740785552182], yd = 2.1741247177124015;
+  s.quad([D[0], yd, D[2]], [D[1], yd, D[2]], [D[1], yd, D[3]], [D[0], yd, D[3]]);
+  const W = [11.121418747571987, 14.1676377963004, 3.982904048124059, 8.211496241371739];
+  s.quad([W[0], 2.1741247242216026, W[2]], [W[1], 2.174124726660702, W[2]], [W[1], 2.1741247201515015, W[3]], [W[0], 2.1741247177124023, W[3]]);
+  const f1 = s.faces, j1 = s.junk;
+  s.push([(W[0] + W[1]) / 2, Y, (W[2] + W[3]) / 2], -1.43, mY); s.push([(D[0] + D[1]) / 2, Y, 4], -1.41, mY);
+  const front = s.geo.polys.filter(P => P.every(p => Math.abs(p[1] - Y) < 1e-4));
+  return { 'ściany po narysowaniu': [f1, 8], 'śmieci po narysowaniu': [j1, 0], otwarte: [s.open, 0], ściany: [s.faces, 15],
+    'przód dokładnie w płaszczyźnie ściany': [front.every(P => P.every(p => p[1] === Y)), true],
+    'tył okna': [s.has([12.6, Y + 1.43, 6], mY), true], 'tył drzwi': [s.has([6.3, Y + 1.41, 4], mY), true] };
+});
+
 /* cienka ściana budynku: płyta 6 × 0,3 × 3 */
 const sciana = () => { const s = new Szkic().rectXY(0, 0, 0, 6, 0.3); wyciagnij(s, [3, 0.15, 0], 3); return s; };
 przypadek('cienka ściana — okno', 'Okno w ścianie grubości 0,3: prostokąt wciśnięty o 0,3 robi otwór na wylot.', () => {
@@ -226,7 +259,7 @@ for (const c of P) {
   if (filt && !c.nazwa.toLowerCase().includes(filt)) continue;
   n++;
   let res, err = null;
-  try { res = c.fn(); } catch (e) { err = e; }
+  try { ostatni = null; res = c.fn(); if (ostatni) res['śmieci (zerowe i podwójne wielokąty)'] = [ostatni.junk, 0]; } catch (e) { err = e; }
   const fails = err ? [] : Object.entries(res).filter(([, [got, want]]) => !near(got, want));
   if (err || fails.length) {
     bad++;

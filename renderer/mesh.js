@@ -219,7 +219,9 @@ function dropCollinear(loop, keep) {
 
 // scala kawałki jednej ściany w jeden wielokąt (gdy ściana nie ma otworów) i usuwa zdegenerowane
 export function simplify(s) {
-  s.polys = s.polys.filter(p => p.length >= 3 && polyArea(p) > 1e-9);
+  // wielokąty zdegenerowane: o polu zerowym względem swojej wielkości (punkty prawie na jednej prostej — drzazgi po cięciu
+  // ściany z drobnymi niedokładnościami liczb); inaczej zostają w modelu jako „ściany” rysowane kreskami
+  s.polys = s.polys.filter(p => { if (p.length < 3) return false; let L = 0; for (let i = 0; i < p.length; i++) L = Math.max(L, V.dist(p[i], p[(i + 1) % p.length])); return polyArea(p) > Math.max(1e-9, 1e-6 * L * L); });
   // punkty używane przez ściany w innej płaszczyźnie zostają (złącza z sąsiednimi ścianami)
   const keep = pointKeeper(s);
   const r = regions(s), groups = new Map();
