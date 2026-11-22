@@ -10,6 +10,11 @@ import { ShapeUtils, Vector2 } from './vendor/three.module.js';
 
 export const isMesh = s => s && s.kind === 'mesh';
 const EPS = 1e-6;
+// Numery ścian z rdzenia (topo.js) są ważne, dopóki wielokąty się nie zmieniły inną drogą: podpis to liczby wierzchołków
+// kolejnych wielokątów (przesunięcie punktów go nie zmienia, dodanie / usunięcie / pocięcie wielokąta — tak).
+// (do podpisu wchodzi też liczba znaczników: gumka na krawędzi między ścianami usuwa znacznik — ściany mają się scalić)
+export const polySig = (polys, marks) => polys.length + ':' + polys.map(p => p.length).join(',') + '|' + (marks ? marks.length : 0);
+export const fidValid = s => Array.isArray(s.fid) && s.fid.length === s.polys.length && s.fidSig === polySig(s.polys, s.marks);
 
 export function newell(p) {
   let n = [0, 0, 0];
@@ -82,7 +87,33 @@ export function meshTriangles(s) {
 /* ---------- krawędzie i ściany ---------- */
 const edgeCache = new WeakMap();
 export function meshEdges(s) {
-  const c = edgeCache.get(s.polys); if (c && c.marks === s.marks && c.softs === s.softs && c.hid === s.hid) return c.edges;
+  const c = edgeCache.get(s.polys); if (c && c.marks === s.marks && c.softs === s.softs && c.hid === s.hid && c.fid === s.fid) return c.edges;
+  if (fidValid(s)) {
+    // krawędź = brzeg ściany: boki kawałków jednej ściany (podzielone w jej punktach leżących na boku) znoszą się parami,
+    // zostaje obrys; krawędź rysujemy raz, z normalnymi obu ścian, które się na niej stykają
+    const K = p => Math.round(p[0] * 1e5) + ',' + Math.round(p[1] * 1e5) + ',' + Math.round(p[2] * 1e5);
+    const groups = new Map(); s.polys.forEach((P, i) => { const g = s.fid[i]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(P); });
+    const map = new Map();
+    for (const [id, polys] of groups) {
+      const n = newell(polys[0]), pts = new Map(); for (const P of polys) for (const p of P) pts.set(K(p), p);
+      const all = [...pts.values()], half = new Map();
+      for (const P of polys) for (let j = 0; j < P.length; j++) {
+        const a = P[j], b = P[(j + 1) % P.length], L = V.dist(a, b); if (L < EPS) continue;
+        const e = V.mul(V.sub(b, a), 1 / L), ts = [[0, a], [L, b]];
+        if (polys.length > 1) for (const q of all) { const t = V.dot(V.sub(q, a), e); if (t > 1e-6 && t < L - 1e-6 && V.dist(V.add(a, V.mul(e, t)), q) < 1e-6) ts.push([t, q]); }
+        ts.sort((x, y) => x[0] - y[0]);
+        for (let k = 0; k + 1 < ts.length; k++) { const p = ts[k][1], q = ts[k + 1][1], back = K(q) + '>' + K(p); if (half.has(back)) half.delete(back); else half.set(K(p) + '>' + K(q), [p, q]); }
+      }
+      for (const [p, q] of half.values()) { const x = K(p), y = K(q), k = x < y ? x + '|' + y : y + '|' + x; let e = map.get(k); if (!e) map.set(k, e = { a: p, b: q, f: [] }); if (!e.f.some(z => z.id === id)) e.f.push({ id, n }); }
+    }
+    const edges = [];
+    for (const e of map.values()) edges.push({ a: e.a, b: e.b, n1: e.f[0].n, n2: e.f[1] ? e.f[1].n : null });
+    const onEdge = m => edges.some(e => { const L = V.dist(e.a, e.b); if (L < EPS) return false; const d = V.mul(V.sub(e.b, e.a), 1 / L), t = V.dot(V.sub(m, e.a), d); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(e.a, V.mul(d, t)), m) < 1e-5; });
+    for (const [a, b] of s.marks || []) { const mid = V.lerp(a, b, 0.5); if (onEdge(mid)) continue; const f = s.polys.find(p => Math.abs(V.dot(newell(p), V.sub(mid, p[0]))) < 1e-5); const n = f ? newell(f) : [0, 0, 1]; edges.push({ a, b, n1: n, n2: n }); }
+    flagEdges(s, edges);
+    edgeCache.set(s.polys, { marks: s.marks, softs: s.softs, hid: s.hid, fid: s.fid, edges });
+    return edges;
+  }
   const tris = [];
   for (const p of s.polys) for (const t of triangulatePoly(p)) { const n = newell(t); tris.push({ vs: t, n, w: V.dot(n, t[0]), shared: { soft: !!s.soft } }); }
   const edges = resultEdges(tris);
@@ -94,7 +125,7 @@ export function meshEdges(s) {
     edges.push({ a, b, n1: n, n2: n });
   }
   flagEdges(s, edges);
-  edgeCache.set(s.polys, { marks: s.marks, softs: s.softs, hid: s.hid, edges });
+  edgeCache.set(s.polys, { marks: s.marks, softs: s.softs, hid: s.hid, fid: s.fid, edges });
   return edges;
 }
 // krawędzie wygładzone (s.softs) i ukryte (s.hid) — listy odcinków; pasująca krawędź dostaje flagę
@@ -157,6 +188,8 @@ function edgeGrid(s, pl) {
 }
 const regionCache = new WeakMap();
 export function regions(s) {
+  // ściany z rdzenia (topo.js) mają numery — nic nie trzeba odgadywać
+  if (fidValid(s)) return s.fid;
   const c = regionCache.get(s.polys); if (c && c.marks === s.marks) return c.r;
   const pl = s.polys.map(planeOf), n = s.polys.length, par = [...Array(n).keys()];
   const find = i => par[i] === i ? i : (par[i] = find(par[i]));
@@ -219,6 +252,15 @@ function dropCollinear(loop, keep) {
 
 // scala kawałki jednej ściany w jeden wielokąt (gdy ściana nie ma otworów) i usuwa zdegenerowane
 export function simplify(s) {
+  if (fidValid(s)) {
+    // ściany z rdzenia są już czyste: tylko zdegenerowane kawałki wypadają (z numerami w parze)
+    const keep = s.polys.map(p => { if (p.length < 3) return false; let L = 0; for (let i = 0; i < p.length; i++) L = Math.max(L, V.dist(p[i], p[(i + 1) % p.length])); return polyArea(p) > Math.max(1e-9, 1e-6 * L * L); });
+    if (keep.every(Boolean)) return s;
+    const fc = {}, polys = [], fid = [];
+    s.polys.forEach((p, i) => { if (!keep[i]) return; if (s.fc && s.fc['p:' + i]) fc['p:' + polys.length] = s.fc['p:' + i]; polys.push(p); fid.push(s.fid[i]); });
+    s.polys = polys; s.fid = fid; s.fidSig = polySig(polys, s.marks); if (Object.keys(fc).length) s.fc = fc; else delete s.fc;
+    return s;
+  }
   // wielokąty zdegenerowane: o polu zerowym względem swojej wielkości (punkty prawie na jednej prostej — drzazgi po cięciu
   // ściany z drobnymi niedokładnościami liczb); inaczej zostają w modelu jako „ściany” rysowane kreskami
   s.polys = s.polys.filter(p => { if (p.length < 3) return false; let L = 0; for (let i = 0; i < p.length; i++) L = Math.max(L, V.dist(p[i], p[(i + 1) % p.length])); return polyArea(p) > Math.max(1e-9, 1e-6 * L * L); });
@@ -392,6 +434,7 @@ export function insertPoint(s, p) {
 export function moveMeshPoints(s, pts, d) { return mapMeshPoints(s, pts, v => V.add(v, d)); }
 // to samo dla dowolnego przekształcenia punktów (np. obrót zaznaczonej ściany)
 export function mapMeshPoints(s, pts, f) {
+  delete s.fid; delete s.fidSig;   // ściana może się zgiąć — ściany składane od nowa (jak w SketchUpie: zgięcie to krawędź)
   const K = v => v.map(x => Math.round(x * 1e5)).join(','), set = new Set(pts.map(K));
   const mv = v => set.has(K(v)) ? f(v) : v.slice();
   const out = [], fc = {};

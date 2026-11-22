@@ -13,6 +13,7 @@
 import { V, faces as facesOf, edges as edgesOf, isHidden } from './model.js';
 import { isMesh, toMesh, newell, planeOf, inPoly, triangulatePoly, triangulateHoles, regionOf, regions, regionLoops, simplify, keepPaint, splitMesh, segKey } from './mesh.js';
 import { arrange, inLoop, inner, tidy } from './stitch.js';
+import { addLoop, push } from './topo.js';
 
 const basisOf = n => { let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n)))); return { u, v: V.cross(n, u) }; };
 function frame(n, w) {
@@ -92,119 +93,16 @@ export function addFace(s, outer, holes = [], paint = null) {
     outer = outer.map(put); holes = holes.map(h => h.map(put));
     n = V.mul(q.n, side); w = q.w * side;
   }
-  const idx = []; s.polys.forEach((p, i) => { if (inPlane(p, n, w)) idx.push(i); });
-  const pieces = () => holes.length ? triangulateHoles(outer, holes) : [outer.map(p => p.slice())];
-  const push = list => { const fc = { ...(s.fc || {}) }; let k = s.polys.length; for (const p of list) { if (paint) fc['p:' + k] = paint; k++; } setPolys(s, [...s.polys, ...list], fc); };
-  if (!idx.length) { push(pieces()); return; }
-  const { to2, to3 } = frame(n, w), P2 = idx.map(i => s.polys[i].map(to2)), L2 = outer.map(to2), H2 = holes.map(h => h.map(to2));
-  const segs = [];
-  P2.forEach((L, k) => L.forEach((a, i) => segs.push({ a, b: L[(i + 1) % L.length], src: k })));
-  [L2, ...H2].forEach(L => L.forEach((a, i) => segs.push({ a, b: L[(i + 1) % L.length], src: 'new' })));
-  const A = arrange(segs), fresh = [];
-  for (const c of cellsOf(A)) {
-    const ip = inner(c.pts);
-    if (!inLoop(ip, L2) || H2.some(h => inLoop(ip, h)) || P2.some(L => inLoop(ip, L))) continue;
-    const o3 = tidy(c.pts).map(to3), h3 = c.holes.map(h => tidy(h).map(to3));
-    fresh.push(...(h3.length ? triangulateHoles(o3, h3) : [o3]));
-  }
-  // krawędzie nowej ściany biegnące przez istniejącą ścianę dzielą ją
-  const cuts = [];
-  for (const e of A.all.values()) {
-    if (!e.src.includes('new') || e.src.some(q => q !== 'new')) continue;
-    const m = [(e.a.p[0] + e.b.p[0]) / 2, (e.a.p[1] + e.b.p[1]) / 2];
-    if (P2.some(L => inLoop(m, L))) cuts.push([to3(e.a.p), to3(e.b.p)]);
-  }
-  // Krawędź nowej ściany, która biegnie po brzegu istniejącej ściany w tej samej płaszczyźnie (dwa prostokąty obok siebie,
-  // nakładające się obrysy), zostaje krawędzią — inaczej obie ściany zlałyby się w jedną (jak w SketchUpie: narysowana krawędź zostaje).
-  const keep = [];
-  for (const e of A.all.values()) {
-    const both = e.src.includes('new') && e.src.some(q => q !== 'new');
-    // brzeg istniejącej ściany, który po dodaniu nowej ściany ma ścianę po obu stronach (obrysy zachodzą na siebie)
-    const m = [(e.a.p[0] + e.b.p[0]) / 2, (e.a.p[1] + e.b.p[1]) / 2];
-    // (tylko brzeg: krawędź jednego wielokąta; przekątne podziału ściany na trójkąty należą do dwóch i nie są krawędziami)
-    const inside = !e.src.includes('new') && new Set(e.src).size === 1 && inLoop(m, L2) && !H2.some(h => inLoop(m, h));
-    if (both || inside) keep.push([to3(e.a.p), to3(e.b.p)]);
-  }
-  if (fresh.length) push(fresh);
-  if (keep.length) s.marks = [...(s.marks || []), ...keep];
-  for (const [a, b] of cuts) splitMesh(s, a, b, true, true);
+  // podział ścian, na których leży nowa — rdzeń topo.js (pola z właścicielem, czyste obrysy z otworami)
+  if (V.dot(newell(outer), n) < 0) { outer = outer.slice().reverse(); holes = holes.map(h => h.slice().reverse()); }
+  addLoop(s, outer, holes, paint);
 }
 export function finish(s) { keepPaint(s, () => simplify(s)); return s; }
 
 /* ---------- wypchnij / wciśnij ---------- */
-// Czy w punkcie o (patrząc w stronę dir) jest materiał: parzystość przecięć promienia ze ścianami. Wewnętrzna przegroda
-// (wspólna ściana dwóch brył stojących obok siebie) się nie liczy — po obu jej stronach jest materiał. Przegrodę poznajemy
-// po tym, że tuż przed nią (po stronie, w którą jest zwrócona) też jest materiał; to samo pytanie, o poziom głębiej.
-function insideAt(s, skip, o, dir, depth) {
-  let hits = 0;
-  s.polys.forEach((P, i) => {
-    if (skip.has(i)) return;
-    for (const t of triangulatePoly(P)) {
-      const e1 = V.sub(t[1], t[0]), e2 = V.sub(t[2], t[0]), h = V.cross(dir, e2), a = V.dot(e1, h); if (Math.abs(a) < 1e-12) continue;
-      const f = 1 / a, q = V.sub(o, t[0]), uu = f * V.dot(q, h); if (uu < 0 || uu > 1) continue;
-      const r = V.cross(q, e1), vv = f * V.dot(dir, r); if (vv < 0 || uu + vv > 1) continue;
-      const d = f * V.dot(e2, r); if (d <= 1e-9) continue;
-      if (depth > 0) {
-        // za ścianą zawsze jest materiał; jeśli przed nią (po stronie, w którą jest zwrócona) też — to przegroda, pomijamy
-        const n = newell(P), hp = V.add(o, V.mul(dir, d)), { u, v } = basisOf(n);
-        const d2 = V.norm(V.add(n, V.add(V.mul(u, 0.0113), V.mul(v, 0.0089))));
-        if (insideAt(s, new Set([i]), V.add(hp, V.mul(d2, 1e-5)), d2, depth - 1)) continue;
-      }
-      hits++;
-    }
-  });
-  return hits % 2 === 1;
-}
-// czy tuż za ścianą (po stronie przeciwnej do normalnej) jest materiał
-function solidBehind(s, skip, p, n) {
-  const { u, v } = basisOf(n), dir = V.norm(V.add(V.mul(n, -1), V.add(V.mul(u, 0.0137), V.mul(v, 0.0071))));
-  return insideAt(s, skip, V.add(p, V.mul(dir, 1e-5)), dir, 2);
-}
-// Ściana `pi` (cały jej obszar) przesunięta o d wzdłuż normalnej. Jak w SketchUpie:
-//  – wyciągana ze ściany bryły dokłada materiał, wciskana — wybiera go (do przeciwległej ściany: otwór na wylot),
-//  – wolna płaska ściana staje się bryłą; jej pierwotne miejsce zostaje jako druga podstawa,
-//  – keep (⌥ / Ctrl): pierwotna ściana zostaje na miejscu.
-export function pushFace(s, pi, d, keep) {
-  if (Math.abs(d) < 1e-9) return s;
-  const idx = regionOf(s, pi), n = newell(s.polys[pi]), sweep = V.mul(n, d), R = new Set(idx);
-  const loops = regionLoops(s, idx), paint = s.fc && s.fc['p:' + pi];
-  const t0 = triangulatePoly(s.polys[pi])[0], mat = solidBehind(s, R, V.mul(V.add(V.add(t0[0], t0[1]), t0[2]), 1 / 3), n);
-  const back = d < 0 && !mat;   // wolna ściana ciągnięta do tyłu: bryła rośnie po tej stronie
-  const out = [], fc = {}, put = (poly, pt) => { if (pt) fc['p:' + out.length] = pt; out.push(poly); };
-  const rev = p => p.slice().reverse();
-  s.polys.forEach((p, i) => {
-    const pt = s.fc && s.fc['p:' + i];
-    if (!R.has(i)) return put(p, pt);
-    // pierwotne miejsce ściany: zostaje, gdy za nią nie ma materiału (staje się spodem nowej bryły) albo na życzenie
-    if (keep || !mat) put(d > 0 && !mat ? rev(p) : p, pt);
-  });
-  // denko: ściana w nowym miejscu
-  for (const i of idx) { const q = s.polys[i].map(p => V.add(p, sweep)); put(back ? rev(q) : q, paint); }
-  // boki; kolor biorą od ściany, którą przedłużają
-  const softs = [], sides = new WeakSet();
-  for (const L of loops) {
-    const round = L.length >= 12;
-    L.forEach((a, i) => {
-      const b = L[(i + 1) % L.length], q = [a, b, V.add(b, sweep), V.add(a, sweep)], side = back ? rev(q) : q, sn = newell(side);
-      let pt = null;
-      s.polys.some((P, k) => { if (R.has(k) || !(s.fc && s.fc['p:' + k])) return false; const pn = newell(P); if (V.dot(pn, sn) < 1 - 1e-6 || Math.abs(V.dot(pn, V.sub(a, P[0]))) > 1e-5) return false; const onEdge = P.some((c, j) => { const e = P[(j + 1) % P.length], l = V.dist(c, e); if (l < 1e-9) return false; const k2 = V.mul(V.sub(e, c), 1 / l), m = V.lerp(a, b, 0.5), t = V.dot(V.sub(m, c), k2); return t > -1e-6 && t < l + 1e-6 && V.dist(V.add(c, V.mul(k2, t)), m) < 1e-5; }); if (onEdge) pt = s.fc['p:' + k]; return onEdge; });
-      put(side, pt); sides.add(side);
-      // obły obrys (okrąg, łuk): krawędzie między bokami są wygładzone
-      if (round) { const p0 = L[(i - 1 + L.length) % L.length], e1 = V.norm(V.sub(a, p0)), e2 = V.norm(V.sub(b, a)); if (V.dot(e1, e2) > 0.9) softs.push([a.slice(), V.add(a, sweep)]); }
-    });
-  }
-  setPolys(s, out, fc);
-  if (softs.length) s.softs = [...(s.softs || []), ...softs];
-  // porządek we wszystkich dotkniętych płaszczyznach: denka, pierwotnej ściany i boków
-  const planes = new Map(), add = (m, p) => { const w = V.dot(m, p); planes.set(planeKey(m, w), [m, w]); };
-  add(n, loops[0][0]); add(n, V.add(loops[0][0], sweep));
-  for (const L of loops) L.forEach((a, i) => { const b = L[(i + 1) % L.length], m = V.cross(V.sub(b, a), n); if (V.len(m) > 1e-9) add(V.norm(m), a); });
-  // wolna ściana (np. prostokąt narysowany na ziemi obok bryły) staje się nową bryłą: jej boki nie kasują ścian sąsiedniej
-  // bryły, na które trafiają — zostaje wspólna przegroda. Przy ścianie bryły (wciskanie, wyciąganie z powrotem wnęki) boki
-  // i ściany, na które trafiają, znoszą się jak dawniej.
-  for (const [m, w] of planes.values()) rebuildPlane(s, m, w, mat ? null : sides);
-  return finish(s);
-}
+// Ściana `pi` (cały jej obszar) przesunięta o d wzdłuż normalnej — rdzeń topo.js (jak w SketchUpie, bez zgadywania,
+// gdzie jest materiał). keep (⌥ / Ctrl): pierwotna ściana zostaje na miejscu.
+export function pushFace(s, pi, d, keep) { return push(s, pi, d, keep); }
 
 /* ---------- części spójne, usuwanie, wyjmowanie ---------- */
 const VK = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4) + ',' + Math.round(p[2] * 1e4);

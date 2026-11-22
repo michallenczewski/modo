@@ -13,7 +13,8 @@ const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
 const { absorb } = await import(R + 'geo.js');
-const { regions, regionOf, meshVolume, newell, inPoly } = await import(R + 'mesh.js');
+const { deleteEdge, deleteFace } = await import(R + 'tools.js');
+const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
 /* ---------- szkic i kroki ---------- */
 let ostatni = null;   // szkic bieżącego przypadku (do wspólnych kontroli)
@@ -61,6 +62,8 @@ class Szkic {
   faceArea(p, n) { const s = this.geo, i = this.faceAt(p, n); if (i < 0) return 0; return regionOf(s, i).reduce((a, j) => a + polyArea(s.polys[j]), 0); }
   // domknięcie: każdy odcinek krawędzi (po podziale na wszystkich wierzchołkach) użyty tyle samo razy w obie strony
   get open() { return openEdges(this.geo); }
+  // krawędzie, które program rysuje (granice ścian i linie na ścianach)
+  get edges() { const s = this.geo; return s ? meshEdges(s).filter(e => !e.hid).length : 0; }
   // śmieci: wielokąty o zerowym polu (punkty na jednej prostej) i podwójne wielokąty — sprawdzane w każdym przypadku
   get junk() { const s = this.geo; if (!s) return 0; const seen = new Set(); let n = 0; for (const P of s.polys) { const k = P.map(p => p.map(x => Math.round(x * 1e5)).join(',')).sort().join(';'); let L = 0; for (let i = 0; i < P.length; i++) L = Math.max(L, V.dist(P[i], P[(i + 1) % P.length])); if (polyArea(P) <= Math.max(1e-9, 1e-6 * L * L) || seen.has(k)) n++; seen.add(k); } return n; }
 }
@@ -205,9 +208,10 @@ przypadek('okno wyciągnięte na zewnątrz', 'Prostokąt na ścianie wyciągnię
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.push([2.5, 0, 1.5], 0.3, mY); const v1 = s.volume; s.push([2.5, -0.3, 1.5], -0.6, mY);
   return { 'objętość z wykuszem': [v1, 72.3], objętość: [s.volume, 72 - 0.3], otwarte: [s.open, 0] };
 });
+// kalenica: linia przez środek dachu przesunięta w górę o 1,5 (jak narzędzie Przesuń na krawędzi — punkty i znaczniki razem)
+const kalenica = s => s.edit(m => { const g = m.shapes.find(q => q.geo), up = p => (Math.abs(p[0] - 3) < 1e-9 && Math.abs(p[2] - 3) < 1e-9) ? [p[0], p[1], 4.5] : p; g.polys = g.polys.map(P => P.map(up)); if (g.marks) g.marks = g.marks.map(e => e.map(up)); });
 przypadek('dom z dachem — okno i drzwi', 'Pudło, linia kalenicy przesunięta w górę o 1,5, potem okno i drzwi we froncie (wnęki 0,3).', () => {
-  const s = dom(); s.line([3, 0, 3], [3, 4, 3]);
-  s.edit(m => { const g = m.shapes.find(q => q.geo); g.polys = g.polys.map(P => P.map(p => (Math.abs(p[0] - 3) < 1e-9 && Math.abs(p[2] - 3) < 1e-9) ? [p[0], p[1], 4.5] : p)); });
+  const s = dom(); s.line([3, 0, 3], [3, 4, 3]); kalenica(s);
   const v0 = s.volume; s.rectXZ(3.5, 0, 1, 1, 1); s.push([4, 0, 1.5], -0.3, mY); s.rectXZ(1, 0, 0, 1, 2); s.push([1.5, 0, 1], -0.3, mY);
   return { 'objętość domu': [v0, 72 + 18], objętość: [s.volume, 90 - 0.3 - 0.6], otwarte: [s.open, 0], 'tył okna': [s.has([4, 0.3, 1.5], mY), true], 'tył drzwi': [s.has([1.5, 0.3, 1], mY), true], 'stara ściana drzwi': [s.has([1.5, 0, 1]), false] };
 });
@@ -233,6 +237,45 @@ przypadek('krzywe liczby z myszy — drzwi i okno', 'Dom Michała: drzwi i okno 
   return { 'ściany po narysowaniu': [f1, 8], 'śmieci po narysowaniu': [j1, 0], otwarte: [s.open, 0], ściany: [s.faces, 15],
     'przód dokładnie w płaszczyźnie ściany': [front.every(P => P.every(p => p[1] === Y)), true],
     'tył okna': [s.has([12.6, Y + 1.43, 6], mY), true], 'tył drzwi': [s.has([6.3, Y + 1.41, 4], mY), true] };
+});
+
+przypadek('okrąg na ścianie', 'Okrąg (24 boki) na przedniej ścianie: 7 ścian, rysowane krawędzie = 12 pudła + 24 okręgu.', () => {
+  const s = dom(); s.circle([3, 0, 1.5], X, Z, 0.8);
+  return { ściany: [s.faces, 7], krawędzie: [s.edges, 36], otwarte: [s.open, 0] };
+});
+przypadek('okrąg wciśnięty w ścianę', 'Okrąg na ścianie wciśnięty o 0,3: wnęka walcowa; krawędzie: 12 + 24 brzeg + 24 dno + 24 boczne.', () => {
+  const s = dom(); s.circle([3, 0, 1.5], X, Z, 0.8); s.push([3, 0, 1.5], -0.3, mY);
+  return { ściany: [s.faces, 6 + 1 + 24], krawędzie: [s.edges, 12 + 24 * 3], otwarte: [s.open, 0], 'dno wnęki': [s.has([3, 0.3, 1.5], mY), true] };
+});
+przypadek('trzy okręgi na domu z dachem', 'Dom z dachem dwuspadowym; okrąg na froncie, na boku i na połaci dachu — żadnych krawędzi poza okręgami.', () => {
+  const s = dom(); s.line([3, 0, 3], [3, 4, 3]);
+  kalenica(s);
+  const e0 = s.edges, f0 = s.faces;
+  s.circle([2, 0, 1.5], X, Z, 0.7); s.circle([6, 2, 1.5], Y, Z, 0.7);
+  const n = V.norm([-1.5, 0, 3]), u = [0, 1, 0], v = V.cross(n, u); s.circle([1.5, 2, 3.75], u, v, 0.5);
+  return { 'krawędzie domu': [e0, 15], 'ściany domu': [f0, 7], ściany: [s.faces, 10], krawędzie: [s.edges, 15 + 72], otwarte: [s.open, 0] };
+});
+
+// polecenia spoza rdzenia (linia na ścianie, gumka, usuwanie ściany) — ściany w jednej płaszczyźnie nie mogą się zlać
+przypadek('okno, potem linia na dachu', 'Prostokąt okna na froncie, potem linia przez dach: okno zostaje osobną ścianą (8 ścian).', () => {
+  const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.line([3, 0, 3], [3, 4, 3]);
+  return { ściany: [s.faces, 8], 'okno': [s.faceArea([2.5, 0, 1.5], mY), 1] };
+});
+przypadek('gumka na krawędzi okna', 'Gumka na dolnej krawędzi narysowanego okna: okno wraca do ściany (6 ścian), bryła domknięta.', () => {
+  const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => deleteEdge(m, m.shapes.find(q => q.geo), [2, 0, 1], [3, 0, 1], true));
+  return { ściany: [s.faces, 6], otwarte: [s.open, 0], 'front cały': [s.faceArea([1, 0, 0.5], mY), 18] };
+});
+przypadek('gumka między prostokątami', 'Dwa prostokąty na ziemi, gumka na wspólnym boku: jedna ściana 4 × 2.', () => {
+  const s = new Szkic().rectXY(0, 0, 0, 2, 2).rectXY(2, 0, 0, 2, 2); s.edit(m => deleteEdge(m, m.shapes.find(q => q.geo), [2, 0, 0], [2, 2, 0], true));
+  return { ściany: [s.faces, 1], pole: [s.faceArea([1, 1, 0]), 8] };
+});
+przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
+  const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });
+  return { ściany: [s.faces, 6], 'okno': [s.faceArea([2.5, 0, 1.5], mY), 1] };
+});
+przypadek('bryły obok siebie — front jednej wciśnięty', 'Dwie bryły 2×2×2 obok siebie, front lewej wciśnięty o 1: odsłonięta część przegrody staje się ścianą prawej bryły.', () => {
+  const s = new Szkic().rectXY(0, 0, 0, 2, 2); wyciagnij(s, [1, 1, 0], 2); s.rectXY(2, 0, 0, 2, 2); wyciagnij(s, [3, 1, 0], 2); s.push([1, 0, 1], -1, mY);
+  return { 'bok prawej bryły': [s.has([2, 0.5, 1], mX), true], 'przegroda dalej': [s.has([2, 1.5, 1]), true], 'nowy front lewej': [s.has([1, 1, 1], mY), true] };
 });
 
 /* cienka ściana budynku: płyta 6 × 0,3 × 3 */
