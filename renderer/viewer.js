@@ -141,6 +141,9 @@ function shapeSig(s) {
   if (s.polys) for (const p of s.polys) for (const v of p) { n++; sum += (v[0] * 1.37 + v[1] * 2.11 + v[2] * 3.07) * (n % 251 + 1); }
   return n + '|' + sum + '|' + JSON.stringify([s.pts, s.fc, s.softs, s.hid, s.marks, s.o, s.u, s.v, s.h, s.holes, s.alpha, s.soft, s.color, s.tex, s.open]);
 }
+// Szkło jest odsunięte w głąb bardziej niż zwykłe ściany: szyba leżąca dokładnie na stropie (ta sama płaszczyzna)
+// zawsze przegrywa ze stropem — inaczej karta graficzna rozstrzyga to raz tak, raz tak i na szybie pojawiają się prostokąty.
+const GLASS_OFS = [4, 16];
 const hex3 = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
 
 export class Viewer {
@@ -418,7 +421,7 @@ export class Viewer {
       geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
         map, vertexColors: true, side: pk.two ? THREE.DoubleSide : THREE.FrontSide, transparent: pk.glass, opacity: pk.a, depthWrite: !pk.glass,
-        polygonOffset: true, polygonOffsetFactor: pk.flat ? 0.5 : 1.5, polygonOffsetUnits: pk.flat ? 1 : 2
+        polygonOffset: true, polygonOffsetFactor: pk.glass ? GLASS_OFS[0] : pk.flat ? 0.5 : 1.5, polygonOffsetUnits: pk.glass ? GLASS_OFS[1] : pk.flat ? 1 : 2
       }));
       mesh.castShadow = pk.cast; mesh.receiveShadow = true; mesh.frustumCulled = false;
       if (pk.glass) { mesh.renderOrder = 1; anyGlass = true; this.addGlassDepth(mesh); }
@@ -457,7 +460,7 @@ export class Viewer {
 
   // szyba po narysowaniu koloru zapisuje jeszcze samą głębię — po to, żeby drugi przebieg kresek wiedział, co jest za nią
   addGlassDepth(mesh) {
-    this.glassDepthMat ||= [THREE.FrontSide, THREE.DoubleSide].map(side => new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, transparent: true, side, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 }));
+    this.glassDepthMat ||= [THREE.FrontSide, THREE.DoubleSide].map(side => new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, transparent: true, side, polygonOffset: true, polygonOffsetFactor: GLASS_OFS[0], polygonOffsetUnits: GLASS_OFS[1] }));
     const d = new THREE.Mesh(mesh.geometry, this.glassDepthMat[1]);
     d.renderOrder = 1.5; d.frustumCulled = mesh.frustumCulled; d.userData = { depthOnly: true };
     this.modelGroup.add(d);
@@ -607,7 +610,7 @@ export class Viewer {
     return new THREE.MeshLambertMaterial({
       map, color: this.colorFor(s, st, paper, color, !!map), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
       transparent: glass, opacity: a, depthWrite: !glass,
-      polygonOffset: true, polygonOffsetFactor: flat ? 0.5 : 1.5, polygonOffsetUnits: flat ? 1 : 2
+      polygonOffset: true, polygonOffsetFactor: glass ? GLASS_OFS[0] : flat ? 0.5 : 1.5, polygonOffsetUnits: glass ? GLASS_OFS[1] : flat ? 1 : 2
     });
   }
   // Ściany połączone wygładzoną krawędzią (np. trójkąty, na które złożyła się ściana po przesunięciu wierzchołka)
