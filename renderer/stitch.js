@@ -6,8 +6,8 @@
 //     linia przez istniejącą ścianę dzieli ją na części, a obrys leżący w środku ściany robi w niej otwór.
 // Sposób (układ płaski z otworami zamiast szukania najkrótszego cyklu) jest wzorowany na IngeTrazo (GPL-3.0-or-later).
 
-import { V, at, makeShape, normalizeShape, edges as shapeEdges, vertices, isHidden, isSolid, splitByLine, area2 } from './model.js';
-import { isMesh } from './mesh.js';
+import { V, at, makeShape, normalizeShape, edges as shapeEdges, faces as facesOf, vertices, isHidden, isSolid, splitByLine, area2, toMesh } from './model.js';
+import { isMesh, splitMesh, booleanMesh, inPoly, planeOf, triangulatePoly, simplify, keepPaint } from './mesh.js';
 import { closestLines } from './snap.js';
 
 const EPS = 1e-5;
@@ -146,14 +146,18 @@ export function stitch(m, prev, limit = 200) {
   }
 
   // 2. linia po ścianie bryły, od krawędzi do krawędzi, dzieli tę ścianę
+  const doneOn = new Map();   // linia → bryły, których ścianę już podzieliła
   for (const N of [...isFresh]) {
+    let hit = false;
     for (const s of m.shapes) {
       if (!same(s) || !ok(s) || !isSolid(s) || s.op === 'cut' || s.bill || flat(s)) continue;
       const vs = vertices(s); let lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
       for (const p of vs) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
       if ([N.a, N.b].some(p => p.some((x, k) => x < lo[k] - 1e-4 || x > hi[k] + 1e-4))) continue;
-      if (splitByLine(m, s, N.a, N.b)) { m.lines = m.lines.filter(l => l !== N); isFresh.delete(N); split++; break; }
+      if (splitByLine(m, s, N.a, N.b)) { hit = true; split++; if (!doneOn.has(N)) doneOn.set(N, new Set()); doneOn.get(N).add(s); }
     }
+    // Linia może leżeć na ścianach kilku brył naraz (np. krawędź przecięcia dwóch brył): na jednej jest cięciwą, na drugiej
+    // częścią obrysu. Dlatego zostaje do kroku 3 i znika dopiero po nim.
   }
 
   // 3. płaszczyzny, w których nowe krawędzie stykają się z innymi
@@ -198,16 +202,36 @@ export function stitch(m, prev, limit = 200) {
     const replace = new Set();
     for (const c of A.cycles) {
       if (c.area < 1e-8 || c.bridge || !active.has(c.comp)) continue;
-      const ip = inner(c.pts), own = Fs.filter(F => F.comp === c.comp && inLoop(ip, F.L));
+      const ip = inner(c.pts), own = Fs.filter(F => F.comp === c.comp && F.has(ip));
       const keep = own.find(F => Math.abs(F.area - c.area) < 1e-6 * Math.max(1, c.area));
       if (keep) { out.push({ ...c, keep: keep.s }); continue; }
       if (own.length) { const P = own.reduce((x, y) => y.area < x.area ? y : x); replace.add(P); out.push({ ...c, parent: P }); continue; }
       if ([...c.edges].some(isNew)) out.push({ ...c });
     }
+    // Pola leżące na ścianie bryły (łamana od krawędzi do krawędzi, zamknięty obrys z linii): zamiast osobnej ścianki
+    // linie dzielą ścianę bryły — bryła staje się siatką, a każda część ściany daje się osobno wypchnąć.
+    const onSolid = [];
+    for (const S of new Set(segs.filter(c => c.solid).map(c => c.solid))) {
+      const F2 = facesOf(S).filter(f => Math.abs(Math.abs(V.dot(f.normal, n)) - 1) < 1e-6 && on(f.verts[0])).map(f => ({ L: f.verts.map(to2), H: (f.holes || []).map(h => h.map(to2)) }));
+      if (!F2.length) continue;
+      const mine = out.filter(c => !c.keep && !c.parent && !c.cut && (() => { const ip = inner(c.pts); return F2.some(f => inLoop(ip, f.L) && !f.H.some(h => inLoop(ip, h))); })());
+      if (!mine.length) continue;
+      const cuts = new Map();
+      for (const c of mine) for (const e of c.edges) if (e.src.some(q => q.line && !(doneOn.get(q.line) || new Set()).has(S))) cuts.set(e, [to3(e.a.p), to3(e.b.p)]);
+      if (!cuts.size) { if (mine.some(c => [...c.edges].some(e => e.src.some(q => q.line && doneOn.has(q.line))))) for (const c of mine) c.cut = true; continue; }   // ta bryła jest już podzielona tymi liniami
+      const test = JSON.parse(JSON.stringify(S)); toMesh(test, facesOf);
+      // wszystkie odcinki naraz, scalanie kawałków dopiero na końcu — pojedynczy odcinek łamanej sam niczego nie oddziela
+      let any = false; for (const [a, b] of cuts.values()) any = splitMesh(test, a, b, true, true) || any;
+      if (!any) continue;
+      keepPaint(test, () => simplify(test));
+      for (const k of Object.keys(S)) delete S[k]; Object.assign(S, test);
+      for (const c of mine) { c.cut = true; onSolid.push(c); } split++;
+    }
     if (!out.some(c => !c.keep) && !out.some(c => c.keep && newFace.has(c.keep))) continue;
     // nowe ściany
     for (const c of out) {
       if (c.keep) { c.shape = c.keep; continue; }
+      if (c.cut) continue;
       const sh = makeShape(m, { o, u, v }, tidy(c.pts), 0);
       const P = c.parent && c.parent.s;
       if (P) for (const k of ['color', 'tex', 'alpha', 'tag', 'soft']) if (P[k] != null) sh[k] = P[k];
@@ -216,7 +240,7 @@ export function stitch(m, prev, limit = 200) {
     }
     // otwory: wyspa (osobna część układu, w której powstała albo została ściana) wycina otwór w ścianie, w której leży
     const holeIn = (loopCW, skipComp) => {
-      const p = loopCW[0], cand = out.filter(c => c.comp !== skipComp && inLoop(p, c.pts)).sort((x, y) => x.area - y.area)[0];
+      const p = loopCW[0], cand = out.filter(c => c.shape && c.comp !== skipComp && inLoop(p, c.pts)).sort((x, y) => x.area - y.area)[0];
       if (cand) return cand.shape;
       const F = Fs.filter(F => !replace.has(F) && F.comp !== skipComp && F.has(p)).sort((x, y) => x.area - y.area)[0];
       return F ? F.s : null;
@@ -227,16 +251,19 @@ export function stitch(m, prev, limit = 200) {
       sh.holes = [...(sh.holes || []), L]; normalizeShape(sh);
     };
     for (const comp of active) {
-      if (!out.some(c => c.comp === comp)) continue;
+      if (!out.some(c => c.comp === comp && c.shape)) continue;
       const outer = A.cycles.filter(c => c.comp === comp && c.area < 0 && !c.bridge).sort((x, y) => x.area - y.area)[0];
       if (!outer) continue;
       const host = holeIn(outer.pts, comp); if (host) addHole(host, outer.pts);
     }
     // otwory dzielonej ściany przechodzą do tej części, w której leżą
-    for (const P of replace) for (const h of P.H) {
+    // (otwór, do którego doszły linie podziału, jest już częścią brzegu nowych ścian — np. pierścień przecięty dwiema liniami)
+    for (const P of replace) P.H.forEach((h, k) => {
+      let hc = null; for (const e of A.all.values()) if (e.src.some(q => q.face === P.s && q.loop === k + 1)) { hc = e.comp; break; }
+      if (hc != null && active.has(hc)) return;
       const c = out.filter(c => c.parent === P && inLoop(h[0], c.pts)).sort((x, y) => x.area - y.area)[0];
       if (c) addHole(c.shape, h);
-    }
+    });
     const gone = new Set([...replace].map(P => P.s));
     if (gone.size) m.shapes = m.shapes.filter(s => !gone.has(s));
     // linie, które w całości leżą na brzegu powstałych albo zachowanych ścian, znikają — ściana ma własne krawędzie
@@ -251,6 +278,7 @@ export function stitch(m, prev, limit = 200) {
     }
     if (dead.size) m.lines = m.lines.filter(l => !dead.has(l)).concat(rest);
   }
+  if (doneOn.size) m.lines = m.lines.filter(l => !doneOn.has(l));
   return made || split ? { made, split } : null;
 }
 
@@ -271,4 +299,101 @@ export function healFaces(m, A, B, a, b) {
   normalizeShape(A);
   m.shapes = m.shapes.filter(s => s !== B);
   return true;
+}
+
+/* ---------- przecinanie ścian i łączenie stykających się brył ---------- */
+const looseSolid = (m, s, G) => (s.g ?? null) === G && !isHidden(m, s) && !s.locked && isSolid(s) && !flat(s) && s.op !== 'cut' && !s.bill;
+const bbox = pts => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (const p of pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); } return { lo, hi }; };
+const boxHit = (a, b, e = 1e-5) => [0, 1, 2].every(k => a.lo[k] <= b.hi[k] + e && b.lo[k] <= a.hi[k] + e);
+// wielokąty ścian bryły (ściana z otworami — jako trójkąty)
+function polysOf(s) {
+  if (isMesh(s)) return s.polys;
+  const t = JSON.parse(JSON.stringify(s)); toMesh(t, facesOf); return t.polys;
+}
+// odcinki prostej (o, d), które leżą w wielokącie P (prosta leży w jego płaszczyźnie): lista [t0, t1]
+function spans(P, n, o, d) {
+  const mm = V.cross(n, d), ts = [];
+  for (let i = 0; i < P.length; i++) {
+    const p = P[i], q = P[(i + 1) % P.length], sp = V.dot(V.sub(p, o), mm), sq = V.dot(V.sub(q, o), mm);
+    if (Math.abs(sp) < 1e-7) ts.push(V.dot(V.sub(p, o), d));
+    if ((sp > 1e-7 && sq < -1e-7) || (sp < -1e-7 && sq > 1e-7)) ts.push(V.dot(V.sub(V.lerp(p, q, sp / (sp - sq)), o), d));
+  }
+  ts.sort((x, y) => x - y);
+  const out = [];
+  for (let i = 0; i + 1 < ts.length; i++) { if (ts[i + 1] - ts[i] < 1e-6) continue; if (inPoly(V.add(o, V.mul(d, (ts[i] + ts[i + 1]) / 2)), P, n)) out.push([ts[i], ts[i + 1]]); }
+  return out;
+}
+// Krawędzie przecięcia ścian brył (jak „Intersect Faces” w SketchUpie): odcinki, wzdłuż których ściana jednej bryły
+// przechodzi przez ścianę drugiej. ids — bryły, które przecinamy z resztą (null = wszystkie luzem).
+export function intersectFaces(m, ids, G = null) {
+  const all = m.shapes.filter(s => looseSolid(m, s, G)).map(s => { const polys = polysOf(s); return { s, polys: polys.map(p => ({ p, pl: planeOf(p), box: bbox(p) })), box: bbox(polys.flat()) }; });
+  const pick = ids ? all.filter(x => ids.has(x.s.id)) : all, lines = new Map();
+  for (const A of pick) for (const B of all) {
+    if (A === B || (pick.includes(B) && B.s.id < A.s.id) || !boxHit(A.box, B.box)) continue;
+    for (const P of A.polys) { if (!boxHit(P.box, B.box)) continue; for (const Q of B.polys) {
+      if (!boxHit(P.box, Q.box)) continue;
+      const x = V.cross(P.pl.n, Q.pl.n), l2 = V.dot(x, x); if (l2 < 1e-10) continue;
+      let d = V.mul(x, 1 / Math.sqrt(l2)); if (d[0] < -1e-9 || (Math.abs(d[0]) < 1e-9 && (d[1] < -1e-9 || (Math.abs(d[1]) < 1e-9 && d[2] < 0)))) d = V.mul(d, -1);
+      let o = V.mul(V.cross(V.sub(V.mul(Q.pl.n, P.pl.w), V.mul(P.pl.n, Q.pl.w)), x), 1 / l2);
+      o = V.sub(o, V.mul(d, V.dot(o, d)));   // punkt prostej najbliższy początkowi układu — wspólny dla wszystkich par na tej prostej
+      const a = spans(P.p, P.pl.n, o, d), b = spans(Q.p, Q.pl.n, o, d);
+      for (const [a0, a1] of a) for (const [b0, b1] of b) {
+        const lo = Math.max(a0, b0), hi = Math.min(a1, b1); if (hi - lo < 1e-5) continue;
+        const key = d.map(v => Math.round(v * 1e4)).join(',') + '|' + o.map(v => Math.round(v * 1e3)).join(',');
+        if (!lines.has(key)) lines.set(key, { o, d, iv: [] });
+        lines.get(key).iv.push([lo, hi]);
+      }
+    } }
+  }
+  // kawałki na jednej prostej sklejone w całe odcinki
+  const out = [];
+  for (const { o, d, iv } of lines.values()) {
+    iv.sort((x, y) => x[0] - y[0]);
+    let cur = iv[0].slice();
+    const put = c => out.push([V.add(o, V.mul(d, c[0])), V.add(o, V.mul(d, c[1]))]);
+    for (const [lo, hi] of iv.slice(1)) { if (lo <= cur[1] + 1e-5) cur[1] = Math.max(cur[1], hi); else { put(cur); cur = [lo, hi]; } }
+    put(cur);
+  }
+  return out;
+}
+
+// Bryły luzem, które stykają się ścianami z bryłą s, łączą się z nią w jedną (jak geometria poza grupami w SketchUpie).
+// Ściany przejętej bryły zachowują jej kolor. Zwraca liczbę przyłączonych brył.
+export function mergeTouching(m, s) {
+  const G = s.g ?? null; let n = 0;
+  if (!looseSolid(m, s, G) || s.open) return 0;
+  const facesW = t => polysOf(t).map(p => ({ p, pl: planeOf(p) }));
+  const touch = (A, B) => A.some(a => B.some(b => V.dot(a.pl.n, b.pl.n) < -1 + 1e-6 && Math.abs(a.pl.w + b.pl.w) < 1e-5 && overlap(a.p, b.p, a.pl.n)));
+  for (let pass = 0; pass < 8; pass++) {
+    const FA = facesW(s), boxA = bbox(vertices(s));
+    const t = m.shapes.find(t => t !== s && looseSolid(m, t, G) && !t.open && boxHit(boxA, bbox(vertices(t))) && touch(FA, facesW(t)));
+    if (!t) break;
+    const base = q => (q.color || '') + '|' + (q.tex || ''), keep = base(t) !== base(s) || t.fc;
+    const T = JSON.parse(JSON.stringify(t)); toMesh(T, facesOf);
+    const paints = keep ? T.polys.map((p, i) => ({ p, pl: planeOf(p), v: (T.fc && T.fc['p:' + i]) || { c: t.color || null, t: t.tex || null } })) : [];
+    toMesh(s, facesOf); booleanMesh(s, T, 'union');
+    if (!s.polys.length) break;
+    s.polys.forEach((p, i) => {
+      if (s.fc && s.fc['p:' + i]) return;
+      const pl = planeOf(p), tr = triangulatePoly(p)[0], c = V.mul(V.add(V.add(tr[0], tr[1]), tr[2]), 1 / 3);
+      const o = paints.find(q => V.dot(q.pl.n, pl.n) > 1 - 1e-6 && Math.abs(q.pl.w - pl.w) < 1e-5 && inPoly(c, q.p, q.pl.n));
+      if (o && base({ color: o.v.c, tex: o.v.t }) !== base(s)) (s.fc ||= {})['p:' + i] = o.v;
+    });
+    m.shapes = m.shapes.filter(q => q !== t); n++;
+  }
+  return n;
+}
+// czy dwa wielokąty w jednej płaszczyźnie nachodzą na siebie powierzchnią (nie tylko krawędzią albo narożnikiem)
+function overlap(P, Q, n) {
+  const mid = L => { const t = triangulatePoly(L)[0]; return V.mul(V.add(V.add(t[0], t[1]), t[2]), 1 / 3); };
+  const strict = (p, L) => inPoly(p, L, n) && !L.some((a, i) => { const b = L[(i + 1) % L.length], l = V.dist(a, b); if (l < 1e-9) return false; const e = V.mul(V.sub(b, a), 1 / l), t = V.dot(V.sub(p, a), e); return t > -1e-6 && t < l + 1e-6 && V.dist(V.add(a, V.mul(e, t)), p) < 1e-5; });
+  if (strict(mid(P), Q) || strict(mid(Q), P) || P.some(p => strict(p, Q)) || Q.some(p => strict(p, P))) return true;
+  // krawędzie przecinające się we wnętrzu
+  for (let i = 0; i < P.length; i++) for (let j = 0; j < Q.length; j++) {
+    const a = P[i], b = P[(i + 1) % P.length], c = Q[j], d = Q[(j + 1) % Q.length];
+    const la = V.dist(a, b), lc = V.dist(c, d); if (la < 1e-9 || lc < 1e-9) continue;
+    const r = closestLines(a, V.mul(V.sub(b, a), 1 / la), c, V.mul(V.sub(d, c), 1 / lc));
+    if (r && r.gap < 1e-6 && r.s > 1e-5 && r.s < la - 1e-5 && r.t > 1e-5 && r.t < lc - 1e-5) return true;
+  }
+  return false;
 }

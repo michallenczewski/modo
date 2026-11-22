@@ -33,6 +33,7 @@ export const ACTIONS = [
   { group: 'Edycja', id: 'scale', name: 'Skaluj', keys: ['R'] },
   { group: 'Edycja', id: 'push', name: 'Wypchnij / wciśnij', keys: ['X'] },
   { group: 'Edycja', id: 'cut', name: 'Bryła wycinająca / zwykła', keys: ['Shift+X'] },
+  { group: 'Bryły', id: 'intersect', name: 'Przetnij ściany brył (krawędzie przecięcia)', keys: [] },
   { group: 'Bryły', id: 'solidUnion', name: 'Połącz zaznaczone bryły', keys: [] },
   { group: 'Bryły', id: 'solidIntersect', name: 'Część wspólna', keys: [] },
   { group: 'Bryły', id: 'solidSubtract', name: 'Odejmij od pierwszej (reszta znika)', keys: [] },

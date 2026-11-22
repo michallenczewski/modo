@@ -299,14 +299,16 @@ export function booleanMesh(a, b, op) {
 }
 
 // linia narysowana po ścianie: jeśli oba końce leżą na brzegu tej samej ściany, a środek w niej — dzieli ją
-export function splitMesh(s, a, b) {
+// force: odcinek jest częścią łamanej albo obrysu — nie musi sam sięgać od brzegu do brzegu
+// (defer: nie scalaj jeszcze kawałków — po wszystkich odcinkach łamanej trzeba wywołać simplify)
+export function splitMesh(s, a, b, force, defer) {
   const mid = V.lerp(a, b, 0.5);
   const pi = s.polys.findIndex(p => { const n = newell(p); return Math.abs(V.dot(n, V.sub(a, p[0]))) < 1e-5 && Math.abs(V.dot(n, V.sub(b, p[0]))) < 1e-5 && inPoly(mid, p, n); });
   if (pi < 0) return false;
   const idx = regionOf(s, pi), n = newell(s.polys[pi]);
   const loops = regionLoops(s, idx);
   const onBoundary = p => loops.some(loop => loop.some((q, i) => { const r = loop[(i + 1) % loop.length], L = V.dist(q, r); if (L < EPS) return false; const e = V.mul(V.sub(r, q), 1 / L), t = V.dot(V.sub(p, q), e); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(q, V.mul(e, t)), p) < 1e-5; }));
-  if (!onBoundary(a) || !onBoundary(b)) return false;
+  if (!force && (!onBoundary(a) || !onBoundary(b))) return false;
   const dir = V.norm(V.sub(b, a)), m = V.norm(V.cross(n, dir)), w = V.dot(m, a), L = V.dist(a, b);
   const out = [];
   for (let i = 0; i < s.polys.length; i++) {
@@ -332,7 +334,7 @@ export function splitMesh(s, a, b) {
     s.marks = [...(s.marks || []), [a.slice(), b.slice()]];
     // sąsiednie ściany dostają te same punkty na wspólnych krawędziach (bryła musi pozostać szczelna)
     insertPoint(s, a); insertPoint(s, b);
-    simplify(s);
+    if (!defer) simplify(s);
   });
   return true;
 }

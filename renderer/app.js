@@ -4,7 +4,7 @@ import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines } from './model.js';
 import { TEXTURES, textureCanvas } from './textures.js';
-import { stitch } from './stitch.js';
+import { stitch, intersectFaces } from './stitch.js';
 import { scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -82,6 +82,7 @@ const IC = {
   fog: '<path d="M2.5 5.5h8M5 8h8.5M2.5 10.5h6M10.5 10.5h3"/>',
   wire: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6.2M2.4 11.2 8 8M13.6 11.2 8 8M8 1.8V8" stroke-width="1"/>',
   hiddenGeo: '<path d="M8 1.8 13.6 5v6.2L8 14.4 2.4 11.2V5z" stroke-dasharray="1.6 1.7"/><circle cx="8" cy="8" r="1.6"/>',
+  intersect: '<path d="M2.5 6.5h7v7h-7z"/><path d="M6.5 2.5h7v7h-7z"/><path d="M6.5 6.5h3v3" stroke="#b0489e" stroke-width="1.8"/>',
   makeFaces: '<path d="M2.8 12.8 4.2 4.2l8.6-1.4-1.4 8.6z"/><path d="M5 10.5 10.5 5M5.2 7.6 7.6 5.2M8 10.6l2.6-2.6" stroke-width="1"/>',
   edit: '<path d="M2.5 13.5 3.3 10.4 10.9 2.8a1.2 1.2 0 0 1 1.7 0l.6.6a1.2 1.2 0 0 1 0 1.7L5.6 12.7z"/><path d="M9.6 4.1l2.3 2.3"/>'
 };
@@ -127,7 +128,7 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   }
   // nowe linie i płaskie ściany łączą się z tym, co już jest: dzielą krawędzie, zamykają pola w ściany, dzielą ściany, robią otwory
   app.lastStitch = null;
-  if (prev && !app.noStitch) { try { app.lastStitch = stitch(m, prev); } catch (e) { console.error('stitch', e); } }
+  if (prev && !app.noStitch) { try { app.lastStitch = stitch(m, prev, app.stitchLimit || 200); } catch (e) { console.error('stitch', e); } }
   pruneGroups(m);
   if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();
   if (app.editSolid != null && !m.shapes.some(s => s.id === app.editSolid)) { app.editSolid = null; viewer.editSolid = null; }
@@ -458,6 +459,7 @@ function run(act) {
     case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); app.markDirtySoft(); toast(viewer.wire ? 'Siatka: same krawędzie' : 'Ściany widoczne'); break;
     case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? 'Ukryta geometria widoczna (blado)' : 'Ukryta geometria schowana'); break;
     case 'makeFaces': makeFaces(); break;
+    case 'intersect': intersectSel(); break;
     case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
     case 'selectInvert': selectInvert(); break;
@@ -1057,7 +1059,7 @@ const VIEW_ON = { xray: () => viewer.xray, wire: () => viewer.wire, fog: () => v
 const tipOf = (id, name) => { const c = keysFor(id, app.keys.over)[0]; return name + (c ? ' (' + prettyCombo(c, isMac) + ')' : ''); };
 const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a="${id}" title="${tipOf(id, name)}" aria-label="${name}">${ic(id)}</button>`;
 // okienko Edycja: polecenia, które dotąd miały tylko skrót albo menu podręczne
-const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], ['makeFaces', 'Ściany z zaznaczonych linii']]];
+const EDIT_ICONS = [[['undo', 'Cofnij'], ['redo', 'Ponów']], [['cutClip', 'Wytnij'], ['copy', 'Kopiuj'], ['paste', 'Wklej (wskaż miejsce)'], ['pasteInPlace', 'Wklej w tym samym miejscu']], [['selectAll', 'Zaznacz wszystko'], ['selectNone', 'Odznacz wszystko'], ['selectInvert', 'Odwróć zaznaczenie']], [['hideSel', 'Ukryj zaznaczone'], ['unhideAll', 'Pokaż wszystko'], ['lock', 'Zablokuj zaznaczone'], ['unlockAll', 'Odblokuj wszystko']], [['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej'], ['makeFaces', 'Ściany z zaznaczonych linii'], ['intersect', 'Przetnij ściany brył']]];
 function renderEditPop() {
   const p = $('#editPop');
   p.innerHTML = EDIT_ICONS.map(g => `<div class="icons">${g.map(i => iconBtn(i)).join('')}</div>`).join('');
@@ -1309,6 +1311,20 @@ function underlayToLines() {
   app.noStitch = true; app.changed(); app.noStitch = false; app.selectionChanged();
   toast(`Podkład zamieniony na ${made} linii w jednej grupie. Dwuklik wchodzi do grupy; „Ściany z linii” wypełnia zamknięte pola.`, ['Ściany z linii', () => makeFaces()], 9000);
 }
+// „Przetnij ściany” (Intersect Faces): tam, gdzie ściany brył przechodzą przez siebie, powstają krawędzie, które dzielą te ściany.
+// Z zaznaczeniem — zaznaczone bryły z resztą; bez — wszystkie bryły luzem (w edytowanej grupie: jej bryły).
+function intersectSel() {
+  const m = app.model, ids = new Set([...app.selection].filter(i => typeof i === 'number'));
+  const segs = intersectFaces(m, ids.size ? ids : null, app.editing ?? null);
+  if (!segs.length) return toast(ids.size ? 'Zaznaczone bryły nie przecinają się z żadną inną.' : 'Żadne bryły się nie przecinają.');
+  if (segs.length > 1500) return toast('Za dużo krawędzi przecięcia naraz. Zaznacz mniej brył.');
+  app.checkpoint();
+  const lines0 = new Set(m.lines);
+  for (const [a, b] of segs) { const l = { id: m.next++, a, b }; if (app.editing) l.g = app.editing; m.lines.push(l); }
+  app.stitchLimit = 2000; app.selection.clear(); app.changed(); app.stitchLimit = 0; app.selectionChanged();
+  const left = app.model.lines.filter(l => !lines0.has(l)).length;
+  toast(`Krawędzie przecięcia: ${segs.length}. Ściany są podzielone wzdłuż nich` + (left ? `; ${left} zostało jako luźne linie.` : '.'));
+}
 // zamknięte pola między zaznaczonymi liniami (także w zaznaczonej grupie) stają się płaskimi ścianami
 function makeFaces() {
   const m = app.model, lines = m.lines.filter(l => app.selection.has('l' + l.id));
@@ -1445,6 +1461,7 @@ function openContext(x, y, cx, cy) {
     if (groups.some(g => g.kind === 'comp')) items.push(['unique', 'Zrób unikalny']);
     items.push(null);
     if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? 'Bryła zwykła (nie wycina)' : 'Bryła wycinająca']);
+    if (solids.some(s => s.op !== 'cut')) items.push(['intersect', 'Przetnij ściany z modelem']);
     if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', 'Suma brył'], ['solidIntersect', 'Część wspólna'], ['solidSubtract', 'Odejmij od pierwszej'], ['solidTrim', 'Przytnij pierwszą']);
     items.push(null, ['flipX', 'Odbij wzdłuż osi czerwonej'], ['flipY', 'Odbij wzdłuż osi zielonej'], ['flipZ', 'Odbij wzdłuż osi niebieskiej']);
     if (sel.filter(i => String(i)[0] === 'l').length >= 3) items.push(null, ['makeFaces', 'Ściany z linii']);

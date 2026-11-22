@@ -7,7 +7,7 @@ import { pickAnnotation, drawAnnotations } from './annot.js';
 import { AXIS_COLOR, AXES } from './snap.js';
 import { mapMeshPoints, booleanMesh, isMesh, transformMesh, regionOf, removePolys, polysOnEdge, newell, inPoly, segKey } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
-import { healFaces } from './stitch.js';
+import { healFaces, mergeTouching } from './stitch.js';
 
 const INK = '#1a1a19', INK_DARK = '#e9e9e7', BLUE = '#3f5f99';
 
@@ -357,6 +357,12 @@ export class PushTool extends Tool {
     const A = this.active; if (!A) return;
     if (Math.abs(dist) < 1e-6) { this.app.setModelLive(A.start); this.reset(); this.app.refresh(); return; }
     if (dist !== this.dist) this.apply(dist);
+    // bryła, która po wypchnięciu styka się ścianą z inną bryłą luzem, łączy się z nią (z ⌥ / Ctrl zostaje osobna)
+    if (!this.copy) {
+      const s = this.shapeOf(A.shapeId);
+      const k = s ? mergeTouching(this.model, s) : 0;
+      if (k) this.app.toast?.(`Bryły się połączyły, bo stykają się ścianami. Osobne zostają bryły w grupach albo wypchnięte z ${this.app.isMac ? '⌥' : 'Ctrl'}.`);
+    }
     this.app.commitLive(A.start);
     this.app.lastPush = dist;
     // zapamiętujemy, żeby po zakończeniu dało się jeszcze wpisać odległość (jak w SketchUpie)
