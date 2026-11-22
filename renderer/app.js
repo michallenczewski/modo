@@ -465,7 +465,14 @@ view.addEventListener('wheel', e => {
 /* ---------- klawiatura ---------- */
 const typingIn = el => el && (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'range' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA');
 let capture = null;   // przypisywanie skrótu w oknie skrótów
+// Tryb kopii (⌥ na Macu, Ctrl w Windows) przełącza krótkie stuknięcie samym klawiszem — jak w SketchUpie. Klawisz
+// przytrzymany przy obracaniu widoku, kliknięciu, kółku myszy albo jako część skrótu niczego nie przełącza.
+const copyKeyName = () => app.isMac ? 'Alt' : 'Control';
+let copyTap = 0;
+const cancelCopyTap = () => { copyTap = 0; };
 window.addEventListener('keydown', e => {
+  if (e.key === copyKeyName() && !e.repeat && !e.metaKey && !e.shiftKey && !(app.isMac ? e.ctrlKey : e.altKey)) { copyTap = performance.now(); if (!capture && !(typingIn(document.activeElement) && document.activeElement !== vcbEl)) e.preventDefault(); return; }
+  if (e.key !== copyKeyName()) copyTap = 0;
   if (capture) { capture(e); return; }
   if (typingIn(document.activeElement) && document.activeElement !== vcbEl) {
     if (e.key === 'Escape') document.activeElement.blur();
@@ -526,7 +533,12 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => {
   if (e.key === 'Shift' && app.lockByShift) { app.lockAxis = null; app.lockDir = null; snapper.lockLine = null; app.lockByShift = false; app.refresh(); }
+  if (e.key === copyKeyName() && copyTap && performance.now() - copyTap < 600) {
+    copyTap = 0;
+    if (!capture && !(typingIn(document.activeElement) && document.activeElement !== vcbEl)) tool.key({ key: copyKeyName(), repeat: false, metaKey: false, shiftKey: false, ctrlKey: false, altKey: false, preventDefault() {} });
+  }
 });
+for (const ev of ['pointerdown', 'wheel']) window.addEventListener(ev, cancelCopyTap, true);
 
 function run(act) {
   const later = ACTIONS.find(a => a.id === act)?.later;

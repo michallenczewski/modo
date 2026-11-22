@@ -11,7 +11,8 @@ import { TEXTURES, textureCanvas } from './textures.js';
 import { _t } from './i18n.js';
 /* ---------- style rysunku ---------- */
 export const STYLES = {
-  szkic: { name: _t('Szkic'), paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 0, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
+  // Szkic: ołówek — cienka, lekko drżąca kreska (dawniej gruby obrys 2,1 px i wyraźne falowanie wyglądały topornie)
+  szkic: { name: _t('Szkic'), paper: '#f3f1ea', ink: '#2e2b26', inkFar: '#9a958a', wSil: 1.45, wIn: 0.7, ext: 0, wobble: 0.45, fade: 0.75, lines: true, shadow: 0.22, tint: 0.3 },
   kreska: { name: _t('Kreska'), paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
   model: { name: _t('Model'), paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
@@ -26,6 +27,8 @@ export const styleOf = (name, dark) => dark ? { ...STYLES[name], ...DARK[name] }
 
 /* ---------- shader krawędzi ---------- */
 const EDGE_VS = `
+#define BIAS_K 0.0015
+#define BIAS_MAX 0.05
 uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar, sectOn; uniform vec4 sect;
 attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul, soft;
 varying float vHalf, vD, vFade, vDepth, vAlpha; varying vec3 vCol;
@@ -72,7 +75,12 @@ void main(){
   s += nrm * vD;
   vFade = clamp((-vp.z - fadeNear) / max(fadeFar - fadeNear, 0.001), 0.0, 1.0);
   vCol = col; vDepth = -vp.z;
-  gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);
+  // Kreska wygrywa ze ścianą, na której leży: przysuwamy ją do kamery w przestrzeni widoku o ułamek odległości (najwyżej
+  // 5 cm, z daleka tyle, ile wymaga dokładność głębi), a w rzucie równoległym o stałe 3 cm. Dawniej stała w głębi ekranu
+  // rosła z kwadratem odległości (przy 40 m ~30 cm) i spod ścian wystawały końcówki krawędzi wnęk i otworów.
+  float dist = -vp.z, bias = projectionMatrix[3][3] > 0.5 ? 0.03 : min(dist * BIAS_K, max(BIAS_MAX, 5e-6 * dist * dist));
+  vec4 zc = projectionMatrix * vec4(vp.xy, vp.z + bias, 1.0);
+  gl_Position = vec4(s / (0.5 * res) * cp.w, zc.z / zc.w * cp.w, cp.w);
 }`;
 // Kreska zaznaczenia ma stałą grubość (niezależną od stylu — w stylu „Model” zwykłe kreski mają grubość 0), bez falowania,
 // wydłużania i cienienia z odległości. Głębia: kreska jest przysuwana do kamery o ułamek swojej odległości, ale najwyżej
@@ -82,7 +90,7 @@ const selRepl = [
   ['  float amp = wobble * px', '  float amp = 0.0 * px'],
   ['  float w = (sil ? wSil : (soft > 0.5 ? 0.0 : wIn)) * px * wmul * clamp(L / (26.0 * px), 0.4, 1.0);', '  float w = 2.6 * px * wmul;'],
   ['  w *= clamp(ppm / 40.0, 0.18, 1.0);\n', ''],
-  ['  gl_Position = vec4(s / (0.5 * res) * cp.w, cp.z - 0.00004 * cp.w, cp.w);', '  vec4 zc = projectionMatrix * vec4(vp.xy, vp.z + min(-vp.z * 0.002, 0.15), 1.0);\n  gl_Position = vec4(s / (0.5 * res) * cp.w, zc.z / zc.w * cp.w, cp.w);'],
+  ['#define BIAS_K 0.0015\n#define BIAS_MAX 0.05', '#define BIAS_K 0.002\n#define BIAS_MAX 0.15'],
 ];
 const SEL_VS = selRepl.reduce((v, [a, b]) => { if (!v.includes(a)) throw new Error('SEL_VS: ' + a); return v.replace(a, b); }, EDGE_VS);
 const EDGE_FS = `
