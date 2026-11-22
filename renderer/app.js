@@ -139,7 +139,8 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
   if (prev && !app.noStitch) { try { app.lastStitch = stitch(m, prev, app.stitchLimit || 200); } catch (e) { console.error('stitch', e); } }
   // Wspólna geometria: luźne bryły bieżącego kontekstu (szkic albo edytowana grupa) zlewają się w jedną.
   // Bryła wyjęta do polecenia na obiektach (`apart`) wraca do wspólnej, gdy przestaje być zaznaczona.
-  for (const s of m.shapes) if (s.apart && !app.selection.has(s.id)) delete s.apart;
+  // (bryła, która trafiła do grupy, przestaje być „wyjęta” — w grupie jest zwykłą zawartością)
+  for (const s of m.shapes) if (s.apart && (!app.selection.has(s.id) || (s.g ?? null) !== (app.editing ?? null))) delete s.apart;
   try { const r = absorb(m, app.editing ?? null); for (const id of r.gone) app.selection.delete(id); } catch (e) { console.error('absorb', e); }
   pruneGroups(m);
   if (app.editing && !m.groups.some(g => g.id === app.editing)) app.exitGroup();

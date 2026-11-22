@@ -5,6 +5,7 @@
 import { isHidden, triangulate, boxOf, boxesTouch, isSolid, chainOf, V } from './model.js';
 import { subtractAll } from './csg.js';
 import { DEFAULT_COLOR } from './viewer.js';
+import { TEXTURES } from './textures.js';
 
 const clean = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'x';
 const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
@@ -12,8 +13,9 @@ const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255
 export function exportObj(model, baseName = 'Modo') {
   const lines = ['# Modo — eksport OBJ', '# jednostki: metry, oś Y w górę', `mtllib ${clean(baseName)}.mtl`];
   const mats = new Map();
-  const matOf = s => {
-    const c = s.color || DEFAULT_COLOR, a = s.alpha ?? 1;
+  // fp — kolor, materiał i krycie pojedynczej ściany (s.fc); tekstura eksportuje się jako jej kolor zastępczy
+  const matOf = (s, fp) => {
+    const c = (fp ? fp.c || (fp.t && TEXTURES[fp.t] && TEXTURES[fp.t].avg) : s.color || (s.tex && TEXTURES[s.tex] && TEXTURES[s.tex].avg)) || DEFAULT_COLOR, a = (fp && fp.a) ?? s.alpha ?? 1;
     const key = c + '|' + a.toFixed(2);
     if (!mats.has(key)) mats.set(key, { name: 'Modo_' + c.slice(1) + (a < 0.999 ? '_a' + Math.round(a * 100) : ''), c, a });
     return mats.get(key).name;
@@ -32,13 +34,17 @@ export function exportObj(model, baseName = 'Modo') {
     let faces;
     const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
     if (cut.length) faces = subtractAll(polysOf(s), cut.map(c => polysOf(c.s))).map(p => ({ vs: p.vs, n: p.n }));
-    else faces = triangulate(s).flatMap(f => f.tris.map(t => { const g = V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0])); return { vs: V.dot(g, f.normal) < 0 ? [t[0], t[2], t[1]] : t, n: f.normal }; }));
+    else faces = triangulate(s).flatMap(f => f.tris.map(t => { const g = V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0])); return { vs: V.dot(g, f.normal) < 0 ? [t[0], t[2], t[1]] : t, n: f.normal, fp: s.fc && s.fc[f.key] }; }));
     if (!faces.length) continue;
     const path = s.g ? chainOf(model, s.g).reverse().map(g => g.name || (g.kind === 'comp' ? 'Komponent_' + g.def : 'Grupa_' + g.id)) : [];
     let name = clean([...path, s.name || 'Bryla_' + s.id].join('__'));
     const k = names.get(name) || 0; names.set(name, k + 1); if (k) name += '_' + (k + 1);
-    lines.push(`o ${name}`, `usemtl ${matOf(s)}`);
+    lines.push(`o ${name}`);
+    // ściany z własnym kolorem albo kryciem dostają własny materiał
+    let cur = null;
+    faces.sort((x, y) => (x.fp ? matOf(s, x.fp) : '').localeCompare(y.fp ? matOf(s, y.fp) : ''));
     for (const f of faces) {
+      const mt = matOf(s, f.fp); if (mt !== cur) { lines.push(`usemtl ${mt}`); cur = mt; }
       for (const v of f.vs) lines.push(`v ${v[0].toFixed(5)} ${v[2].toFixed(5)} ${(-v[1]).toFixed(5)}`);
       lines.push(`vn ${f.n[0].toFixed(5)} ${f.n[2].toFixed(5)} ${(-f.n[1]).toFixed(5)}`);
       lines.push('f ' + f.vs.map((_, j) => `${vi + j}//${ni}`).join(' '));

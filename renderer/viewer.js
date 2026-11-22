@@ -58,7 +58,8 @@ void main(){
   vec3 vd = normalize(cameraPosition - wp);
   float f1 = dot(n1, vd), f2 = hasN2 > 0.5 ? dot(n2, vd) : -1.0;
   bool sil = (f1 > 0.0) != (f2 > 0.0);
-  float w = (sil ? wSil : (soft > 0.5 ? 0.0 : wIn)) * px * wmul;
+  // krawędź, która na ekranie jest bardzo krótka (daleki albo gęsty model), rysuje się cieniej — inaczej kreski zlewają się w plamę
+  float w = (sil ? wSil : (soft > 0.5 ? 0.0 : wIn)) * px * wmul * clamp(L / (26.0 * px), 0.4, 1.0);
   if (w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vHalf = w * 0.5;
   vD = side * (vHalf + px);
@@ -291,10 +292,16 @@ export class Viewer {
       }
       const sel = this.selected.has(s.id);
       const flat = s.h === 0;
-      const mesh = this.faceMesh(s, items, st, paper, flat);
-      mesh.castShadow = !flat && (s.alpha ?? 1) > 0.6; mesh.receiveShadow = true;
-      if ((s.alpha ?? 1) < 0.999) mesh.renderOrder = 1;
-      this.modelGroup.add(mesh); this.meshes.push(mesh);
+      // szkło (krycie poniżej 0,6) idzie do osobnej siatki, która nie rzuca cienia — reszta bryły rzuca go normalnie
+      const alphaOf = it => { const f = s.fc && s.fc[it.key]; return (f && f.a) ?? s.alpha ?? 1; };
+      for (const glass of [false, true]) {
+        const list = items.filter(it => (alphaOf(it) < 0.6) === glass); if (!list.length) continue;
+        const mesh = this.faceMesh(s, list, st, paper, flat);
+        mesh.castShadow = !flat && !glass; mesh.receiveShadow = true;
+        if (glass || (s.alpha ?? 1) < 0.999) mesh.renderOrder = 1;
+        mesh.userData.glass = glass;
+        this.modelGroup.add(mesh); this.meshes.push(mesh);
+      }
       if (lines) {
         const col = sel ? hex3('#3f5f99') : this.dimmed(s) ? hex3(this.dark ? '#4a4a48' : '#c9c5bb') : null;
         for (const e of shapeEdges(s)) {
@@ -352,7 +359,7 @@ export class Viewer {
     for (const m of [...this.meshes]) {
       for (const q of [].concat(m.material)) { q.clippingPlanes = planes; q.clipShadows = true; q.needsUpdate = true; }
       const sh = this.model.shapes.find(q => q.id === m.userData.shapeId);
-      if (!sh || !isSolid(sh) || (sh.alpha ?? 1) < 0.6) continue;
+      if (!sh || !isSolid(sh) || (sh.alpha ?? 1) < 0.6 || m.userData.glass) continue;   // szkło nie ma wypełnienia przekroju
       const back = new THREE.Mesh(m.geometry, poche); back.userData = { poche: true };
       this.modelGroup.add(back);
       // linia przekroju: przecięcie trójkątów z płaszczyzną
@@ -622,6 +629,10 @@ export class Viewer {
     const sc = this.sun.shadow.camera;
     sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = Math.max(0.1, R * 1.9); sc.far = R * 4.1;   // model mieści się w kuli o promieniu R wokół celu; ciasny zakres = dokładna głębia
     sc.updateProjectionMatrix();
+    // Margines cienia rośnie z rozmiarem jednego punktu mapy cienia w modelu: przy dużym modelu punkt ma kilkanaście
+    // centymetrów i stały margines dawał na ścianach kanciaste plamy („kwadraty”).
+    const texel = 2 * R / this.sun.shadow.mapSize.x;
+    this.sun.shadow.normalBias = Math.max(0.02, texel * 1.8); this.sun.shadow.bias = -Math.max(0.0002, texel * 0.002);
     this.sun.castShadow = c.shadows && up;
     this.sun.shadow.radius = 0.5 + c.soft * 5;
     // nisko nad horyzontem słońce słabnie; ściany w cieniu rozjaśnia światło nieba (suwak „Jasność”)
