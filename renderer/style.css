@@ -241,3 +241,6 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .pop.iconpop{width:auto;padding:8px;gap:4px}
 .pop.iconpop .icons+.icons{border-top:1px solid var(--line);padding-top:4px}
 .menu .mlbl{padding:5px 10px 3px;font-size:11px;color:var(--muted2)}
+
+#curIcon{position:fixed;left:0;top:0;z-index:5;pointer-events:none;width:19px;height:19px;will-change:transform}
+#curIcon[hidden]{display:none}

@@ -61,7 +61,7 @@ Wielokąt podstawy może mieć otwory (`holes` — pętle zgodne z ruchem wskaz�
 
 **Ściana, która przestała być płaska** (przesunięty wierzchołek, obrócona ściana) składa się w trójkąty (`mapMeshPoints`); przekątne tego złożenia trafiają do `softs`, więc nie są rysowane, a `Viewer.smoother` uśrednia normalne w wierzchołkach ścian połączonych wygładzoną krawędzią — całość cieniuje się jak jedna powierzchnia.
 
-**Kursor** w widoku to kropka w miejscu wskazania i ikona bieżącego narzędzia obok (`toolCursor` w `app.js`, obraz SVG w adresie `data:`).
+**Kursor** w widoku to systemowy kursor-kropka (jej środek jest dokładnie punktem działania narzędzia) i osobny znaczek z ikoną bieżącego narzędzia, który jedzie obok (`toolCursor`, `#curIcon` w `app.js`). Ikona nie jest częścią obrazu kursora, żeby punkt działania nie zależał od tego, jak system skaluje obraz kursora.
 
 **Krawędzie ukryte i wygładzone.** Gumka z Shiftem dopisuje krawędź do listy `hid` bryły, z ⌥ / Ctrl do `softs` (odcinki w świecie; przekształcenia bryły je przenoszą — `mapFlags`, `transformMesh`). `edges()` oznacza pasujące krawędzie flagami `hid` i `soft`: ukryta nie jest rysowana, wygładzona tylko jako kontur. „Ukryta geometria” (`Viewer.showHidden`) pokazuje je blado razem z ukrytymi elementami i pozwala je przywrócić (Shift + ⌥ / Ctrl). „Pokaż wszystko” czyści też `hid`.
 

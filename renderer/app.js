@@ -290,18 +290,18 @@ function drawTrace(c, v) {
   }
   if (lk) { const L = viewer.pixelSize(lk.o) * 2500; for (let k = -6; k < 6; k++) seg(V.add(lk.o, V.mul(lk.d, L * k / 6)), V.add(lk.o, V.mul(lk.d, L * (k + 1) / 6)), 1.6); }
 }
-// Kursor w widoku: kropka wskazuje dokładne miejsce, a obok niej jest ikona bieżącego narzędzia.
-const cursorCache = new Map();
+// Kursor w widoku: systemowy kursor to sama kropka (jej środek jest dokładnie punktem działania narzędzia),
+// a ikona bieżącego narzędzia jest osobnym znaczkiem, który jedzie obok kursora.
+const DOT_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.6" fill="#1a1a19" stroke="#fff" stroke-width="1.4"/></svg>')}") 8 8, crosshair`;
+const curIcon = document.createElement('div'); curIcon.id = 'curIcon'; curIcon.hidden = true; document.body.append(curIcon);
 function toolCursor(id) {
-  if (id === 'select' || !IC[id]) return '';
-  if (!cursorCache.has(id)) {
-    const icon = IC[id].replace(/currentColor/g, '#1a1a19');
-    const svg = k => `<svg xmlns="http://www.w3.org/2000/svg" width="${32 * k}" height="${32 * k}" viewBox="0 0 32 32"><g transform="translate(12.5 12.5) scale(1.1)" fill="none" stroke-linecap="round" stroke-linejoin="round"><g stroke="#fff" stroke-width="3.4" opacity=".92">${icon}</g><g stroke="#1a1a19" stroke-width="1.4">${icon}</g></g><circle cx="6" cy="6" r="2.3" fill="#1a1a19" stroke="#fff" stroke-width="1.3"/></svg>`;
-    const url = k => `url("data:image/svg+xml,${encodeURIComponent(svg(k))}")`;
-    cursorCache.set(id, `image-set(${url(1)} 1x, ${url(2)} 2x) 6 6, crosshair`);
-  }
-  return cursorCache.get(id);
+  const on = id !== 'select' && !!IC[id];
+  curIcon.dataset.on = on ? '1' : '';
+  if (on) { const icon = IC[id].replace(/currentColor/g, '#1a1a19'); curIcon.innerHTML = `<svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke-linecap="round" stroke-linejoin="round"><g stroke="#fff" stroke-width="3.4" opacity=".92">${icon}</g><g stroke="#1a1a19" stroke-width="1.4">${icon}</g></svg>`; }
+  else curIcon.hidden = true;
+  return on ? DOT_CURSOR : '';
 }
+const moveCurIcon = e => { if (!curIcon.dataset.on || nav) { curIcon.hidden = true; return; } curIcon.hidden = false; curIcon.style.transform = `translate(${e.clientX + 9}px, ${e.clientY + 9}px)`; };
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
@@ -373,7 +373,7 @@ view.addEventListener('pointerdown', e => {
   if (e.button === 0) { view.setPointerCapture(e.pointerId); tool.down(e, x, y); app.refresh(); }
 });
 view.addEventListener('pointermove', e => {
-  const [x, y] = xy(e);
+  const [x, y] = xy(e); moveCurIcon(e);
   if (nav) {
     const dx = x - nav.last.x, dy = y - nav.last.y; nav.last = { x, y }; nav.moved += Math.abs(dx) + Math.abs(dy);
     if (nav.mode === 'orbit' && !e.shiftKey) viewer.orbit(dx, dy, nav.pivot); else viewer.pan(dx, dy, nav.pivot);
@@ -396,7 +396,7 @@ view.addEventListener('dblclick', e => { const [x, y] = xy(e); tool.dbl(e, x, y)
 view.addEventListener('click', e => { if (e.detail === 3 && e.button === 0 && tool.triple) { const [x, y] = xy(e); tool.triple(e, x, y); app.refresh(); } });
 view.addEventListener('contextmenu', e => e.preventDefault());
 view.addEventListener('auxclick', e => e.preventDefault());
-view.addEventListener('pointerleave', () => { viewer.redraw(); });
+view.addEventListener('pointerleave', () => { curIcon.hidden = true; viewer.redraw(); });
 // kółko myszy: powiększanie do kursora; gładzik: dwa palce obracają (z ⇧ przesuwają), szczypanie powiększa
 view.addEventListener('wheel', e => {
   e.preventDefault();
