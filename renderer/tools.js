@@ -616,7 +616,7 @@ export function subAt(app, id, x, y) {
   const s = app.model.shapes.find(q => q.id === id), hit = app.viewer.pick(x, y);
   if (!hit || hit.shapeId !== id) return null;
   const f = faceByKey(s, hit.key); if (!f) return null;
-  const polys = (f.region || [f.verts]).map(p => p.map(q => q.slice())), pts = [];
+  const polys = (f.region || f.verts.region || [f.verts]).map(p => p.map(q => q.slice())), pts = [];
   for (const p of polys) for (const q of p) if (!pts.some(r => V.dist(r, q) < 1e-5)) pts.push(q.slice());
   return { id, kind: 'face', key: hit.key, polys, pts, verts: f.verts };
 }

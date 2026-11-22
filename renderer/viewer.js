@@ -543,7 +543,8 @@ export class Viewer {
   setHoverFace(verts) {
     for (const c of [...this.previewGroup.children]) { c.geometry.dispose(); this.previewGroup.remove(c); }
     if (verts) {
-      const pts = []; for (const t of triangulatePoly(verts)) for (const p of t) pts.push(new THREE.Vector3(...p));
+      // verts.region — kawałki ściany z otworami (albo złożonej z kilku wielokątów): podświetlamy całą ścianę
+      const pts = []; for (const poly of verts.region || [verts]) for (const t of triangulatePoly(poly)) for (const p of t) pts.push(new THREE.Vector3(...p));
       const g = new THREE.BufferGeometry().setFromPoints(pts);
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x6b86b5, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
       m.renderOrder = 3;

@@ -8,6 +8,7 @@
 // Wszystkie wymiary w metrach, oś Z w górę.
 
 import { ShapeUtils, Vector2 } from './vendor/three.module.js';
+import { triangulateHoles } from './mesh.js';
 import { isMesh, toMesh, meshEdges, meshVertices, meshTriangles, pushPullMesh, transformMesh, newell, regionOf, regionLoops, flagEdges } from './mesh.js';
 
 export const V = {
@@ -102,9 +103,14 @@ export function faceByKey(s, key) {
     // ściana bryły dowolnej to cały obszar w jednej płaszczyźnie — zwracamy jej obrys
     const i = +String(key).split(':')[1]; if (!s.polys[i]) return null;
     const idx = regionOf(s, i), loops = idx.length > 1 ? regionLoops(s, idx) : [s.polys[i]];
-    return { key, normal: newell(s.polys[i]), verts: loops.length === 1 ? loops[0] : s.polys[i], region: idx.map(j => s.polys[j]) };
+    const region = idx.map(j => s.polys[j]), verts = loops.length === 1 ? loops[0] : s.polys[i].slice();
+    // ściana z otworami składa się z kilku kawałków: podświetlenie ma objąć wszystkie, nie jeden trójkąt
+    if (loops.length !== 1) verts.region = region;
+    return { key, normal: newell(s.polys[i]), verts, region };
   }
-  return faces(s).find(f => f.key === key) || null;
+  const f = faces(s).find(f => f.key === key) || null;
+  if (f && f.holes && f.holes.length) f.verts.region = triangulateHoles(f.verts, f.holes);
+  return f;
 }
 
 // krawędzie z normalnymi przyległych ścian (do grubości konturu sylwetki)
