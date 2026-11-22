@@ -60,7 +60,7 @@ export const ACTIONS = [
   { group: 'Edycja', id: 'unlockAll', name: 'Odblokuj wszystko', keys: ['Mod+Shift+L'] },
   { group: 'Edycja', id: 'undo', name: 'Cofnij', keys: ['Mod+Z'] },
   { group: 'Edycja', id: 'redo', name: 'Ponów', keys: ['Mod+Shift+Z', 'Mod+Y'] },
-  { group: 'Widok', id: 'hideRest', name: 'Ukryj resztę modelu (drugi raz: pokaż)', keys: ['F'] },
+  { group: 'Widok', id: 'hideRest', name: 'Ukryj resztę modelu (drugi raz: pokaż); przy edycji grupy — schowaj albo przygaś resztę', keys: ['F'] },
   { group: 'Widok', id: 'hideSimilar', name: 'Ukryj podobne bryły', keys: ['G'] },
   { group: 'Widok', id: 'hideSel', name: 'Ukryj zaznaczone', keys: ['H'] },
   { group: 'Widok', id: 'unhideAll', name: 'Pokaż wszystko', keys: ['Shift+H'] },

@@ -43,8 +43,12 @@ export function removeIds(m, ids) {
 }
 export const cloneModel = m => JSON.parse(JSON.stringify(m));
 // element niewidoczny: ukryty sam albo leży na wyłączonej warstwie (własnej albo którejś z grup, w których jest)
+// Widok może chwilowo chować część modelu bez zapisywania tego w pliku (np. reszta modelu przy edycji grupy):
+// `viewHide.fn(e)` zwraca true dla elementów, których teraz nie widać. Wszystko, co pomija ukryte, idzie przez isHidden.
+export const viewHide = { fn: null };
 export function isHidden(m, e) {
   if (e.hidden) return true;
+  if (viewHide.fn && viewHide.fn(e)) return true;
   const tags = m.tags; if (!tags || !tags.length) return false;
   const off = id => id != null && tags.some(t => t.id === id && t.hidden);
   if (off(e.tag)) return true;

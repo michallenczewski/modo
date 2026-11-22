@@ -10,7 +10,7 @@ import { TEXTURES, textureCanvas } from './textures.js';
 
 /* ---------- style rysunku ---------- */
 export const STYLES = {
-  szkic: { name: 'Szkic', paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 9, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
+  szkic: { name: 'Szkic', paper: '#f3f1ea', ink: '#24221e', inkFar: '#8f8a80', wSil: 2.1, wIn: 0.95, ext: 0, wobble: 1.1, fade: 0.8, lines: true, shadow: 0.24, tint: 0.3 },
   kreska: { name: 'Kreska', paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
   model: { name: 'Model', paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
@@ -286,6 +286,7 @@ export class Viewer {
     // przebudowuje wtedy tylko materiały, a nie dziesiątki tysięcy trójkątów.
     this.shapeCache ||= new Map(); const live = new Set();
     this.edgeIndex = [];   // które krawędzie (zakres w liście) należą do której bryły albo linii — do szybkiej zmiany koloru przy zaznaczaniu
+    this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
     this._bounds = bounds(this.model);
     this._sunB = this.model.lines.length ? null : this._bounds;   // zasięg cienia: same bryły
     this.meshes = [];
@@ -298,7 +299,6 @@ export class Viewer {
     const lines = st.lines || this.wire;   // w trybie siatki krawędzie są zawsze
     const GHOST = hex3(this.dark ? '#5d5d5a' : '#b9b5aa');
     // bryły wycinające: nie mają własnych ścian, odejmują się od brył, które przecinają
-    this.editSet = this.editGroup != null ? subtreeIds(this.model, this.editGroup) : null;
     const cutters = this.model.shapes.filter(s => s.op === 'cut' && !isHidden(this.model, s) && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
     const polysOf = s => {
       const out = [];

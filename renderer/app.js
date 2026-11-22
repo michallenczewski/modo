@@ -13,7 +13,7 @@ import { parseDxf } from './dxf.js';
 import { exportObj } from './export.js';
 import { initSolid, solidReady } from './solid.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
-import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds } from './model.js';
+import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds, viewHide } from './model.js';
 import { meshVolume, meshArea, regionOf } from './mesh.js';
 import { LIBRARY, loadUserLib, saveUserLib } from './lib.js';
 import { translateShape, groupsWhollyIn, edges as edgesOf } from './model.js';
@@ -622,7 +622,15 @@ function setHidden(fn, edges) {
   for (const id of [...app.selection]) { const s = typeof id === 'number' ? app.model.shapes.find(q => q.id === id) : app.model.lines.find(q => 'l' + q.id === id); if (!s || s.hidden) app.selection.delete(id); }
   app.changed(); renderViewChip();
 }
+// Przy edycji grupy F (bez zaznaczenia) przełącza widok: reszta modelu przygaszona albo całkiem schowana (jak w SketchUpie).
+// To ustawienie widoku, nie modelu — nic nie trafia do pliku ani do historii cofania, a wybór zostaje na następne edycje.
+function setRestHidden(on) {
+  app.restHidden = on;
+  try { localStorage.setItem('modo.restHidden', on ? '1' : ''); } catch (e) {}
+  viewer.rebuild(); renderViewChip();
+}
 function hideRest() {
+  if (app.editing != null && !app.selection.size && !app.sub.length) return setRestHidden(!app.restHidden);
   // drugi raz F (albo F bez zaznaczenia, gdy coś jest ukryte) pokazuje wszystko
   if ((app.isolated || !app.selection.size) && hiddenCount()) return unhideAll();
   if (!app.selection.size) return toast('Zaznacz bryły, które mają zostać widoczne.');
@@ -660,6 +668,8 @@ function renderViewChip() {
     const depth = chainOf(app.model, ed.id).length;
     eb.textContent = (ed.kind === 'comp' ? `Edytujesz komponent (${instancesOf(app.model, ed.def).length} wyst.)` : 'Edytujesz grupę') + (depth > 1 ? ` · poziom ${depth}` : '') + ' · wyjdź';
   }
+  const rc = $('#restChip'); rc.hidden = !(ed && app.editSolid == null);
+  rc.textContent = app.restHidden ? 'Reszta modelu schowana · pokaż' : 'Schowaj resztę modelu';
   const sg = !app.editing && selectedGroups(), sc = $('#selChip');
   sc.hidden = !(sg && sg.length === 1);
   if (sg && sg.length === 1) sc.textContent = sg[0].kind === 'comp' ? 'Komponent · ' + instancesOf(app.model, sg[0].def).length + ' wyst.' : 'Grupa';
@@ -1887,6 +1897,7 @@ function toast(text, action, ms) {
 app.toast = (t, a) => toast(t, a);
 $('#hiddenChip').addEventListener('click', () => unhideAll());
 $('#lockChip').addEventListener('click', () => unlockAll());
+$('#restChip').addEventListener('click', () => setRestHidden(!app.restHidden));
 $('#editChip').addEventListener('click', () => app.editSolid != null ? app.exitSolid() : app.exitGroup());
 $('#orthoChip').addEventListener('click', () => run(viewer.ortho ? 'persp' : 'twoPoint'));
 
@@ -1919,6 +1930,13 @@ const startPath = new URLSearchParams(location.search).get('p');
 if (startPath) openSketch(startPath);
 camReset();
 setTimeout(offerRestore, 1200);
+// reszta modelu schowana przy edycji grupy: ukryte jest wszystko poza edytowaną grupą (zob. viewHide w model.js)
+try { app.restHidden = !!localStorage.getItem('modo.restHidden'); } catch (e) { app.restHidden = false; }
+viewHide.fn = e => {
+  if (!app.restHidden || viewer.editGroup == null || app.editSolid != null) return false;
+  const set = viewer.editSet || (viewer.editSet = subtreeIds(app.model, viewer.editGroup));   // liczone na nowo przy każdej przebudowie widoku
+  return e.g == null || !set.has(e.g);
+};
 window.modo = app;   // do testów w konsoli
 app.solidReady = solidReady;
 // Manifold ładuje się w tle; po załadowaniu scena przelicza wycięcia już nim
