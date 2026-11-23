@@ -1,7 +1,7 @@
 {
   "name": "modo",
   "productName": "Modo",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Lekki szkicownik brył architektonicznych",
   "author": "Michał Lenczewski",
   "license": "GPL-3.0-or-later",
@@ -32,7 +32,11 @@
       {
         "ext": "modo",
         "name": "Szkic Modo",
-        "role": "Editor"
+        "description": "Szkic Modo",
+        "mimeType": "application/x-modo",
+        "role": "Editor",
+        "rank": "Owner",
+        "icon": "modo-file"
       }
     ],
     "mac": {
@@ -48,7 +52,40 @@
       ],
       "identity": null,
       "extendInfo": {
-        "CFBundleDisplayName": "Modo"
+        "CFBundleDisplayName": "Modo",
+        "UTExportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "pl.lenczewski.modo.szkic",
+            "UTTypeDescription": "Szkic Modo",
+            "UTTypeConformsTo": [
+              "public.data",
+              "public.content"
+            ],
+            "UTTypeIconFile": "modo-file.icns",
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "modo"
+              ],
+              "public.mime-type": [
+                "application/x-modo"
+              ]
+            }
+          }
+        ],
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Szkic Modo",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Owner",
+            "LSItemContentTypes": [
+              "pl.lenczewski.modo.szkic"
+            ],
+            "CFBundleTypeExtensions": [
+              "modo"
+            ],
+            "CFBundleTypeIconFile": "modo-file.icns"
+          }
+        ]
       }
     },
     "dmg": {
