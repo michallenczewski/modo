@@ -212,6 +212,13 @@ ipcMain.handle('obj-save', async (e, obj, mtl, suggested) => {
   await fsp.writeFile(base + '.obj', obj.replace(/^mtllib .*$/m, 'mtllib ' + path.basename(base) + '.mtl'), 'utf8');
   return base + '.obj';
 });
+ipcMain.handle('dxf-save', async (e, dxf, suggested) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showSaveDialog(win, { filters: [{ name: 'DXF', extensions: ['dxf'] }], defaultPath: (suggested || 'Modo') + '.dxf' });
+  if (r.canceled || !r.filePath) return null;
+  await fsp.writeFile(r.filePath, dxf, 'latin1');
+  return r.filePath;
+});
 ipcMain.handle('show-in-folder', (e, p) => shell.showItemInFolder(p));
 ipcMain.handle('open-external', (e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
 

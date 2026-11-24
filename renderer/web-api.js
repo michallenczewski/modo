@@ -19,6 +19,7 @@
     async autosaveClear(key) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); if (r && r.key === key) localStorage.removeItem('modo.autozapis'); } catch (e) {} return true; },
     async autosaveRead(key) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); return r && r.key === key ? r : null; } catch (e) { return null; } },
     async autosaveList(mine) { try { const r = JSON.parse(localStorage.getItem('modo.autozapis') || 'null'); return r && r.key !== mine ? [{ key: r.key, name: r.name, path: null, time: r.time }] : []; } catch (e) { return []; } },
+    async saveDxf(dxf, suggested) { const n = (suggested || 'Modo') + '.dxf'; download(new Blob([dxf], { type: 'application/dxf' }), n); return n; },
     async savePng(buf, suggested) { download(new Blob([buf], { type: 'image/png' }), (suggested || 'Modo') + '.png'); return (suggested || 'Modo') + '.png'; },
     async saveObj(obj, mtl, suggested) { const n = suggested || 'Modo'; download(new Blob([obj.replace(/^mtllib .*$/m, 'mtllib ' + n + '.mtl')], { type: 'text/plain' }), n + '.obj'); setTimeout(() => download(new Blob([mtl], { type: 'text/plain' }), n + '.mtl'), 300); return n + '.obj'; },
     // w przeglądarce klucz leży w pamięci przeglądarki, a zapytanie idzie wprost do Gemini

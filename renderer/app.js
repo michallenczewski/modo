@@ -10,7 +10,7 @@ import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, delet
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
-import { exportObj } from './export.js';
+import { exportObj, exportDxf } from './export.js';
 import { initSolid, solidReady } from './solid.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
 import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds, viewHide } from './model.js';
@@ -591,6 +591,7 @@ function run(act) {
     case 'persp': viewer.toggleOrtho(); toast(viewer.ortho ? _t('Rzut równoległy') : _t('Perspektywa')); renderViewChip(); renderViewPop(); break;
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
+    case 'dxf': saveDxf(); break;
     case 'render': showSec('render'); break;
     case 'importSkp': importSkp(); break;
     case 'library': openPop('#libPop', $('#libBtn')); break;
@@ -1755,7 +1756,7 @@ async function openFileMenu() {
   try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
   const items = [['new', _t('Nowy szkic')], ['open', _t('Otwórz…')], null, ['save', _t('Zapisz')], ['saveAs', _t('Zapisz jako…')], ['saveCopy', _t('Zapisz kopię jako…')]];
   if (app.file.path) items.push(['revert', _t('Przywróć zapisaną wersję')]);
-  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
+  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], ['dxf', _t('Eksport DXF (CAD)…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
   // Edycja: schowek, zaznaczenie, ukrywanie i blokada (dawne okienko Edycja)
   items.push('edit', ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej (wskaż miejsce)')], ['pasteInPlace', _t('Wklej w tym samym miejscu')], null,
     ['selectAll', _t('Zaznacz wszystko')], ['selectNone', _t('Odznacz wszystko')], ['selectInvert', _t('Odwróć zaznaczenie')], null,
@@ -1901,6 +1902,15 @@ async function saveObj() {
     const p = await api.saveObj(r.obj, r.mtl, name);
     if (p) toast(_t('Zapisano OBJ: ') + r.count + _t(' obiektów (metry, oś Y w górę)'), api.web ? null : [_t('Pokaż'), () => api.showInFolder(p)]);
   } catch (err) { toast(_t('Nie udało się zapisać OBJ: ') + err.message); }
+}
+async function saveDxf() {
+  const name = app.file.name === _t('Bez nazwy') ? 'Modo' : app.file.name, unit = getUnit();
+  const r = exportDxf(app.model, unit);
+  if (!r.count && !r.lines) return toast(_t('Nie ma nic do eksportu.'));
+  try {
+    const p = await api.saveDxf(r.dxf, name);
+    if (p) toast(_t`Zapisano DXF — bryły: ${r.count}, linie: ${r.lines} (jednostki: ${unit}, oś Z w górę).`, api.web ? null : [_t('Pokaż'), () => api.showInFolder(p)]);
+  } catch (err) { toast(_t('Nie udało się zapisać DXF: ') + err.message); }
 }
 /* ---------- render widoku przez Gemini (Nano Banana) ---------- */
 const AI_MODELS = [['gemini-nano-banana-2.1', 'Nano Banana 2.1'], ['gemini-3-pro-image', 'Nano Banana Pro'], ['gemini-3.1-flash-image', 'Nano Banana 2'], ['gemini-3.1-flash-lite-image', _t('Nano Banana 2 Lite (tylko 1K)')], ['', _t('Inny model…')]];
