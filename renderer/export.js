@@ -232,21 +232,32 @@ export function exportStl(model, unit = 'm') {
 // Złącza T: wierzchołek jednego trójkąta leżący w środku boku drugiego (typowe po wycinaniu i przy ścianach z otworami).
 // Taki trójkąt dzielimy wachlarzem ze swojego środka przez wszystkie punkty na brzegu — bryła w STL jest wtedy szczelna.
 function weldT(tris) {
-  const K = p => p.map(x => Math.round(x * 1e6)).join(','), pts = new Map();
-  for (const t of tris) for (const v of t.vs) pts.set(K(v), v);
-  const all = [...pts.values()], C = 0.25, grid = new Map(), cell = x => Math.floor(x / C);
-  for (const p of all) { const k = cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]); (grid.get(k) || grid.set(k, []).get(k)).push(p); }
+  // boki bez pary (ten sam odcinek w drugą stronę) — tylko tam może leżeć cudzy wierzchołek; bryła domknięta nie wymaga zmian
+  const K = p => p.map(x => Math.round(x * 1e6)).join(','), cnt = new Map(), ek = (a, b) => { const x = K(a), y = K(b); return x < y ? [x + '|' + y, 1] : [y + '|' + x, -1]; };
+  for (const t of tris) for (let i = 0; i < 3; i++) { const [k, sg] = ek(t.vs[i], t.vs[(i + 1) % 3]); cnt.set(k, (cnt.get(k) || 0) + sg); }
+  const open = (a, b) => cnt.get(ek(a, b)[0]) !== 0;
+  const pts = new Map();
+  for (const t of tris) for (let i = 0; i < 3; i++) { const a = t.vs[i], b = t.vs[(i + 1) % 3]; if (open(a, b)) { pts.set(K(a), a); pts.set(K(b), b); } }
+  if (!pts.size) return tris;
+  const C = 0.25, grid = new Map(), cell = x => Math.floor(x / C);
+  for (const p of pts.values()) { const k = cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]); (grid.get(k) || grid.set(k, []).get(k)).push(p); }
+  const all = [...pts.values()];
   const near = (a, b) => {
-    const lo = [0, 1, 2].map(i => cell(Math.min(a[i], b[i]) - 1e-6)), hi = [0, 1, 2].map(i => cell(Math.max(a[i], b[i]) + 1e-6));
-    if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) return all;
-    const out = []; for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) for (const p of grid.get(x + ',' + y + ',' + z) || []) out.push(p);
+    if (all.length < 64) return all;
+    const seen = new Set(), out = [], n = Math.ceil(V.dist(a, b) / (C / 2)) + 1;
+    for (let i = 0; i <= n; i++) {
+      const p = V.lerp(a, b, i / n), cx = cell(p[0]), cy = cell(p[1]), cz = cell(p[2]);
+      for (let x = cx - 1; x <= cx + 1; x++) for (let y = cy - 1; y <= cy + 1; y++) for (let z = cz - 1; z <= cz + 1; z++) {
+        const k = x + ',' + y + ',' + z; if (seen.has(k)) continue; seen.add(k); for (const q of grid.get(k) || []) out.push(q);
+      }
+    }
     return out;
   };
   const out = [];
   for (const t of tris) {
     const ring = []; let extra = false;
     for (let i = 0; i < 3; i++) {
-      const a = t.vs[i], b = t.vs[(i + 1) % 3], L = V.dist(a, b); ring.push(a); if (L < 1e-9) continue;
+      const a = t.vs[i], b = t.vs[(i + 1) % 3], L = V.dist(a, b); ring.push(a); if (L < 1e-9 || !open(a, b)) continue;
       const d = V.mul(V.sub(b, a), 1 / L), ins = [];
       for (const q of near(a, b)) { const u = V.dot(V.sub(q, a), d); if (u > 1e-6 && u < L - 1e-6 && V.dist(V.add(a, V.mul(d, u)), q) < 1e-6) ins.push([u, q]); }
       ins.sort((x, y) => x[0] - y[0]); for (const [, q] of ins) { ring.push(q); extra = true; }

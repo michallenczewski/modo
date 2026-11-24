@@ -1,12 +1,12 @@
 // Modo — okno programu: narzędzia, nawigacja, klawiatura, pole wymiarów, okienka (słońce, PNG, podkład, skróty), plik.
 
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
-import { Snapper } from './snap.js';
+import { Snapper, setAxes } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
 import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
-import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, noteMove, TIP_DELAY } from './tools.js';
+import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -57,6 +57,7 @@ const IC = {
   section: '<path d="M3 3.5h10v9H3z" stroke-dasharray="0"/><path d="M1.5 8h13"/><path d="M5 8l-1.2 2.2M8 8l-1.2 2.2M11 8l-1.2 2.2"/>',
   dim: '<path d="M2.5 5v7M13.5 5v7M2.5 9.5h11"/><path d="M4 11l-1.4-1.4M13.4 9.6 12 8"/>',
   text: '<path d="M3.5 4h9M8 4v8.5"/>',
+  axes: '<path d="M4 12V2.8M4 12h9.2M4 12 1.8 14.2"/><path d="M2.6 4.2 4 2.8l1.4 1.4M11.8 10.6l1.4 1.4-1.4 1.4"/>',
   protractor: '<path d="M2.5 12.5h11"/><path d="M2.5 12.5A5.5 5.5 0 0 1 13.5 12.5"/><path d="M8 12.5 11.5 5" stroke-dasharray="1.4 1.6"/>',
   pie: '<path d="M8 8V2.5A5.5 5.5 0 1 1 2.5 8z"/>',
   extents: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx=".5"/>',
@@ -160,7 +161,10 @@ function postEdit(prev = app.undo[app.undo.length - 1]) {
 }
 app.setModelLive = m => { app.model = m; viewer.setModel(m); };
 app.commitLive = start => { app.clearSub(); unlockAxis(); app.undo.push(start); trimUndo(); app.redo = []; app.opSeq++; postEdit(start); app.markDirty(); viewer.setModel(app.model); app.refresh(); app.renderViewChip?.(); };
-app.refresh = () => { viewer.redraw(); app.updateHint(); app.updateVcb(); };
+// osie rysowania z modelu (po zmianie, cofnięciu i wczytaniu): przyciąganie i rysowane osie
+let axesKey = '';
+const syncAxes = () => { const a = app.model.axes || null, k = a ? [...a.o, ...a.x, ...a.y].join(',') : ''; if (k !== axesKey) { axesKey = k; setAxes(a); viewer.setAxesFrame(a); } };
+app.refresh = () => { syncAxes(); viewer.redraw(); app.updateHint(); app.updateVcb(); };
 // zablokowane elementy nie mogą trafić do zaznaczenia żadną drogą (ramka, panel, „zaznacz wszystko”)
 function dropLocked() {
   const m = app.model; if (!m.shapes.some(s => s.locked) && !m.lines.some(l => l.locked)) return;
@@ -267,16 +271,16 @@ const tools = {
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom'), zoomWin: new ZoomWinTool(app),
   arc3: new Arc3Tool(app), freehand: new FreehandTool(app), look: new LookTool(app), walk: new WalkTool(app), camPos: new CamPosTool(app),
-  imgScale: new ImageScaleTool(app)
+  imgScale: new ImageScaleTool(app), axes: new AxesTool(app)
 };
 // po ustawieniu kamery od razu można się rozejrzeć (jak w SketchUpie)
 app.camPosDone = () => { setTool('look'); renderViewChip(); };
 let tool = tools.select, toolId = 'select', toolBefore = 'select';
 // po powiększeniu ramką wraca narzędzie, którym pracowałeś wcześniej
 app.zoomWinDone = () => setTool(toolBefore);
-const TOOL_NAME = { line: _t('Linia'), freehand: _t('Linia odręczna'), arc3: _t('Łuk przez trzy punkty'), orbit: _t('Orbita'), look: _t('Rozejrzyj się'), walk: _t('Spacer'), camPos: _t('Ustaw kamerę'), tape: _t('Taśma i prowadnice'), protractor: _t('Kątomierz'), dim: _t('Wymiar'), text: _t('Opis'), rect: _t('Prostokąt'), rrect: _t('Prostokąt obrócony'), circle: _t('Okrąg'), polygon: _t('Wielokąt'), arc: _t('Łuk przez dwa punkty'), carc: _t('Łuk ze środka'), pie: _t('Wycinek koła') };
+const TOOL_NAME = { line: _t('Linia'), freehand: _t('Linia odręczna'), arc3: _t('Łuk przez trzy punkty'), orbit: _t('Orbita'), look: _t('Rozejrzyj się'), walk: _t('Spacer'), camPos: _t('Ustaw kamerę'), tape: _t('Taśma i prowadnice'), protractor: _t('Kątomierz'), axes: _t('Osie rysowania'), dim: _t('Wymiar'), text: _t('Opis'), rect: _t('Prostokąt'), rrect: _t('Prostokąt obrócony'), circle: _t('Okrąg'), polygon: _t('Wielokąt'), arc: _t('Łuk przez dwa punkty'), carc: _t('Łuk ze środka'), pie: _t('Wycinek koła') };
 // rodziny narzędzi: jeden przycisk na pasku, warianty w wysuwanym menu po najechaniu
-const FAMILIES = { line: ['line', 'freehand'], rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'arc3', 'carc', 'pie'], tape: ['tape', 'protractor'], dim: ['dim', 'text'], orbit: ['orbit', 'look', 'walk', 'camPos'] };
+const FAMILIES = { line: ['line', 'freehand'], rect: ['rect', 'rrect'], circle: ['circle', 'polygon'], arc: ['arc', 'arc3', 'carc', 'pie'], tape: ['tape', 'protractor', 'axes'], dim: ['dim', 'text'], orbit: ['orbit', 'look', 'walk', 'camPos'] };
 const famOf = id => Object.keys(FAMILIES).find(f => FAMILIES[f].includes(id));
 const famCur = {};
 // Lewy pasek w kolejności pracy: zaznacz / gumka / wiaderko, rysowanie, zmiana kształtu (z operacjami na bryłach), pomiary, a na dole kamera.
@@ -555,7 +559,8 @@ function run(act) {
     app.sub = edgeSub.filter(q => { const s = app.model.shapes.find(t => t.id === q.id); return s && edgeList(s).some(e => (near(e.a, q.a) && near(e.b, q.b)) || (near(e.a, q.b) && near(e.b, q.a))); });
   }
   switch (act) {
-    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': setTool(act); break;
+    case 'select': case 'line': case 'rect': case 'circle': case 'arc': case 'rrect': case 'polygon': case 'carc': case 'pie': case 'dim': case 'text': case 'protractor': case 'section': case 'push': case 'move': case 'rotate': case 'scale': case 'offset': case 'tape': case 'eraser': case 'paint': case 'orbit': case 'pan': case 'zoom': case 'zoomWin': case 'arc3': case 'freehand': case 'look': case 'walk': case 'camPos': case 'axes': setTool(act); break;
+    case 'axesReset': if (app.model.axes) { app.checkpoint(); delete app.model.axes; app.changed(); toast(_t('Osie rysowania wróciły na miejsce.')); } break;
     case 'fog': viewer.setLook({ fog: !viewer.fog }); renderViewPop(); app.markDirtySoft(); toast(viewer.fog ? _t('Mgła włączona') : _t('Mgła wyłączona')); syncLook(); break;
     case 'wire': viewer.setLook({ wire: !viewer.wire }); renderViewPop(); syncLook(); app.markDirtySoft(); toast(viewer.wire ? _t('Siatka: same krawędzie') : _t('Ściany widoczne')); break;
     case 'hiddenGeo': viewer.setLook({ showHidden: !viewer.showHidden }); renderViewPop(); toast(viewer.showHidden ? _t('Ukryta geometria widoczna (blado)') : _t('Ukryta geometria schowana')); syncLook(); break;
@@ -1120,10 +1125,12 @@ function texPanel(F) {
     + _t`<div class="row"><button class="tb soft" id="txFit" title="Jedno powtórzenie wzoru albo obrazu na całą ścianę (np. zdjęcie elewacji)">Dopasuj do ściany</button><span class="grow"></span><button class="tb soft" id="txReset">Domyślnie</button></div>`;
 }
 function setTex(t, fn) {
-  app.checkpoint();
-  const fc = { ...t.s.fc };
-  for (const i of t.idx) { const k = 'p:' + i, cur = fc[k]; if (!cur || cur.t !== t.fp.t) continue; const tx = fn({ ...(cur.tx || {}) }); fc[k] = { ...cur }; if (tx) fc[k].tx = tx; else delete fc[k].tx; }
-  t.s.fc = fc; viewer.setModel(app.model); app.markDirty(); app.refresh(); renderInfo();
+  const fc = { ...t.s.fc }; let any = false;
+  for (const i of t.idx) { const k = 'p:' + i, cur = fc[k]; if (!cur || cur.t !== t.fp.t) continue; const tx = fn({ ...(cur.tx || {}) }); fc[k] = { ...cur }; if (tx) fc[k].tx = tx; else delete fc[k].tx; any = true; }
+  if (!any) return;
+  app.checkpoint(); t.s.fc = fc;
+  const keep = app.sub; postEdit(); app.sub = keep;   // inne wystąpienia komponentu dostają to samo; panel zostaje przy ścianie
+  viewer.setModel(app.model); app.markDirty(); app.refresh(); renderInfo();
 }
 function wireTexPanel() {
   const t = texFace(app.selection.size ? [] : app.sub.filter(q => q.kind === 'face')); if (!t) return;
@@ -1135,6 +1142,7 @@ function wireTexPanel() {
   $('#txFit').addEventListener('click', () => {
     // te same kierunki co w widoku (Viewer.faceGeo): poziom ściany i pion w jej płaszczyźnie
     const P = t.q.polys.flat(), n = newellOf(t.q.polys[0]);
+    if (t.q.polys.some(p => Math.abs(V.dot(newellOf(p), n)) < 0.9999) || P.some(p => Math.abs(V.dot(V.sub(p, P[0]), n)) > 1e-4)) return toast(_t('Dopasowanie działa na płaskiej ścianie.'));
     let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n)))); const w = V.cross(n, u);
     const U = P.map(p => V.dot(p, u)), W = P.map(p => V.dot(p, w)), [sw, sh] = TEXTURES[t.fp.t].size;
     const x0 = Math.min(...U), y0 = Math.min(...W);
@@ -1548,7 +1556,7 @@ imgField('#imgW', (u, v) => { const L = parseLength(v); if (L == null || L <= 0)
 imgField('#imgRot', (u, v) => { const a = numIn(v.replace('°', '')); if (a == null) return false; u.rot = a; });
 imgField('#imgXY', (u, v) => { const L = parseLengths(v); if (!L || L.length !== 2) return false; u.x = L[0]; u.y = L[1]; });
 imgField('#imgH', (u, v) => { const L = parseLength(v); if (L == null) return false; u.height = L; });
-$('#imgOp').addEventListener('input', e => { const u = app.imageUnder; if (!u) return; u.opacity = +e.target.value; setRangeFill(e.target); viewer.setImageUnder(u); app.markDirty(); });
+$('#imgOp').addEventListener('input', e => { const u = app.imageUnder; if (!u) return; u.opacity = +e.target.value; setRangeFill(e.target); viewer.setImageOpacity(u.opacity); app.markDirty(); });
 $('#imgPick').addEventListener('click', () => pickImageUnder());
 $('#imgRemove').addEventListener('click', () => { app.imageUnder = null; app.imageUnderChanged(); });
 $('#imgScale').addEventListener('click', () => { closePops(); setTool('imgScale'); });
@@ -1831,6 +1839,7 @@ function openContext(x, y, cx, cy) {
     items.push(['selectAll', _t('Zaznacz wszystko')], ['unhideAll', _t('Pokaż ukryte')]);
     if (lockedCount()) items.push(['unlockAll', _t('Odblokuj wszystko')]);
     items.push(['extents', _t('Pokaż cały model')], null, ['cleanLines', _t('Usuń luźne krawędzie')], ['clearGuides', _t('Usuń wszystkie prowadnice')]);
+    items.push(null, ['axes', _t('Osie rysowania')]); if (app.model.axes) items.push(['axesReset', _t('Przywróć osie rysowania')]);
   }
   while (items.length && !items[items.length - 1]) items.pop();
   const m = $('#ctxMenu');
@@ -1899,7 +1908,17 @@ $('#setBtn').addEventListener('click', () => {
 });
 
 /* ---------- plik ---------- */
+function adoptImages() {
+  const used = new Set();
+  for (const s of app.model.shapes) for (const f of Object.values(s.fc || {})) if (isImageMat(f && f.t)) used.add(f.t);
+  for (const s of app.model.shapes) if (isImageMat(s.tex)) used.add(s.tex);
+  for (const k of used) {
+    const T = TEXTURES[k]; if (!T || !T.image || app.images.some(im => 'img:' + im.id === k)) continue;
+    app.images.push({ id: k.slice(4), name: T.name, data: T.image, px: T.px.slice(), avg: T.avg, size: T.size.slice() });
+  }
+}
 function serialize() {
+  adoptImages();
   return JSON.stringify({
     images: app.images.length ? app.images : undefined, imageUnder: app.imageUnder || undefined,
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
@@ -1921,7 +1940,7 @@ function load(text, name, path) {
   viewer.showAxes = d.axes !== false;
   viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye; syncLook();
   app.underlay = d.underlay || null;
-  app.images = d.images || []; registerImages(app.images); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
+  app.images = d.images || []; registerImages(app.images); for (const im of app.images) viewer.refreshTexture('img:' + im.id); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();

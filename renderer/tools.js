@@ -4,7 +4,7 @@
 
 import { V, at, makeShape, pushPull, extrudeFace, faceFromLoop, faceByKey, cloneModel, closeLoop, circlePts, CIRCLE_SEGMENTS, translateShape, translateLine, translateGuide, rotateShape, rotateLine, rotateGuide, scaleShape, scalePoint, vertices, hostFace, duplicateIds, groupsWhollyIn, transformFrame, transformShape, normalizeShape, rotVec, splitByLine, toMesh, faces as facesOf, offsetPolygon, facePlane, insideDistance, edges as shapeEdges, removeIds, isHidden } from './model.js';
 import { pickAnnotation, drawAnnotations } from './annot.js';
-import { AXIS_COLOR, AXES } from './snap.js';
+import { AXIS_COLOR, AXES, ORIGIN, planeU } from './snap.js';
 import { mapMeshPoints, booleanMesh, isMesh, transformMesh, regionOf, removePolys, polysOnEdge, newell, inPoly, segKey } from './mesh.js';
 import { parseLength, parseLengths, fmtLength, fmtNum } from './units.js';
 import { healFaces, mergeTouching } from './stitch.js';
@@ -277,7 +277,7 @@ export class RectTool extends Tool {
   }
   // płaszczyzna o normalnej n przez pierwszy narożnik; boki prostokąta wzdłuż krawędzi ściany, jeśli jest podana
   setPlane(n, along) {
-    let u = along && Math.abs(V.dot(along, n)) < 1e-6 ? along : Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
+    let u = along && Math.abs(V.dot(along, n)) < 1e-6 ? along : planeU(n);
     u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
     this.plane = { o: this.p0, n, u, v: V.cross(n, u) };
   }
@@ -312,7 +312,7 @@ export class RectTool extends Tool {
     if (!this.cur) return;
     if (!this.p0) {
       const s = this.cur, p0 = s.p.slice();
-      let n = [0, 0, 1];
+      let n = AXES.z.slice();
       if (s.face && (s.type === 'face' || s.type === 'edge' || s.type === 'end' || s.type === 'mid')) {
         const sh = this.model.shapes.find(q => q.id === s.face.shapeId);
         const f = sh && faceByKey(sh, s.face.key);
@@ -803,13 +803,13 @@ export function hoverShape(app, x, y, id = pickEntity(app, x, y)) {
 }
 // płaszczyzna rysowania z pierwszego kliknięcia: ściana pod kursorem albo ziemia
 function planeAt(app, s) {
-  let n = [0, 0, 1];
+  let n = AXES.z.slice();
   if (s.face) {
     const sh = app.model.shapes.find(q => q.id === s.face.shapeId), f = sh && faceByKey(sh, s.face.key);
     if (f && Math.abs(V.dot(V.sub(s.p, f.verts[0]), f.normal)) < 1e-4) n = f.normal;
   }
   if (app.lockAxis) n = AXES[app.lockAxis];
-  let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
+  let u = planeU(n);
   u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
   return { o: s.p.slice(), n, u, v: V.cross(n, u) };
 }
@@ -1675,7 +1675,7 @@ export class RotateTool extends Tool {
     const n = this.n || this.lockN || (s ? planeAt(this.app, s).n : [0, 0, 1]);
     // kątomierz: okrąg z podziałką co 15°
     const R = this.v.pixelSize(ctr) * 70;
-    let u = this.ref || (Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)));
+    let u = this.ref || planeU(n);
     u = V.norm(V.sub(u, V.mul(n, V.dot(u, n))));
     const w = V.cross(n, u), at = (a, r) => V.add(ctr, V.add(V.mul(u, Math.cos(a) * r), V.mul(w, Math.sin(a) * r)));
     // kolor kątomierza mówi, wokół której osi obracasz (także w podglądzie przed kliknięciem)
@@ -1859,6 +1859,40 @@ export class TapeTool extends Tool {
     drawMarker(c, v, s);
     const P = v.toScreen(s.p);
     drawChip(c, P.x, P.y, this.p0 ? fmtLength(this.dist()) : tip(s));
+  }
+}
+
+/* ---------- osie rysowania ---------- */
+// Jak narzędzie Osie w SketchUpie: początek, kierunek osi czerwonej, punkt wyznaczający płaszczyznę z osią zieloną.
+// Oś niebieska jest do nich prostopadła. Osie leżą w modelu (model.axes), więc zapisują się w pliku i dają się cofnąć.
+export class AxesTool extends Tool {
+  reset() { this.o = null; this.x = null; this.cur = null; }
+  hint() { return !this.o ? _t('Kliknij nowy początek osi (np. narożnik budynku).') : !this.x ? _t('Kliknij punkt w kierunku osi czerwonej.') : _t('Kliknij punkt po stronie osi zielonej — oś niebieska będzie prostopadła do obu.'); }
+  move(e, x, y) { this.cur = this.app.snapper.find(x, y, { model: this.model, anchor: this.x || this.o || null, lockAxis: this.app.lockAxis, lockDir: this.app.lockDir }); }
+  lockFrom() { return this.x ? null : this.o; }
+  dirs(p) {
+    const x = this.x || (p && this.o ? V.sub(p, this.o) : null); if (!x || V.len(x) < 1e-9) return null;
+    const X = V.norm(x); if (!this.x || !p) return { X };
+    let Y = V.sub(V.sub(p, this.o), V.mul(X, V.dot(V.sub(p, this.o), X)));
+    if (V.len(Y) < 1e-9) return { X }; Y = V.norm(Y); return { X, Y, Z: V.cross(X, Y) };
+  }
+  down() {
+    const p = this.cur && this.cur.p; if (!p) return;
+    if (!this.o) { this.o = p.slice(); return; }
+    if (!this.x) { const d = V.sub(p, this.o); if (V.len(d) > 1e-6) this.x = V.norm(d); return; }
+    const D = this.dirs(p); if (!D || !D.Y) return;
+    this.app.checkpoint(); this.model.axes = { o: this.o.slice(), x: D.X, y: D.Y };
+    this.app.changed(); this.reset(); this.app.setTool('select');
+  }
+  draw(c, v) {
+    const s = this.cur; if (!s) return;
+    const L = this.v.pixelSize(this.o || s.p) * 90, D = this.o ? this.dirs(s.p) : null;
+    if (this.o && D) {
+      drawSeg(c, v, this.o, V.add(this.o, V.mul(D.X, L)), AXIS_COLOR.x, { width: 2.4 });
+      if (D.Y) { drawSeg(c, v, this.o, V.add(this.o, V.mul(D.Y, L)), AXIS_COLOR.y, { width: 2.4 }); drawSeg(c, v, this.o, V.add(this.o, V.mul(D.Z, L)), AXIS_COLOR.z, { width: 2.4 }); }
+    }
+    drawMarker(c, v, s);
+    const P = v.toScreen(s.p); drawChip(c, P.x, P.y, tip(s));
   }
 }
 

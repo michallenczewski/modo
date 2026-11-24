@@ -17,6 +17,8 @@ export const ACTIONS = [
   { group: _t('Rysowanie'), id: 'offset', name: _t('Odsunięcie'), keys: ['T'] },
   { group: _t('Rysowanie'), id: 'tape', name: _t('Taśma i prowadnice'), keys: ['Y'] },
   { group: _t('Rysowanie'), id: 'protractor', name: _t('Kątomierz (prowadnica pod kątem)'), keys: ['Shift+Y'] },
+  { group: _t('Rysowanie'), id: 'axes', name: _t('Osie rysowania (nowy początek i kierunki)'), keys: [] },
+  { group: _t('Rysowanie'), id: 'axesReset', name: _t('Przywróć osie rysowania'), keys: [] },
   { group: _t('Rysowanie'), id: 'dim', name: _t('Wymiar'), keys: ['U'] },
   { group: _t('Rysowanie'), id: 'text', name: _t('Opis z odnośnikiem'), keys: ['Shift+T'] },
   { group: _t('Rysowanie'), id: 'section', name: _t('Płaszczyzna przekroju'), keys: ['N'] },

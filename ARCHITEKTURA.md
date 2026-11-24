@@ -15,9 +15,9 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/dev/wieza.js` | Model do sprawdzianu wydajności (wieża w stylu Turning Torso, ok. 2575 grup), budowany zwykłymi poleceniami programu; `modoTest.tower()`. |
 | `scripts/serve-web.js`, `scripts/cdp.mjs`, `scripts/tlumaczenia.mjs` | Wersja przeglądarkowa bez pamięci podręcznej (`npm run web`); polecenia do okna programu uruchomionego z `--remote-debugging-port`; sprawdzenie tłumaczeń. |
 | `scripts/sprawdziany.mjs` | Sprawdziany modelowania bez przeglądarki: przypadki z SketchUpa (pudło, komin, wnęka, otwory, okna, drzwi, bryły obok siebie, ⌥) na rdzeniu geometrii; umiejętność `sprawdziany-modelowania`. |
-| `renderer/viewer.js` | Scena three.js: kamera z osią Z w górę, nawigacja, słońce i cienie, szkicowe krawędzie (shader), eksport PNG, podkład. |
+| `renderer/viewer.js` | Scena three.js: kamera z osią Z w górę, nawigacja, słońce i cienie, szkicowe krawędzie (shader), cień otoczenia w stylu Model, eksport PNG, podkład CAD i podkład z obrazu, osie rysowania. |
 | `renderer/model.js` | Dane modelu i geometria: bryły, ściany, krawędzie, push/pull, ściana z zamkniętego obrysu. |
-| `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. |
+| `renderer/snap.js` | Przyklejanie kursora (inferencje): końce, środki, krawędzie, ściany, osie, „od punktu”, blokada osi. Osie rysowania (`AXES`, `ORIGIN`, `setAxes`, `planeU`). |
 | `renderer/tools.js` | Narzędzia: zaznacz, linia (także odręczna), prostokąt, okrąg, łuki (dwa punkty, trzy punkty, ze środka), wypchnij/wciśnij, przesuń, obróć, odsunięcie, taśma, gumka, wiaderko, orbita/przesuw/zoom lewym przyciskiem, rozglądanie, spacer i ustawianie kamery. Każde narzędzie pamięta swoją ostatnią operację (`last` z numerem `app.opSeq`), żeby wymiar wpisany po zakończeniu ją poprawił. |
 | `renderer/keys.js` | Lista poleceń ze skrótami (domyślnie własny układ Modo), zapis własnych skrótów w `localStorage`. |
 | `renderer/csg.js` | Odejmowanie brył (drzewa BSP na wzór csg.js) i wyciąganie krawędzi z wyniku: dzielenie na złączach T, pomijanie szwów w jednej płaszczyźnie, łączenie kawałków w całe krawędzie. |
@@ -25,7 +25,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/sun.js` | Położenie słońca (algorytm NOAA) dla daty, godziny i miejsca, z czasem letnim. |
 | `renderer/mesh.js` | Bryły z dowolnych ścian (`kind: 'mesh'`): ściany jako wielokąty, dzielenie linią, przesuwanie wierzchołków, wypychanie części ściany, operacje na bryłach (`booleanMesh`), pole i objętość. |
 | `renderer/annot.js` | Wymiary i opisy: rysowanie na płaskiej nakładce (okno i PNG) i trafianie kursorem. |
-| `renderer/export.js` | Eksport OBJ + MTL (wycięcia odjęte, obiekty nazwane ścieżką grup, oś Y w górę). |
+| `renderer/export.js` | Eksport OBJ + MTL (oś Y w górę), DXF R12 (ściany 3D z krawędziami jak w Modo, linie, warstwy), DAE (COLLADA, kolory, oś Z w górę) i STL (szczelne bryły — `weldT`); wycięcia odjęte, obiekty nazwane ścieżką grup. |
 | `renderer/lib.js` | Biblioteka modeli budowanych z kodu (samochód, van, ludzie, drzewa 2D, krzew, ławka) i zapis własnych modeli w `localStorage` (`modo.library`). |
 | `renderer/solid.js` | Operacje na bryłach przez Manifold (WASM). Każda funkcja może zwrócić `null` — wtedy `csg.js` liczy po staremu drzewami BSP. |
 | `renderer/skp.js` | Import `.skp`: model z OpenSKP → bryły z dowolnych ścian, linie, grupy, komponenty, warstwy, sceny. |
@@ -33,7 +33,7 @@ Modo to lekki szkicownik brył architektonicznych: rysuje się jak w SketchUpie,
 | `renderer/geo.js` | Wspólna geometria: zlewanie luźnych brył w jedną (`absorb`), porządek w płaszczyźnie (`rebuildPlane`), dokładanie ścian (`addFace`), wypychanie (`pushFace`), części spójne, usuwanie ścian z zachowaniem krawędzi, wyjmowanie ścian do osobnej bryły (`liftFaces`). |
 | `renderer/topo.js` | **Rdzeń geometrii** (jak w SketchUpie): ściany jako obrysy z otworami na zespawanych punktach. Wielokąty bryły `geo` mają numery ścian `s.fid` (kawałki jednej ściany — ten sam numer; ważne, dopóki zgadza się podpis `s.fidSig`), więc ściany i krawędzie nie są odgadywane z położenia. `addLoop` dzieli płaszczyznę na pola z właścicielem (prostokąt na ścianie), `push` wypycha bez zgadywania materiału: prostopadły sąsiad się rozciąga albo dostaje wcięcie, przy pozostałych krawędziach powstaje bok, podstawa zostaje tylko pod wolną ścianą albo z ⌥, ściany przeciwne w jednej płaszczyźnie znoszą się. Stare szkice (bez numerów) są składane w ściany przy pierwszej operacji. Sprawdziany: `scripts/sprawdziany.mjs`. |
 | `renderer/stitch.js` | Łączenie geometrii po narysowaniu: dzielenie linii w miejscach styku, układ płaski krawędzi (`arrange`), ściany z zamkniętych pól, dzielenie ścian linią, otwory, scalanie ścian po usunięciu krawędzi (`healFaces`). |
-| `renderer/textures.js` | Materiały z teksturą dla wiaderka: wzory rysowane w kodzie (cegła, deski, beton, płytki, dachówka, blacha, trawa, żwir), powtarzalne, w prawdziwej skali. |
+| `renderer/textures.js` | Materiały z teksturą dla wiaderka: wzory rysowane w kodzie (cegła, deski, beton, płytki, dachówka, blacha, trawa, żwir), powtarzalne, w prawdziwej skali, oraz materiały z obrazów (`registerImages`, klucz `img:<uid>`). |
 | `renderer/units.js` | Wymiary wpisywane z klawiatury: metry domyślnie, przecinek albo kropka, `cm`/`mm`, dwa wymiary `6;4`. |
 
 ## Model
@@ -126,6 +126,12 @@ Wielokąt podstawy może mieć otwory (`holes` — pętle zgodne z ruchem wskaz�
 
 Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model, kamera, styl, słońce, sceny, podkład (już przeliczony na metry, więc działa na obu komputerach bez oryginalnego DXF).
 
+**Obrazy.** Materiały z obrazów (`app.images`: `{ id, name, data, px, avg, size }`) i podkład z obrazu (`app.imageUnder`: `{ name, data, px, w, rot, x, y, height, opacity }`) leżą w pliku szkicu obok modelu, a nie w modelu — duże zdjęcia nie trafiają do historii cofania. Ściana pamięta tylko klucz materiału (`fc[klucz].t = 'img:<uid>'`); rejestr w `textures.js` tylko dopisuje, więc klucz z losowym uid nie zderzy się z obrazem innego szkicu. Obraz przy wczytaniu jest zmniejszany do 4096 px na dłuższym boku. „Skaluj odcinkiem” (`ImageScaleTool`) skaluje podkład względem pierwszego punktu tak, żeby wskazany odcinek miał wpisaną długość.
+
+**Ułożenie tekstury na ścianie** to `fc[klucz].tx = { x, y, r, sx, sy }` (przesunięcie w metrach, obrót w stopniach, skala) dla wszystkich wielokątów ściany; `Viewer.faceGeo` przelicza z tego współrzędne tekstury. „Dopasuj do ściany” rozciąga jedno powtórzenie wzoru na prostokąt otaczający ścianę w tych samych kierunkach co widok (poziom ściany, pion w jej płaszczyźnie).
+
+**Osie rysowania** (`model.axes`: początek `o` i kierunki `x`, `y`; `z = x × y`) ustawia narzędzie Osie (trzy kliknięcia, jak w SketchUpie). `setAxes` zmienia tablice `AXES` i `ORIGIN` w miejscu, więc przyciąganie, blokada strzałkami, linie śledzenia i kierunek prostokąta, okręgu i kątomierza (`planeU`) idą za nowymi osiami; `app.refresh` (`syncAxes`) wyrównuje je z modelem po każdej zmianie, cofnięciu i wczytaniu. Rdzeń geometrii liczy dalej w osiach świata.
+
 ## Rysunek
 
 Ściany to zwykłe `MeshLambertMaterial` z cieniami (`PCFShadowMap` — mapa głębi z miękkim filtrem; promień = „Miękkość”; zakres głębi kamery cienia jest ciasno dopasowany do modelu). Wcześniejszy `VSMShadowMap` dawał przy niskim słońcu i dużych modelach kwadratowe plamy na ścianach. Ziemia to `ShadowMaterial` — widać na niej tylko cień, reszta to kolor papieru.
@@ -140,6 +146,8 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 **Duże modele.** `Viewer.rebuild` nie tworzy siatki na bryłę: ściany wszystkich brył trafiają do kilku wspólnych paczek (`batches`, jedna na rodzaj materiału: krycie, tekstura, strona, cień), a kolor ściany jest kolorem wierzchołków. Osobne siatki brył (`meshes`) istnieją tylko po to, żeby trafiał w nie kursor (`pick`), i nie są rysowane. Geometria ścian i dane kresek każdej bryły są pamiętane w `shapeCache`, dopóki bryła się nie zmieni (porównanie tablic, a po cofnięciu — skrótu treści `shapeSig`). Zaznaczenie zmienia tylko kolory (`reselect`). Przy aktywnym przekroju działa starsza ścieżka: siatka na bryłę.
 
 **Szkło i kreski.** Kreski rysują się dwa razy: najpierw blado pod szkłem (`underMesh`), potem szkło, potem sama głębia szkła (`addGlassDepth`) i na końcu kreski w pełni — już tylko te, których żadna szyba nie zasłania. Kreski modelu oglądanego z daleka cienieją i bledną (`ppm` w shaderze).
+
+**Cień otoczenia** (styl Model, przełącznik w okienku Wygląd widoku, `modo.ao`): po zwykłym obrazie `aoPass` rysuje nieprzezroczyste ściany i ziemię (warstwa 1) materiałem z kierunkiem ściany do bufora z głębią, liczy zasłonięcie półkulą 16 próbek w połowie rozdzielczości (promień ok. 3,5% wielkości modelu, 0,25–2 m), wygładza je z uwzględnieniem głębi i mnoży przez gotowy obraz. Działa też w eksporcie PNG.
 
 Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
@@ -170,7 +178,7 @@ Wszystkie leżą w `renderer/vendor/` jako gotowe pliki, żeby program i wersja 
 - **Wydajność przy dużych modelach** — dziś każda zmiana przebudowuje całą geometrię. Przy setkach brył trzeba przebudowywać tylko zmienione.
 - **Geometria łączona między bryłami** — łączą się luźne linie i płaskie ściany, linie dzielą ściany brył, a bryły stykające się ścianami łączą się przy wypchnięciu (nie przy przesuwaniu). To dalej osobne bryły ze scalaniem, a nie jeden zbiór krawędzi i ścian. Pełna lepka geometria w 3D (jeden wspólny zbiór wierzchołków, krawędzi i ścian, jak `core/mesh.py` w IngeTrazo) byłaby zmianą modelu.
 - **Duże modele ze SketchUpa** — powyżej kilkudziesięciu tysięcy ścian przebudowa sceny i cofanie (kopia całego modelu) zaczynają być odczuwalne. Wtedy: przebudowa tylko zmienionych brył i współdzielona geometria kopii komponentu.
-- **Tekstury z plików i ze SketchUpa** — tekstury są tylko wbudowane (rysowane w kodzie); import .skp sprowadza materiały do jednego koloru na bryłę, a eksport OBJ nie zna koloru pojedynczej ściany.
+- **Tekstury ze SketchUpa** — import .skp sprowadza materiały do jednego koloru na bryłę; eksport OBJ i DAE zapisuje tekstury jako ich kolor zastępczy.
 - **Follow Me** — nie ma; wymaga brył z dowolnego przekroju prowadzonego po ścieżce.
 - **Wiele wycięć w dużych bryłach** — CSG liczy się przy każdej przebudowie sceny (także w trakcie push/pull). Przy dziesiątkach okien w jednej bryle trzeba będzie zapamiętywać wynik i liczyć tylko zmienione bryły.
 - **Bardzo duże podkłady** — przyklejanie korzysta z siatki odcinków (`Snapper.setUnderlay`), rysowanie z jednego `LineSegments` na warstwę. Powyżej ~600 tys. odcinków czytnik przerywa.

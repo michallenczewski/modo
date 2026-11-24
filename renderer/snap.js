@@ -15,6 +15,19 @@ function onFace(m, hit) {
 
 import { _t } from './i18n.js';
 export const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+// Osie rysowania (jak narzędzie Osie w SketchUpie): początek i trzy prostopadłe kierunki. Tablice zmieniają się w miejscu,
+// więc każde miejsce, które czyta AXES (przyciąganie, blokada strzałkami, linie śledzenia), od razu widzi nowe osie.
+export const ORIGIN = [0, 0, 0];
+export function setAxes(a) {
+  const o = a ? a.o : [0, 0, 0], x = a ? a.x : [1, 0, 0], y = a ? a.y : [0, 1, 0], z = V.cross(x, y);
+  ORIGIN.splice(0, 3, ...o); AXES.x.splice(0, 3, ...x); AXES.y.splice(0, 3, ...y); AXES.z.splice(0, 3, ...z);
+}
+// kierunek „w poziomie” dla płaszczyzny o normalnej n: oś czerwona, gdy płaszczyzna leży jak ziemia osi, inaczej poziom osi
+export function planeU(n) {
+  let u = Math.abs(V.dot(n, AXES.z)) > 0.9 ? AXES.x : V.cross(AXES.z, n);
+  if (V.len(u) < 1e-9) u = [1, 0, 0];
+  u = V.sub(u, V.mul(n, V.dot(u, n))); return V.norm(u);
+}
 export const AXIS_COLOR = { x: '#c0533f', y: '#4f8a46', z: '#3f63a8' };
 export const REF_COLOR = '#b0489e';   // równolegle / prostopadle do krawędzi — magenta, jak w SketchUpie
 export const AXIS_NAME = { x: _t('Na osi czerwonej'), y: _t('Na osi zielonej'), z: _t('Na osi niebieskiej') };
@@ -165,7 +178,7 @@ export class Snapper {
       }
     }
     for (const [a, b] of this.underNear(x, y)) { tryPt(a, 'end'); tryPt(b, 'end'); tryPt(V.lerp(a, b, 0.5), 'mid'); segs.push([a, b]); }
-    tryPt([0, 0, 0], 'end');
+    tryPt(ORIGIN.slice(), 'end');
     if (opts.extraPoints) for (const p of opts.extraPoints) tryPt(p, 'end');
 
     // krawędzie wychodzące z punktu pod kursorem (albo ta, której to środek) też stają się odniesieniem
@@ -344,7 +357,7 @@ export class Snapper {
     if (hit) return { p: onFace(model || v.model, hit), type: 'face', label: _t('Na ścianie'), face: hit };
 
     // 4. ziemia
-    const g = v.onPlane(x, y, [0, 0, 0], [0, 0, 1]);
+    const g = v.onPlane(x, y, ORIGIN, AXES.z);   // ziemia osi rysowania (bez własnych osi — z = 0)
     if (g) return { p: g, type: 'ground', label: '' };
     return null;
   }

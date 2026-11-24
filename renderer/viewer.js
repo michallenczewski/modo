@@ -273,6 +273,12 @@ export class Viewer {
   }
   setDark(v) { this.dark = !!v; if (this.model) this.rebuild(); else this.needs = true; }
 
+  // osie rysowania: początek i kierunki (model.axes); bez nich — osie świata
+  setAxesFrame(a) {
+    const o = a ? a.o : [0, 0, 0], x = a ? a.x : [1, 0, 0], y = a ? a.y : [0, 1, 0], z = V.cross(x, y);
+    const M = new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z)).setPosition(...o);
+    this.axes.matrixAutoUpdate = false; this.axes.matrix.copy(M); this.axes.matrixWorldNeedsUpdate = true; this.needs = true;
+  }
   makeAxes() {
     // osie dzielone na krótkie odcinki: linia, która w całości przechodzi za kamerę, bywa przez niektóre karty gubiona
     const g = new THREE.Group(), L = 1500, N = 150;
@@ -897,16 +903,21 @@ export class Viewer {
     const hw = Math.max(1, W >> 1), hh = Math.max(1, H >> 1);
     if (A.w !== W || A.h !== H) { A.rtN.setSize(W, H); A.rtA.setSize(hw, hh); A.rtB.setSize(hw, hh); A.w = W; A.h = H; }
     // warstwa 1: ściany, które naprawdę coś zasłaniają
-    const solid = this.batches ? this.batches.map(b => b.mesh) : this.meshes;
+    const pick = this.pickMats || [], solid = [...(this.batches || []).map(b => b.mesh), ...this.meshes.filter(m => !pick.includes(m.material))];
     for (const m of solid) { const mats = [].concat(m.material); if (mats.every(q => !q.transparent && q.colorWrite !== false)) m.layers.enable(1); else m.layers.disable(1); }
-    this.ground.layers.enable(1);
-    const b = this._bounds || bounds(this.model), radius = Math.min(2, Math.max(0.25, (b ? b.radius : 10) * 0.035));
+    const b = this._bounds || bounds(this.model);
+    // ziemia zasłania tylko wtedy, gdy kamera jest nad nią, a model nie schodzi pod poziom 0 (piwnica w przekroju)
+    if (this.ground.visible && cam.position.z > 0 && (!b || b.lo[2] > -0.01)) this.ground.layers.enable(1); else this.ground.layers.disable(1);
+    const radius = Math.min(2, Math.max(0.25, (b ? b.radius : 10) * 0.035));
     A.normal.clippingPlanes = this.section ? [this.clipPlane] : [];
     const keepMask = cam.layers.mask, keepBg = this.scene.background, keepOver = this.scene.overrideMaterial, keepFog = this.scene.fog, keepRT = r.getRenderTarget(), keepAuto = r.autoClear;
     cam.layers.set(1); this.scene.overrideMaterial = A.normal; this.scene.background = null; this.scene.fog = null;
     r.setRenderTarget(A.rtN); r.setClearColor(0x8080ff, 1); r.clear(); r.render(this.scene, cam);
     cam.layers.mask = keepMask; this.scene.overrideMaterial = keepOver; this.scene.background = keepBg; this.scene.fog = keepFog;
     const U = A.ao.uniforms; U.uProj.value.copy(cam.projectionMatrix); U.uInvProj.value.copy(cam.projectionMatrixInverse); U.uRadius.value = radius;
+    // za modelem cień otoczenia gaśnie (daleka ziemia pod małym kątem dawała szary pas na horyzoncie)
+    const dm = b ? this.cam.position.distanceTo(new THREE.Vector3(...b.center)) : 50, rm = b ? b.radius : 10; U.uFade.value.set(dm + rm, dm + rm * 2.5);
+    U.uOff.value = this.ortho ? 3000 : 0;   // kamera rzutu równoległego stoi 3 km za zwykłą (vc)
     A.quad.material = A.ao; r.setRenderTarget(A.rtA); r.render(A.qs, A.qc);
     const Bu = A.blur.uniforms; Bu.uInvProj.value.copy(cam.projectionMatrixInverse); Bu.uTexel.value.set(1 / hw, 1 / hh); Bu.uRadius.value = radius;
     A.quad.material = A.blur; r.setRenderTarget(A.rtB); r.render(A.qs, A.qc);
@@ -915,15 +926,15 @@ export class Viewer {
     r.autoClear = keepAuto; r.setRenderTarget(keepRT);
   }
   aoInit() {
-    const rt = (w, h, depth) => { const t = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true }); if (depth) t.depthTexture = new THREE.DepthTexture(w, h); return t; };
+    const rt = (w, h, depth) => { const t = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: !!depth }); if (depth) t.depthTexture = new THREE.DepthTexture(w, h); return t; };
     const A = { w: 0, h: 0, rtN: rt(1, 1, true), rtA: rt(1, 1), rtB: rt(1, 1) };
     A.normal = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
     const VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
     const VIEW = `vec3 viewPos(vec2 uv) { float d = texture2D(tDepth, uv).x; vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0); return p.xyz / p.w; }`;
     A.ao = new THREE.ShaderMaterial({
-      uniforms: { tDepth: { value: A.rtN.depthTexture }, tNormal: { value: A.rtN.texture }, uProj: { value: new THREE.Matrix4() }, uInvProj: { value: new THREE.Matrix4() }, uRadius: { value: 0.5 } },
+      uniforms: { tDepth: { value: A.rtN.depthTexture }, tNormal: { value: A.rtN.texture }, uProj: { value: new THREE.Matrix4() }, uInvProj: { value: new THREE.Matrix4() }, uRadius: { value: 0.5 }, uFade: { value: new THREE.Vector2(50, 100) }, uOff: { value: 0 } },
       vertexShader: VS, depthTest: false, depthWrite: false,
-      fragmentShader: `varying vec2 vUv; uniform sampler2D tDepth, tNormal; uniform mat4 uProj, uInvProj; uniform float uRadius;
+      fragmentShader: `varying vec2 vUv; uniform sampler2D tDepth, tNormal; uniform mat4 uProj, uInvProj; uniform float uRadius, uOff; uniform vec2 uFade;
         ${VIEW}
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
@@ -931,7 +942,7 @@ export class Viewer {
           vec3 P = viewPos(vUv), N = normalize(texture2D(tNormal, vUv).xyz * 2.0 - 1.0);
           float a = hash(gl_FragCoord.xy) * 6.2831853; vec3 rnd = vec3(cos(a), sin(a), 0.3);
           vec3 T = normalize(rnd - N * dot(rnd, N)), B = cross(N, T);
-          float occ = 0.0, bias = uRadius * 0.03;
+          float occ = 0.0, dist = max(0.0, length(P) - uOff), bias = uRadius * 0.03 + dist * 0.0015;
           for (int i = 0; i < 16; i++) {
             float f = (float(i) + 0.5) / 16.0, th = float(i) * 2.39996 + a, z = sqrt(1.0 - f), rr = sqrt(f);
             float len = mix(0.15, 1.0, f * f);
@@ -941,7 +952,7 @@ export class Viewer {
             float sz = viewPos(suv).z;
             occ += (sz >= S.z + bias ? 1.0 : 0.0) * smoothstep(0.0, 1.0, uRadius / abs(P.z - sz));
           }
-          gl_FragColor = vec4(vec3(clamp(1.0 - occ / 16.0 * 1.35, 0.0, 1.0)), 1.0);
+          gl_FragColor = vec4(vec3(clamp(1.0 - occ / 16.0 * 1.35 * (1.0 - smoothstep(uFade.x, uFade.y, dist)), 0.0, 1.0)), 1.0);
         }`
     });
     // wygładzenie 5×5 tylko w obrębie podobnej głębi (bez jasnych i ciemnych obwódek na brzegach brył)
@@ -999,7 +1010,7 @@ export class Viewer {
     const scale = W / (this.w * dpr);
     this.applyStyleUniforms(scale, this.w, this.h);
     this.edgeMat.uniforms.res.value.set(W, H);
-    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); if (this.aoOn()) this.aoPass(rt, W, H); r.setRenderTarget(null);
+    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); if (this.aoOn()) { const k = Math.min(1, 2400 / Math.max(W, H)); this.aoPass(rt, Math.round(W * k), Math.round(H * k)); } r.setRenderTarget(null);
     const px = new Uint8Array(W * H * 4);
     r.readRenderTargetPixels(rt, 0, 0, W, H, px);
     // wymiary i opisy: osobna warstwa 2D w rozdzielczości eksportu (rzut kamerą eksportu)
@@ -1223,6 +1234,7 @@ export class Viewer {
     if (lo[0] !== Infinity) this.cadBounds = [[lo[0], lo[1], u.height], [hi[0], hi[1], u.height]];
     this.joinUnderBounds(); this.updateSun();
   }
+  setImageOpacity(o) { for (const c of this.imageGroup?.children || []) c.material.opacity = o; this.needs = true; }
   joinUnderBounds() {
     const L = [this.cadBounds, this.imgBounds].filter(Boolean);
     this.underlayBounds = L.length ? [[0, 1, 2].map(k => Math.min(...L.map(b => b[0][k]))), [0, 1, 2].map(k => Math.max(...L.map(b => b[1][k])))] : null;
@@ -1231,11 +1243,12 @@ export class Viewer {
   // metrach `w`, obrót `rot` w stopniach. Leży w tej samej grupie co podkład CAD (widoczność, eksport PNG).
   setImageUnder(u) {
     if (!this.imageGroup) { this.imageGroup = new THREE.Group(); this.underlayGroup.add(this.imageGroup); }
-    for (const c of [...this.imageGroup.children]) { c.geometry.dispose(); c.material.map?.dispose(); c.material.dispose(); this.imageGroup.remove(c); }
+    for (const c of [...this.imageGroup.children]) { c.geometry.dispose(); c.material.dispose(); this.imageGroup.remove(c); }
     this.imgBounds = null;
+    if (this._imgTex && (!u || this._imgTex.data !== u.data)) { this._imgTex.tex.dispose(); this._imgTex = null; }
     if (u) {
-      const h = u.w * u.px[1] / u.px[0], tex = new THREE.TextureLoader().load(u.data, () => { this.needs = true; });
-      tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+      if (!this._imgTex) { const t = new THREE.TextureLoader().load(u.data, () => { this.needs = true; }); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; this._imgTex = { data: u.data, tex: t }; }
+      const h = u.w * u.px[1] / u.px[0], tex = this._imgTex.tex;
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(u.w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: u.opacity ?? 0.7, depthWrite: false, side: THREE.DoubleSide }));
       mesh.position.set(u.x || 0, u.y || 0, (u.height || 0) - 0.001); mesh.rotation.z = (u.rot || 0) * Math.PI / 180; mesh.renderOrder = -1;
       this.imageGroup.add(mesh);
