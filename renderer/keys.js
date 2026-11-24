@@ -96,6 +96,7 @@ export const ACTIONS = [
   { group: _t('Widok'), id: 'guides', name: _t('Prowadnice: pokaż / ukryj'), keys: [] },
   { group: _t('Widok'), id: 'wire', name: _t('Siatka — same krawędzie'), keys: ['Shift+J'] },
   { group: _t('Widok'), id: 'fog', name: _t('Mgła'), keys: [] },
+  { group: _t('Widok'), id: 'ao', name: _t('Cień otoczenia (styl Model)'), keys: [] },
   { group: _t('Widok'), id: 'hiddenGeo', name: _t('Ukryta geometria'), keys: [] },
   { group: _t('Widok'), id: 'style1', name: _t('Styl: Szkic'), keys: ['Shift+1'] },
   { group: _t('Widok'), id: 'style2', name: _t('Styl: Kreska'), keys: ['Shift+2'] },

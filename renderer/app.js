@@ -116,6 +116,7 @@ const app = {
   keys: loadKeys()
 };
 const viewer = app.viewer = new Viewer($('#view'));
+try { viewer.ao = localStorage.getItem('modo.ao') !== '0'; } catch (e) {}
 const snapper = app.snapper = new Snapper(viewer);
 viewer.selected = app.selection;
 viewer.setModel(app.model);
@@ -560,6 +561,7 @@ function run(act) {
     case 'makeFaces': makeFaces(); break;
     case 'cleanLines': cleanLines(); break;
     case 'backEdges': viewer.setLook({ backEdges: !viewer.backEdges }); renderViewPop(); syncLook(); toast(viewer.backEdges ? _t('Krawędzie tylne widoczne (blado)') : _t('Krawędzie tylne schowane')); break;
+    case 'ao': viewer.setLook({ ao: viewer.ao === false }); try { localStorage.setItem('modo.ao', viewer.ao === false ? '0' : '1'); } catch (e) {} toast(viewer.ao === false ? _t('Cień otoczenia wyłączony') : viewer.style === 'model' ? _t('Cień otoczenia włączony') : _t('Cień otoczenia włączony — widać go w stylu Model')); syncLook(); break;
     case 'guides': viewer.setLook({ showGuides: viewer.showGuides === false }); renderViewPop(); toast(viewer.showGuides === false ? _t('Prowadnice ukryte') : _t('Prowadnice widoczne')); syncLook(); break;
     case 'soften': softenSel(true); break;
     case 'unsoften': softenSel(false); break;
@@ -901,9 +903,9 @@ document.querySelectorAll('#styleSeg button').forEach(b => b.addEventListener('c
 // Przycisk na pasku jest podświetlony, gdy coś odbiega od zwykłego widoku.
 const LOOK = [['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges],
   ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire], ['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden],
-  ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false]];
+  ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false], ['ao', _t('Cień otoczenia'), _t('w stylu Model'), () => viewer.ao !== false]];
 function syncLook() {
-  $('#lookBtn').classList.toggle('on', LOOK.some(([id, , , on]) => id !== 'guides' && on()));
+  $('#lookBtn').classList.toggle('on', LOOK.some(([id, , , on]) => id !== 'guides' && id !== 'ao' && on()));
   if (!$('#lookPop').hidden) renderLookPop();
 }
 function renderLookPop() {

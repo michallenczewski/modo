@@ -772,7 +772,7 @@ export class Viewer {
   }
   // mgła, siatka i ukryta geometria: materiały trzeba zbudować na nowo (mgła jest wkompilowana w shader)
   setLook(o) {
-    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides']) if (k in o) this[k] = !!o[k];
+    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides', 'ao']) if (k in o) this[k] = !!o[k];
     this.scene.fog = null; this.applyStyleUniforms();
     this.scene.traverse(q => { for (const m of [].concat(q.material || [])) m.needsUpdate = true; });
     if (this.model) this.rebuild(); else this.needs = true;
@@ -874,7 +874,91 @@ export class Viewer {
     this.faceBillboards();
     this.applyStyleUniforms();
     this.renderer.render(this.scene, this.vc());
+    if (this.aoOn()) { const dpr = this.renderer.getPixelRatio(); this.aoPass(null, Math.round(this.w * dpr), Math.round(this.h * dpr)); }
     this.drawOverlay();
+  }
+  /* ---------- cień otoczenia (styl Model) ---------- */
+  // Narożniki, styk ściany z ziemią i wnęki dostają mniej światła z otoczenia. Trzy przejścia: (1) głębia i kierunki ścian
+  // (tylko nieprzezroczyste ściany i ziemia — warstwa 1), (2) zasłonięcie liczone w połowie rozdzielczości (półkula
+  // 16 próbek wokół punktu, promień w metrach zależny od wielkości modelu), (3) wygładzenie z uwzględnieniem głębi
+  // i przyciemnienie gotowego obrazu mnożeniem. Kreski stylu Model nie istnieją, więc przyciemnienie ich nie psuje.
+  aoOn() { return this.ao !== false && this.style === 'model' && !this.wire && !!this.model; }
+  aoPass(target, W, H) {
+    const r = this.renderer, cam = this.vc(), A = this._ao ||= this.aoInit();
+    const hw = Math.max(1, W >> 1), hh = Math.max(1, H >> 1);
+    if (A.w !== W || A.h !== H) { A.rtN.setSize(W, H); A.rtA.setSize(hw, hh); A.rtB.setSize(hw, hh); A.w = W; A.h = H; }
+    // warstwa 1: ściany, które naprawdę coś zasłaniają
+    const solid = this.batches ? this.batches.map(b => b.mesh) : this.meshes;
+    for (const m of solid) { const mats = [].concat(m.material); if (mats.every(q => !q.transparent && q.colorWrite !== false)) m.layers.enable(1); else m.layers.disable(1); }
+    this.ground.layers.enable(1);
+    const b = this._bounds || bounds(this.model), radius = Math.min(2, Math.max(0.25, (b ? b.radius : 10) * 0.035));
+    A.normal.clippingPlanes = this.section ? [this.clipPlane] : [];
+    const keepMask = cam.layers.mask, keepBg = this.scene.background, keepOver = this.scene.overrideMaterial, keepFog = this.scene.fog, keepRT = r.getRenderTarget(), keepAuto = r.autoClear;
+    cam.layers.set(1); this.scene.overrideMaterial = A.normal; this.scene.background = null; this.scene.fog = null;
+    r.setRenderTarget(A.rtN); r.setClearColor(0x8080ff, 1); r.clear(); r.render(this.scene, cam);
+    cam.layers.mask = keepMask; this.scene.overrideMaterial = keepOver; this.scene.background = keepBg; this.scene.fog = keepFog;
+    const U = A.ao.uniforms; U.uProj.value.copy(cam.projectionMatrix); U.uInvProj.value.copy(cam.projectionMatrixInverse); U.uRadius.value = radius;
+    A.quad.material = A.ao; r.setRenderTarget(A.rtA); r.render(A.qs, A.qc);
+    const Bu = A.blur.uniforms; Bu.uInvProj.value.copy(cam.projectionMatrixInverse); Bu.uTexel.value.set(1 / hw, 1 / hh); Bu.uRadius.value = radius;
+    A.quad.material = A.blur; r.setRenderTarget(A.rtB); r.render(A.qs, A.qc);
+    A.mul.uniforms.uStrength.value = this.dark ? 0.75 : 0.9;
+    A.quad.material = A.mul; r.autoClear = false; r.setRenderTarget(target); r.render(A.qs, A.qc);
+    r.autoClear = keepAuto; r.setRenderTarget(keepRT);
+  }
+  aoInit() {
+    const rt = (w, h, depth) => { const t = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true }); if (depth) t.depthTexture = new THREE.DepthTexture(w, h); return t; };
+    const A = { w: 0, h: 0, rtN: rt(1, 1, true), rtA: rt(1, 1), rtB: rt(1, 1) };
+    A.normal = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
+    const VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+    const VIEW = `vec3 viewPos(vec2 uv) { float d = texture2D(tDepth, uv).x; vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0); return p.xyz / p.w; }`;
+    A.ao = new THREE.ShaderMaterial({
+      uniforms: { tDepth: { value: A.rtN.depthTexture }, tNormal: { value: A.rtN.texture }, uProj: { value: new THREE.Matrix4() }, uInvProj: { value: new THREE.Matrix4() }, uRadius: { value: 0.5 } },
+      vertexShader: VS, depthTest: false, depthWrite: false,
+      fragmentShader: `varying vec2 vUv; uniform sampler2D tDepth, tNormal; uniform mat4 uProj, uInvProj; uniform float uRadius;
+        ${VIEW}
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        void main() {
+          if (texture2D(tDepth, vUv).x >= 1.0) { gl_FragColor = vec4(1.0); return; }
+          vec3 P = viewPos(vUv), N = normalize(texture2D(tNormal, vUv).xyz * 2.0 - 1.0);
+          float a = hash(gl_FragCoord.xy) * 6.2831853; vec3 rnd = vec3(cos(a), sin(a), 0.3);
+          vec3 T = normalize(rnd - N * dot(rnd, N)), B = cross(N, T);
+          float occ = 0.0, bias = uRadius * 0.03;
+          for (int i = 0; i < 16; i++) {
+            float f = (float(i) + 0.5) / 16.0, th = float(i) * 2.39996 + a, z = sqrt(1.0 - f), rr = sqrt(f);
+            float len = mix(0.15, 1.0, f * f);
+            vec3 S = P + (T * cos(th) * rr + B * sin(th) * rr + N * z) * uRadius * len;
+            vec4 c = uProj * vec4(S, 1.0); vec2 suv = c.xy / c.w * 0.5 + 0.5;
+            if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0 || texture2D(tDepth, suv).x >= 1.0) continue;
+            float sz = viewPos(suv).z;
+            occ += (sz >= S.z + bias ? 1.0 : 0.0) * smoothstep(0.0, 1.0, uRadius / abs(P.z - sz));
+          }
+          gl_FragColor = vec4(vec3(clamp(1.0 - occ / 16.0 * 1.35, 0.0, 1.0)), 1.0);
+        }`
+    });
+    // wygładzenie 5×5 tylko w obrębie podobnej głębi (bez jasnych i ciemnych obwódek na brzegach brył)
+    A.blur = new THREE.ShaderMaterial({
+      uniforms: { tAO: { value: A.rtA.texture }, tDepth: { value: A.rtN.depthTexture }, uInvProj: { value: new THREE.Matrix4() }, uTexel: { value: new THREE.Vector2() }, uRadius: { value: 0.5 } },
+      vertexShader: VS, depthTest: false, depthWrite: false,
+      fragmentShader: `varying vec2 vUv; uniform sampler2D tAO, tDepth; uniform mat4 uInvProj; uniform vec2 uTexel; uniform float uRadius;
+        ${VIEW}
+        void main() {
+          float z0 = viewPos(vUv).z, sum = 0.0, wsum = 0.0;
+          for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) {
+            vec2 uv = vUv + vec2(float(x), float(y)) * uTexel;
+            float w = abs(viewPos(uv).z - z0) < uRadius * 0.5 ? 1.0 : 0.0;
+            sum += texture2D(tAO, uv).r * w; wsum += w;
+          }
+          gl_FragColor = vec4(vec3(wsum > 0.0 ? sum / wsum : 1.0), 1.0);
+        }`
+    });
+    A.mul = new THREE.ShaderMaterial({
+      uniforms: { tAO: { value: A.rtB.texture }, uStrength: { value: 0.9 } }, vertexShader: VS,
+      fragmentShader: 'varying vec2 vUv; uniform sampler2D tAO; uniform float uStrength; void main() { gl_FragColor = vec4(vec3(mix(1.0, texture2D(tAO, vUv).r, uStrength)), 1.0); }',
+      blending: THREE.MultiplyBlending, premultipliedAlpha: true, transparent: true, depthTest: false, depthWrite: false
+    });
+    A.qs = new THREE.Scene(); A.qc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    A.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), A.ao); A.quad.frustumCulled = false; A.qs.add(A.quad);
+    return A;
   }
   drawOverlay() {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
@@ -906,7 +990,7 @@ export class Viewer {
     const scale = W / (this.w * dpr);
     this.applyStyleUniforms(scale, this.w, this.h);
     this.edgeMat.uniforms.res.value.set(W, H);
-    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); r.setRenderTarget(null);
+    r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); if (this.aoOn()) this.aoPass(rt, W, H); r.setRenderTarget(null);
     const px = new Uint8Array(W * H * 4);
     r.readRenderTargetPixels(rt, 0, 0, W, H, px);
     // wymiary i opisy: osobna warstwa 2D w rozdzielczości eksportu (rzut kamerą eksportu)
