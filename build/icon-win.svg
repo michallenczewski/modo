@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Ikona Modo dla Windows: na całą powierzchnię, bez marginesu i cienia (jak w Gapie). Źródło dla build/icon-win.png. -->
+  <g transform="scale(6.4)">
+    <rect width="160" height="160" rx="36" fill="#C6F432"/>
+    <polygon points="80,30 120,53 80,76 40,53" fill="#FFFFFF" stroke="#161616" stroke-width="4" stroke-linejoin="round"/>
+    <polygon points="40,53 80,76 80,132 40,109" fill="#161616" stroke="#161616" stroke-width="4" stroke-linejoin="round"/>
+    <polygon points="80,76 120,53 120,109 80,132" fill="#FFFFFF" stroke="#161616" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M80 102 L120 79" stroke="#161616" stroke-width="3" stroke-dasharray="5 5" fill="none"/>
+    <path d="M80 62 V44 M73 51 L80 44 L87 51" stroke="#161616" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
