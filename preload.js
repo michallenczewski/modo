@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   savePng: (buf, suggested) => ipcRenderer.invoke('png-save', buf, suggested),
   saveObj: (obj, mtl, suggested) => ipcRenderer.invoke('obj-save', obj, mtl, suggested),
   saveDxf: (dxf, suggested) => ipcRenderer.invoke('dxf-save', dxf, suggested),
+  saveExport: (data, suggested, ext, label) => ipcRenderer.invoke('export-save', data, suggested, ext, label),
   geminiHasKey: () => ipcRenderer.invoke('gemini-key-has'),
   geminiSetKey: k => ipcRenderer.invoke('gemini-key-set', k),
   geminiRender: req => ipcRenderer.invoke('gemini-render', req),

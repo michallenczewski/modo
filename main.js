@@ -219,6 +219,15 @@ ipcMain.handle('dxf-save', async (e, dxf, suggested) => {
   await fsp.writeFile(r.filePath, dxf, 'latin1');
   return r.filePath;
 });
+// eksport 3D (DAE — tekst, STL — dane binarne): okno zapisu z jednym rozszerzeniem
+ipcMain.handle('export-save', async (e, data, suggested, ext, label) => {
+  if (!/^[a-z0-9]{1,5}$/.test(ext || '')) return null;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showSaveDialog(win, { filters: [{ name: label || ext.toUpperCase(), extensions: [ext] }], defaultPath: (suggested || 'Modo') + '.' + ext });
+  if (r.canceled || !r.filePath) return null;
+  await fsp.writeFile(r.filePath, typeof data === 'string' ? data : Buffer.from(data));
+  return r.filePath;
+});
 ipcMain.handle('show-in-folder', (e, p) => shell.showItemInFolder(p));
 ipcMain.handle('open-external', (e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
 

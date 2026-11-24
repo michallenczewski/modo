@@ -114,6 +114,8 @@ export const ACTIONS = [
   { group: _t('Plik'), id: 'render', name: _t('Render widoku przez Gemini'), keys: ['Mod+G'] },
   { group: _t('Plik'), id: 'obj', name: _t('Eksport OBJ (3ds Max)'), keys: ['Mod+Shift+O'] },
   { group: _t('Plik'), id: 'dxf', name: _t('Eksport DXF (AutoCAD i inne programy CAD)'), keys: [] },
+  { group: _t('Plik'), id: 'dae', name: _t('Eksport DAE (SketchUp, Blender, Lumion, Twinmotion)'), keys: [] },
+  { group: _t('Plik'), id: 'stl', name: _t('Eksport STL (druk 3D)'), keys: [] },
   { group: _t('Plik'), id: 'importSkp', name: _t('Importuj model SketchUpa (.skp)'), keys: [] },
   { group: _t('Plik'), id: 'underlay', name: _t('Podkład DXF / DWG'), keys: ['Mod+Shift+I'] },
   { group: _t('Plik'), id: 'underToLines', name: _t('Podkład: zamień na linie do rysowania'), keys: [] },

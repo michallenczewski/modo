@@ -150,3 +150,110 @@ function segIndex() {
     }
   };
 }
+
+// Ściany do eksportu 3D (DAE, STL): każda widoczna bryła z odjętymi wycięciami jako trójkąty zwrócone na zewnątrz,
+// z nazwą ze ścieżki grup i materiałem ściany (kolor, krycie; tekstura — jej kolor zastępczy). Jak w exportObj.
+function solidsForExport(model) {
+  const out = [], names = new Map(), mats = new Map();
+  const matOf = (s, fp) => {
+    const c = (fp ? fp.c || (fp.t && TEXTURES[fp.t] && TEXTURES[fp.t].avg) : s.color || (s.tex && TEXTURES[s.tex] && TEXTURES[s.tex].avg)) || DEFAULT_COLOR, a = (fp && fp.a) ?? s.alpha ?? 1;
+    const key = c + '|' + a.toFixed(2);
+    if (!mats.has(key)) mats.set(key, { id: 'Modo_' + c.slice(1) + (a < 0.999 ? '_a' + Math.round(a * 100) : ''), c, a });
+    return mats.get(key);
+  };
+  const cutters = model.shapes.filter(s => s.op === 'cut' && !isHidden(model, s) && isSolid(s)).map(s => ({ s, box: boxOf(s) }));
+  const orient = (t, n) => { const g = V.cross(V.sub(t[1], t[0]), V.sub(t[2], t[0])); return V.dot(g, n) < 0 ? [t[0], t[2], t[1]] : t; };
+  const trisOf = s => triangulate(s).flatMap(f => f.tris.map(t => ({ vs: orient(t, f.normal), shared: null })));
+  for (const s of model.shapes) {
+    if (isHidden(model, s) || s.op === 'cut') continue;
+    const cut = isSolid(s) ? cutters.filter(c => boxesTouch(c.box, boxOf(s))) : [];
+    const tris = [];
+    if (cut.length) { for (const p of subtractAll(trisOf(s), cut.map(c => trisOf(c.s)))) for (let i = 1; i + 1 < p.vs.length; i++) tris.push({ vs: [p.vs[0], p.vs[i], p.vs[i + 1]], n: p.n, mat: matOf(s, null) }); }
+    else for (const f of triangulate(s)) { const mat = matOf(s, s.fc && s.fc[f.key]); for (const t of f.tris) tris.push({ vs: orient(t, f.normal), n: f.normal, mat }); }
+    if (!tris.length) continue;
+    const path = s.g ? chainOf(model, s.g).reverse().map(g => g.name || (g.kind === 'comp' ? _t('Komponent_') + g.def : _t('Grupa_') + g.id)) : [];
+    let name = clean([...path, s.name || _t('Bryla_') + s.id].join('__'));
+    const k = names.get(name) || 0; names.set(name, k + 1); if (k) name += '_' + (k + 1);
+    out.push({ name, tris });
+  }
+  return { solids: out, mats: [...mats.values()] };
+}
+
+// COLLADA 1.4.1 (.dae): SketchUp, Blender, 3ds Max, Rhino, Lumion, Twinmotion. Oś Z w górę i metry zapisane w nagłówku,
+// każda bryła to osobny węzeł i geometria, ściany pogrupowane po materiale.
+export function exportDae(model) {
+  const { solids, mats } = solidsForExport(model);
+  const f = x => (Math.round(x * 1e6) / 1e6).toString(), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const rgb = h => { const [r, g, b] = hexRgb(h); return `${f(r)} ${f(g)} ${f(b)} 1`; };
+  const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  const L = ['<?xml version="1.0" encoding="utf-8"?>', '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">',
+    `<asset><contributor><authoring_tool>Modo</authoring_tool></contributor><created>${now}</created><modified>${now}</modified><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>`,
+    '<library_effects>'];
+  for (const m of mats) L.push(`<effect id="${m.id}-fx"><profile_COMMON><technique sid="common"><lambert><diffuse><color>${rgb(m.c)}</color></diffuse>` + (m.a < 0.999 ? `<transparent opaque="A_ONE"><color>1 1 1 ${f(m.a)}</color></transparent><transparency><float>1</float></transparency>` : '') + '</lambert></technique></profile_COMMON></effect>');
+  L.push('</library_effects>', '<library_materials>');
+  for (const m of mats) L.push(`<material id="${m.id}" name="${m.id}"><instance_effect url="#${m.id}-fx"/></material>`);
+  L.push('</library_materials>', '<library_geometries>');
+  solids.forEach((o, i) => {
+    const id = 'g' + i, pos = [], nor = [], byMat = new Map();
+    o.tris.forEach((t, k) => { for (const v of t.vs) pos.push(f(v[0]), f(v[1]), f(v[2])); nor.push(f(t.n[0]), f(t.n[1]), f(t.n[2])); if (!byMat.has(t.mat.id)) byMat.set(t.mat.id, []); byMat.get(t.mat.id).push(k); });
+    L.push(`<geometry id="${id}" name="${esc(o.name)}"><mesh>`,
+      `<source id="${id}-pos"><float_array id="${id}-pos-a" count="${pos.length}">${pos.join(' ')}</float_array><technique_common><accessor source="#${id}-pos-a" count="${pos.length / 3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source>`,
+      `<source id="${id}-nor"><float_array id="${id}-nor-a" count="${nor.length}">${nor.join(' ')}</float_array><technique_common><accessor source="#${id}-nor-a" count="${nor.length / 3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source>`,
+      `<vertices id="${id}-v"><input semantic="POSITION" source="#${id}-pos"/></vertices>`);
+    for (const [mid, list] of byMat) L.push(`<triangles material="${mid}" count="${list.length}"><input semantic="VERTEX" source="#${id}-v" offset="0"/><input semantic="NORMAL" source="#${id}-nor" offset="1"/><p>${list.map(k => `${k * 3} ${k} ${k * 3 + 1} ${k} ${k * 3 + 2} ${k}`).join(' ')}</p></triangles>`);
+    L.push('</mesh></geometry>');
+  });
+  L.push('</library_geometries>', '<library_visual_scenes><visual_scene id="scene" name="Modo">');
+  solids.forEach((o, i) => {
+    const used = [...new Set(o.tris.map(t => t.mat.id))];
+    L.push(`<node id="n${i}" name="${esc(o.name)}"><instance_geometry url="#g${i}"><bind_material><technique_common>${used.map(m => `<instance_material symbol="${m}" target="#${m}"/>`).join('')}</technique_common></bind_material></instance_geometry></node>`);
+  });
+  L.push('</visual_scene></library_visual_scenes>', '<scene><instance_visual_scene url="#scene"/></scene>', '</COLLADA>');
+  return { dae: L.join('\n') + '\n', count: solids.length };
+}
+
+// STL binarny (druk 3D, programy do obliczeń): same trójkąty, bez kolorów; wymiary w jednostce szkicu (m, cm albo mm).
+export function exportStl(model, unit = 'm') {
+  const k = { m: 1, cm: 100, mm: 1000 }[unit] || 1, { solids } = solidsForExport(model);
+  for (const o of solids) o.tris = weldT(o.tris);
+  const n = solids.reduce((a, o) => a + o.tris.length, 0), buf = new ArrayBuffer(84 + n * 50), dv = new DataView(buf);
+  const head = 'Modo STL, jednostki: ' + unit;
+  for (let i = 0; i < 80; i++) dv.setUint8(i, i < head.length ? head.charCodeAt(i) & 0x7f : 32);
+  dv.setUint32(80, n, true);
+  let o = 84;
+  for (const s of solids) for (const t of s.tris) {
+    for (const x of t.n) { dv.setFloat32(o, x, true); o += 4; }
+    for (const v of t.vs) for (const x of v) { dv.setFloat32(o, x * k, true); o += 4; }
+    dv.setUint16(o, 0, true); o += 2;
+  }
+  return { stl: new Uint8Array(buf), count: solids.length, tris: n };
+}
+
+// Złącza T: wierzchołek jednego trójkąta leżący w środku boku drugiego (typowe po wycinaniu i przy ścianach z otworami).
+// Taki trójkąt dzielimy wachlarzem ze swojego środka przez wszystkie punkty na brzegu — bryła w STL jest wtedy szczelna.
+function weldT(tris) {
+  const K = p => p.map(x => Math.round(x * 1e6)).join(','), pts = new Map();
+  for (const t of tris) for (const v of t.vs) pts.set(K(v), v);
+  const all = [...pts.values()], C = 0.25, grid = new Map(), cell = x => Math.floor(x / C);
+  for (const p of all) { const k = cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]); (grid.get(k) || grid.set(k, []).get(k)).push(p); }
+  const near = (a, b) => {
+    const lo = [0, 1, 2].map(i => cell(Math.min(a[i], b[i]) - 1e-6)), hi = [0, 1, 2].map(i => cell(Math.max(a[i], b[i]) + 1e-6));
+    if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) return all;
+    const out = []; for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) for (const p of grid.get(x + ',' + y + ',' + z) || []) out.push(p);
+    return out;
+  };
+  const out = [];
+  for (const t of tris) {
+    const ring = []; let extra = false;
+    for (let i = 0; i < 3; i++) {
+      const a = t.vs[i], b = t.vs[(i + 1) % 3], L = V.dist(a, b); ring.push(a); if (L < 1e-9) continue;
+      const d = V.mul(V.sub(b, a), 1 / L), ins = [];
+      for (const q of near(a, b)) { const u = V.dot(V.sub(q, a), d); if (u > 1e-6 && u < L - 1e-6 && V.dist(V.add(a, V.mul(d, u)), q) < 1e-6) ins.push([u, q]); }
+      ins.sort((x, y) => x[0] - y[0]); for (const [, q] of ins) { ring.push(q); extra = true; }
+    }
+    if (!extra) { out.push(t); continue; }
+    const c = V.mul(V.add(V.add(t.vs[0], t.vs[1]), t.vs[2]), 1 / 3);
+    for (let i = 0; i < ring.length; i++) out.push({ ...t, vs: [c, ring[i], ring[(i + 1) % ring.length]] });
+  }
+  return out;
+}
