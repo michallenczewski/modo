@@ -83,6 +83,7 @@ export const ACTIONS = [
   { group: _t('Widok'), id: 'sceneNext', name: _t('Następna scena'), keys: ['PageDown'] },
   { group: _t('Edycja'), id: 'library', name: _t('Biblioteka modeli'), keys: ['L'] },
   { group: _t('Widok'), id: 'panel', name: _t('Panel: element, warstwy, struktura'), keys: ['I'] },
+  { group: _t('Widok'), id: 'minimal', name: _t('Tryb minimalistyczny: sam widok (drugi raz: cały interfejs)'), keys: ['Tab'] },
   { group: _t('Widok'), id: 'orbit', name: _t('Orbita'), keys: ['O'] },
   { group: _t('Widok'), id: 'pan', name: _t('Przesuń widok'), keys: ['P'] },
   { group: _t('Widok'), id: 'zoom', name: _t('Powiększ (przeciąganiem)'), keys: [] },

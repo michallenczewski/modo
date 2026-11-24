@@ -469,6 +469,8 @@ export default {
  "Krawędzie tylne (zasłonięte widać blado)": "Back Edges (hidden edges shown faintly)",
  "Powiększ (przeciąganiem)": "Zoom Window (drag)",
  "Panel: element, warstwy, struktura": "Panel: entity, layers, outliner",
+ "Tryb minimalistyczny: sam widok (drugi raz: cały interfejs)": "Minimal mode: the view only (again: the full interface)",
+ "Tryb minimalistyczny — Tab przywraca interfejs.": "Minimal mode — Tab brings the interface back.",
  "Biblioteka modeli": "Model library",
  "Edycja": "Edit",
  "Następna scena": "Next scene",

@@ -282,3 +282,14 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .menu .mcol+.mcol{border-left:1px solid var(--line);padding-left:4px}
 .menu{max-height:calc(100vh - 60px);overflow:auto}
 .looklist .lbl{display:block;font-size:11.5px}
+
+/* --- tryb minimalistyczny (Tab): sam widok --- */
+body.minimal{grid-template-columns:0 minmax(0,1fr) 0!important;grid-template-rows:0 minmax(0,1fr) 0}
+.frame-mac body.minimal,.frame-win body.minimal{grid-template-rows:52px minmax(0,1fr) 0}
+body.minimal header>*{visibility:hidden}
+body.minimal #tools,body.minimal #panel{display:none!important}
+body.minimal #view{margin:12px}
+.frame-mac body.minimal #view,.frame-win body.minimal #view{margin:0 12px 12px}
+body.minimal #status{position:fixed;right:24px;bottom:24px;padding:0;z-index:5}
+body.minimal #status>:not(#vcbWrap){display:none!important}
+body.minimal #vcbWrap{background:var(--card);border-radius:9px;padding:4px 4px 4px 10px;box-shadow:0 0 0 1px var(--line),0 4px 14px rgba(0,0,0,.08)}

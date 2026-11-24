@@ -595,6 +595,7 @@ function run(act) {
     case 'importSkp': importSkp(); break;
     case 'library': openPop('#libPop', $('#libBtn')); break;
     case 'panel': case 'info': togglePanel(act === 'info' ? true : undefined); break;
+    case 'minimal': toggleMinimal(); break;
     case 'sectionToggle': sectionToggle(); break;
     case 'sectionPlanes': viewer.showSectPlanes = !viewer.showSectPlanes; viewer.redraw(); renderViewPop(); toast(viewer.showSectPlanes ? _t('Płaszczyzny przekroju widoczne') : _t('Płaszczyzny przekroju ukryte')); break;
     case 'sectionFlip': { const q = selectedSections()[0]; if (q) { app.checkpoint(); q.n = q.n.map(x => -x); app.changed(); } break; }
@@ -972,6 +973,14 @@ function togglePanel(v) {
   renderPanel();
 }
 $('#panelBtn').addEventListener('click', () => togglePanel());
+// Tryb minimalistyczny (Tab): zostaje sam widok i pływające pole wymiaru; skróty działają jak zwykle.
+// W oknie programu zostaje pusty pasek u góry — trzyma przyciski okna i daje się za niego przeciągać okno.
+function toggleMinimal(v) {
+  const on = v ?? !document.body.classList.contains('minimal');
+  if (on) closePops();
+  document.body.classList.toggle('minimal', on);
+  if (on) toast(_t('Tryb minimalistyczny — Tab przywraca interfejs.'));
+}
 // Sekcje panelu zwijają się kliknięciem w nagłówek; program pamięta, które są zwinięte.
 const FOLD_KEY = 'modo.panelFold';
 let folded = new Set(['render']);
