@@ -118,6 +118,8 @@ export const ACTIONS = [
   { group: _t('Plik'), id: 'stl', name: _t('Eksport STL (druk 3D)'), keys: [] },
   { group: _t('Plik'), id: 'importSkp', name: _t('Importuj model SketchUpa (.skp)'), keys: [] },
   { group: _t('Plik'), id: 'underlay', name: _t('Podkład DXF / DWG'), keys: ['Mod+Shift+I'] },
+  { group: _t('Plik'), id: 'imageUnder', name: _t('Podkład z obrazu (JPG, PNG)'), keys: [] },
+  { group: _t('Edycja'), id: 'imageMat', name: _t('Materiał z obrazu'), keys: [] },
   { group: _t('Plik'), id: 'underToLines', name: _t('Podkład: zamień na linie do rysowania'), keys: [] },
   { group: _t('Plik'), id: 'keys', name: _t('Lista skrótów'), keys: ['Shift+Slash'] }
 ];

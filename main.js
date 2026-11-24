@@ -292,6 +292,14 @@ ipcMain.handle('dwg-oda', async (e, p) => {
   try { return { data: new Uint8Array(await dwgToDxf(p)) }; }
   catch (err) { return { error: err.message, code: err.code || null }; }
 });
+// obraz: podkład albo materiał (dane surowe — okno samo zmniejsza i koduje)
+ipcMain.handle('image-pick', async e => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, { filters: [{ name: 'Obraz', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }], properties: ['openFile'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const p = r.filePaths[0], ext = path.extname(p).slice(1).toLowerCase();
+  return { name: path.basename(p), type: 'image/' + (ext === 'jpg' ? 'jpeg' : ext), data: new Uint8Array(await fsp.readFile(p)) };
+});
 ipcMain.handle('underlay-pick', async (e, p) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!p) {

@@ -107,3 +107,36 @@ export function textureCanvas(id) {
   }
   return canvases.get(id);
 }
+
+// Materiały z obrazów (zdjęcie elewacji, własna tekstura): klucz „img:<uid>”, ten sam opis co wzory rysowane w kodzie
+// (name, avg, size w metrach, px), a zamiast draw — obraz. Obrazy leżą w pliku szkicu (pole `images`, poza historią
+// cofania — duże zdjęcia nie mnożą się w pamięci). Rejestr tylko dopisuje: klucz z losowym uid nie zderzy się z innym szkicem.
+const imgWaiters = new Map();
+export function registerImages(list) {
+  for (const im of list || []) {
+    const key = 'img:' + im.id, T = TEXTURES[key];
+    if (T) { T.name = im.name; T.size = im.size.slice(); continue; }
+    const t = TEXTURES[key] = { name: im.name, avg: im.avg || '#bdb8ad', size: im.size.slice(), px: im.px.slice(), image: im.data, user: true };
+    t.draw = (c, W, H) => {
+      const img = new Image();
+      img.onload = () => { c.drawImage(img, 0, 0, W, H); for (const f of imgWaiters.get(key) || []) f(); imgWaiters.delete(key); };
+      img.src = im.data;
+    };
+  }
+}
+// wywoła fn, gdy obraz materiału będzie narysowany (widok odświeża wtedy teksturę)
+export function onImageReady(key, fn) { if (!imgWaiters.has(key)) imgWaiters.set(key, []); imgWaiters.get(key).push(fn); }
+export const isImageMat = key => typeof key === 'string' && key.startsWith('img:');
+// plik obrazu → { data (dataURL, najwyżej `max` px na dłuższym boku), px, avg, alpha }
+export async function loadImageFile(bytes, type, max = 4096) {
+  const blob = new Blob([bytes], { type: type || 'image/png' }), url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('obraz')); i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight)), W = Math.max(1, Math.round(img.naturalWidth * k)), H = Math.max(1, Math.round(img.naturalHeight * k));
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d'); c.drawImage(img, 0, 0, W, H);
+    const one = document.createElement('canvas'); one.width = one.height = 1; const o = one.getContext('2d'); o.drawImage(img, 0, 0, 1, 1);
+    const [r, g, b] = o.getImageData(0, 0, 1, 1).data, avg = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    const png = /png|gif|webp/i.test(type || '');
+    return { data: cv.toDataURL(png ? 'image/png' : 'image/jpeg', 0.9), px: [W, H], avg };
+  } finally { URL.revokeObjectURL(url); }
+}

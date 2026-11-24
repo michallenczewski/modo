@@ -6,7 +6,7 @@ import { isHidden, triangulate, edges as shapeEdges, bounds, onTopOf, boxOf, box
 import { triangulatePoly, isMesh, segKey, newell, polyArea } from './mesh.js';
 import { subtractAll, resultEdges } from './csg.js';
 import { sunPosition, sunVector } from './sun.js';
-import { TEXTURES, textureCanvas } from './textures.js';
+import { TEXTURES, textureCanvas, isImageMat, onImageReady } from './textures.js';
 
 import { _t } from './i18n.js';
 /* ---------- style rysunku ---------- */
@@ -652,16 +652,19 @@ export class Viewer {
       const t = new THREE.CanvasTexture(cv);
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
       const [w, h] = TEXTURES[id].size; t.repeat.set(1 / w, 1 / h);
+      if (isImageMat(id)) onImageReady(id, () => { t.needsUpdate = true; this.needs = true; });
       this.texCache.set(id, t);
     }
     return this.texCache.get(id);
   }
+  // zmieniony wymiar materiału z obrazu: nowa skala powtórzenia
+  refreshTexture(id) { const t = this.texCache && this.texCache.get(id), T = TEXTURES[id]; if (t && T) { t.repeat.set(1 / T.size[0], 1 / T.size[1]); this.needs = true; } }
   // siatka ścian bryły. items: [{ tri, n, key, id }]; ściany z własnym kolorem albo teksturą (s.fc) dostają osobny materiał.
   // Współrzędne tekstury to metry w płaszczyźnie ściany (poziom i pion świata), więc wzór ma prawdziwą skalę.
   faceMesh(s, items, st, paper, flat) { return this.meshFrom(s, this.faceGeo(s, items), st, paper, flat); }
   // geometria ścian (pozycje, normalne, współrzędne tekstury) i podział na grupy materiałów — bez samych materiałów
   faceGeo(s, items) {
-    const fc = s.fc || null, sig = it => { const f = fc && it.id === s.id && fc[it.key]; return f ? (f.c || '') + '|' + (f.t || '') + '|' + (f.a ?? '') : ''; };
+    const fc = s.fc || null, sig = it => { const f = fc && it.id === s.id && fc[it.key]; return f ? (f.c || '') + '|' + (f.t || '') + '|' + (f.a ?? '') + (f.tx ? '|' + it.key : '') : ''; };
     const order = items.map((it, i) => [sig(it), i]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]);
     const pos = [], nor = [], uv = [], keys = [], ids = [], groups = [];
     for (const [sg, i] of order) {
@@ -670,7 +673,13 @@ export class Viewer {
       const w = V.cross(n, u);
       if (!groups.length || groups[groups.length - 1].sig !== sg) groups.push({ sig: sg, start: keys.length * 3, count: 0, fp: sg ? fc[it.key] : null });
       groups[groups.length - 1].count += 3;
-      it.tri.forEach((p, k) => { const m = (it.ns && it.ns[k]) || n; pos.push(p[0], p[1], p[2]); nor.push(m[0], m[1], m[2]); uv.push(V.dot(p, u), V.dot(p, w)); });
+      const tx = sg && fc[it.key].tx, rc = tx ? Math.cos(-(tx.r || 0) * Math.PI / 180) : 1, rs = tx ? Math.sin(-(tx.r || 0) * Math.PI / 180) : 0;
+      it.tri.forEach((p, k) => {
+        const m = (it.ns && it.ns[k]) || n; pos.push(p[0], p[1], p[2]); nor.push(m[0], m[1], m[2]);
+        let U = V.dot(p, u), W = V.dot(p, w);
+        if (tx) { U -= tx.x || 0; W -= tx.y || 0; const U2 = U * rc - W * rs, W2 = U * rs + W * rc; U = U2 / (tx.sx || 1); W = W2 / (tx.sy || 1); }
+        uv.push(U, W);
+      });
       keys.push(it.key); ids.push(it.id);
     }
     const geo = new THREE.BufferGeometry();
@@ -1194,8 +1203,8 @@ export class Viewer {
 
   /* ---------- podkład CAD ---------- */
   setUnderlay(u) {
-    for (const c of [...this.underlayGroup.children]) { c.geometry.dispose(); c.material.dispose(); this.underlayGroup.remove(c); }
-    this.underlayBounds = null;
+    for (const c of [...this.underlayGroup.children]) { if (c === this.imageGroup) continue; c.geometry.dispose(); c.material.dispose(); this.underlayGroup.remove(c); }
+    this.cadBounds = null; this.joinUnderBounds();
     if (!u) { this.needs = true; return; }
     let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
     for (const L of u.layers) {
@@ -1211,7 +1220,29 @@ export class Viewer {
       const ls = new THREE.LineSegments(g, m); ls.renderOrder = 1;
       this.underlayGroup.add(ls);
     }
-    if (lo[0] !== Infinity) this.underlayBounds = [[lo[0], lo[1], u.height], [hi[0], hi[1], u.height]];
-    this.updateSun();
+    if (lo[0] !== Infinity) this.cadBounds = [[lo[0], lo[1], u.height], [hi[0], hi[1], u.height]];
+    this.joinUnderBounds(); this.updateSun();
+  }
+  joinUnderBounds() {
+    const L = [this.cadBounds, this.imgBounds].filter(Boolean);
+    this.underlayBounds = L.length ? [[0, 1, 2].map(k => Math.min(...L.map(b => b[0][k]))), [0, 1, 2].map(k => Math.max(...L.map(b => b[1][k])))] : null;
+  }
+  // Podkład z obrazu (rzut, mapa, zdjęcie): płaski prostokąt w poziomie na wysokości `height`, środek (x, y), szerokość w
+  // metrach `w`, obrót `rot` w stopniach. Leży w tej samej grupie co podkład CAD (widoczność, eksport PNG).
+  setImageUnder(u) {
+    if (!this.imageGroup) { this.imageGroup = new THREE.Group(); this.underlayGroup.add(this.imageGroup); }
+    for (const c of [...this.imageGroup.children]) { c.geometry.dispose(); c.material.map?.dispose(); c.material.dispose(); this.imageGroup.remove(c); }
+    this.imgBounds = null;
+    if (u) {
+      const h = u.w * u.px[1] / u.px[0], tex = new THREE.TextureLoader().load(u.data, () => { this.needs = true; });
+      tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(u.w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: u.opacity ?? 0.7, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.position.set(u.x || 0, u.y || 0, (u.height || 0) - 0.001); mesh.rotation.z = (u.rot || 0) * Math.PI / 180; mesh.renderOrder = -1;
+      this.imageGroup.add(mesh);
+      const c = Math.cos(mesh.rotation.z), s = Math.sin(mesh.rotation.z), xs = [], ys = [];
+      for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const px = a * u.w / 2, py = b * h / 2; xs.push((u.x || 0) + px * c - py * s); ys.push((u.y || 0) + px * s + py * c); }
+      this.imgBounds = [[Math.min(...xs), Math.min(...ys), u.height || 0], [Math.max(...xs), Math.max(...ys), u.height || 0]];
+    }
+    this.joinUnderBounds(); this.needs = true;
   }
 }

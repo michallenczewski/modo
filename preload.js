@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   pickBinary: (ext, label) => ipcRenderer.invoke('pick-binary', ext, label),
   dwgViaOda: p => ipcRenderer.invoke('dwg-oda', p),
   pickUnderlay: p => ipcRenderer.invoke('underlay-pick', p || null),
+  pickImage: () => ipcRenderer.invoke('image-pick'),
   odaStatus: () => ipcRenderer.invoke('oda-status'),
   odaPick: () => ipcRenderer.invoke('oda-pick'),
   showInFolder: p => ipcRenderer.invoke('show-in-folder', p),

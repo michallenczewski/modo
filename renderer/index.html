@@ -40,6 +40,8 @@
   <section class="psec" data-sec="mat"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Materiały</span></button></div><div id="matBody" class="pbody">
   <div id="swatches"></div>
   <div id="texSwatches"></div>
+  <div class="row" id="matImgRow" hidden><span class="lbl w60">Szerokość</span><input id="matImgW" class="fld grow num" title="Szerokość jednego powtórzenia obrazu"></div>
+  <div class="row"><button class="tb soft" id="matImg">Materiał z obrazu…</button><span class="grow"></span></div>
   <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
   <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
   <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>
@@ -145,7 +147,7 @@
   <div class="row"><span class="lbl grow ell" id="pngName"></span><button class="primary" id="pngGo">Zapisz…</button></div>
 </section>
 
-<section id="underPop" class="pop" role="dialog" aria-label="Podkład CAD" hidden>
+<section id="underPop" class="pop" role="dialog" aria-label="Podkład" hidden>
   <div id="underEmpty">
     <div class="row"><span class="ttl grow">Podkład CAD</span></div>
     <p class="lbl note">Rzut z pliku DXF albo DWG jako podkład do rysowania. Pliki DWG Modo czyta samo (wbudowany LibreDWG).</p>
@@ -164,6 +166,21 @@
     <div id="underLayers"></div>
     <div class="row"><button class="tb soft" id="underLines" title="Widoczne warstwy stają się prawdziwymi liniami, na których można rysować i z których powstają ściany">Zamień na linie</button><span class="grow"></span></div>
     <div class="row"><button class="tb soft" id="underReload">Wczytaj ponownie</button><span class="grow"></span><button class="tb" id="underRemove">Usuń podkład</button></div>
+  </div>
+  <div class="hr"></div>
+  <div id="imgNone">
+    <div class="row"><span class="ttl grow">Obraz</span></div>
+    <p class="lbl note">Rzut, mapa albo zdjęcie z pliku JPG lub PNG jako podkład w poziomie. Skalę ustawisz szerokością albo odcinkiem o znanej długości.</p>
+    <div class="row"><button class="tb soft" id="imgPick">Wybierz obraz…</button><span class="grow"></span></div>
+  </div>
+  <div id="imgFull" hidden>
+    <div class="row"><span class="ttl grow ell" id="imgName"></span></div>
+    <div class="row"><span class="lbl w72">Szerokość</span><input id="imgW" class="fld grow num"></div>
+    <div class="row"><span class="lbl w72">Obrót</span><input id="imgRot" class="fld grow num"></div>
+    <div class="row"><span class="lbl w72">Środek</span><input id="imgXY" class="fld grow num" title="Położenie środka obrazu: x; y"></div>
+    <div class="row"><span class="lbl w72">Wysokość</span><input id="imgH" class="fld grow num"></div>
+    <div class="row"><span class="lbl w72">Krycie</span><input type="range" id="imgOp" min="0.1" max="1" step="0.01" class="grow"></div>
+    <div class="row"><button class="tb soft" id="imgScale" title="Wskaż dwa punkty na obrazie i wpisz prawdziwą długość odcinka">Skaluj odcinkiem</button><span class="grow"></span><button class="tb" id="imgRemove">Usuń obraz</button></div>
   </div>
 </section>
 

@@ -37,6 +37,7 @@
       } catch (err) { return { error: 'Nie udało się połączyć z Gemini: ' + err.message }; }
     },
     async pickBinary(ext) { const f = await pick([].concat(ext).map(x => '.' + x).join(',')); return f ? { path: null, name: f.name, data: new Uint8Array(await f.arrayBuffer()) } : null; },
+    async pickImage() { const f = await pick('image/*'); return f ? { name: f.name, type: f.type, data: new Uint8Array(await f.arrayBuffer()) } : null; },
     async pickUnderlay() {
       const f = await pick('.dxf,.dwg'); if (!f) return null;
       return { path: null, name: f.name, dwg: /\.dwg$/i.test(f.name), data: new Uint8Array(await f.arrayBuffer()) };

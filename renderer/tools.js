@@ -1862,6 +1862,34 @@ export class TapeTool extends Tool {
   }
 }
 
+/* ---------- skalowanie podkładu z obrazu odcinkiem o znanej długości ---------- */
+// Dwa kliknięcia na obrazie (np. końce ściany na rzucie), potem prawdziwa długość z klawiatury i Enter: obraz skaluje się
+// względem pierwszego punktu. Obraz leży w poziomie na wysokości podkładu (app.imageUnder).
+export class ImageScaleTool extends Tool {
+  reset() { this.a = null; this.b = null; this.cur = null; }
+  hint() { return !this.a ? _t('Kliknij początek odcinka o znanej długości na obrazie (np. narożnik ściany).') : !this.b ? _t('Kliknij koniec odcinka.') : _t('Wpisz prawdziwą długość odcinka i naciśnij <kbd>Enter</kbd> — obraz przeskaluje się tak, żeby wymiar się zgadzał.'); }
+  plane() { return { o: [0, 0, this.app.imageUnder?.height || 0], n: [0, 0, 1] }; }
+  vcb() { return { label: _t('Długość'), value: this.a ? fmtLength(V.dist(this.a, this.b || this.cur?.p || this.a)) : '' }; }
+  move(e, x, y) { if (!this.b) { const p = this.v.onPlane(x, y, this.plane().o, [0, 0, 1]); this.cur = p ? { p, type: 'free' } : null; } }
+  down() {
+    if (!this.cur || this.b) return;
+    if (!this.a) { this.a = this.cur.p.slice(); return; }
+    if (V.dist(this.a, this.cur.p) > 1e-6) this.b = this.cur.p.slice();
+  }
+  value(str) {
+    const L = parseLength(str), u = this.app.imageUnder; if (L == null || L <= 0 || !this.a || !this.b || !u) return false;
+    const k = L / V.dist(this.a, this.b);
+    u.w *= k; u.x = this.a[0] + ((u.x || 0) - this.a[0]) * k; u.y = this.a[1] + ((u.y || 0) - this.a[1]) * k;
+    this.app.imageUnderChanged?.(); this.reset(); this.app.setTool('select'); return true;
+  }
+  draw(c, v) {
+    const p = this.cur && this.cur.p;
+    if (this.a) drawSeg(c, v, this.a, this.b || p || this.a, '#c2452d', { width: 2 });
+    for (const q of [this.a, this.b].filter(Boolean)) { const P = v.toScreen(q); c.fillStyle = '#c2452d'; c.beginPath(); c.arc(P.x, P.y, 3.5, 0, 7); c.fill(); }
+    if (p && !this.b) { const P = v.toScreen(p); drawChip(c, P.x, P.y, this.a ? fmtLength(V.dist(this.a, p)) : _t('początek odcinka')); }
+  }
+}
+
 /* ---------- gumka ---------- */
 // Najbliższa widoczna krawędź pod kursorem: { id, shape?, mark?, a, b }. Krawędzie zasłonięte przez ściany się nie liczą.
 export function edgeAt(app, x, y) {

@@ -3,10 +3,10 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
-import { TEXTURES, textureCanvas } from './textures.js';
+import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
-import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, noteMove, TIP_DELAY } from './tools.js';
+import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -19,7 +19,7 @@ import { LIBRARY, loadUserLib, saveUserLib } from './lib.js';
 import { translateShape, groupsWhollyIn, edges as edgesOf } from './model.js';
 import { fmtNum, fmtLength } from './units.js';
 import { drawAnnotations } from './annot.js';
-import { UNITS, getUnit, setUnit } from './units.js';
+import { UNITS, getUnit, setUnit, parseLength, parseLengths } from './units.js';
 
 import { _t, lang, LANGS, setLang, translateDom } from './i18n.js';
 import { installTestApi } from './testapi.js';
@@ -266,7 +266,8 @@ const tools = {
   rrect: new RotRectTool(app), polygon: new PolygonTool(app), carc: new CenterArcTool(app, false), pie: new CenterArcTool(app, true),
   push: new PushTool(app), move: new MoveTool(app), rotate: new RotateTool(app), scale: new ScaleTool(app), offset: new OffsetTool(app), tape: new TapeTool(app), eraser: new EraserTool(app), paint: new PaintTool(app),
   orbit: new NavTool(app, 'orbit'), pan: new NavTool(app, 'pan'), zoom: new NavTool(app, 'zoom'), zoomWin: new ZoomWinTool(app),
-  arc3: new Arc3Tool(app), freehand: new FreehandTool(app), look: new LookTool(app), walk: new WalkTool(app), camPos: new CamPosTool(app)
+  arc3: new Arc3Tool(app), freehand: new FreehandTool(app), look: new LookTool(app), walk: new WalkTool(app), camPos: new CamPosTool(app),
+  imgScale: new ImageScaleTool(app)
 };
 // po ustawieniu kamery od razu można się rozejrzeć (jak w SketchUpie)
 app.camPosDone = () => { setTool('look'); renderViewChip(); };
@@ -594,6 +595,8 @@ function run(act) {
     case 'cut': toggleCut(); break;
     case 'obj': saveObj(); break;
     case 'dxf': saveDxf(); break;
+    case 'imageUnder': pickImageUnder(); break;
+    case 'imageMat': addImageMaterial(); break;
     case 'dae': saveDae(); break;
     case 'stl': saveStl(); break;
     case 'render': showSec('render'); break;
@@ -1051,7 +1054,7 @@ function renderInfo() {
     const polyArea = p => { let s = [0, 0, 0]; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s = [s[0] + a[1] * b[2] - a[2] * b[1], s[1] + a[2] * b[0] - a[0] * b[2], s[2] + a[0] * b[1] - a[1] * b[0]]; } return Math.hypot(...s) / 2; };
     const area = F.reduce((t, q) => t + q.polys.reduce((u, p) => u + polyArea(p), 0), 0), len = E.reduce((t, q) => t + Math.hypot(q.a[0] - q.b[0], q.a[1] - q.b[1], q.a[2] - q.b[2]), 0);
     html = _t`<div class="muted">${F.length && E.length ? _t('Ściany i krawędzie bryły') : F.length > 1 ? _t('Ściany bryły: ') + F.length : F.length ? _t('Ściana bryły') : E.length > 1 ? _t('Krawędzie bryły: ') + E.length : _t('Krawędź bryły')}. Dwuklik zaznacza całą bryłę.</div>`
-      + (F.length ? infoRow(_t('Pole'), fmtA(area)) : '') + (E.length ? infoRow(_t('Długość'), fmtLength(len)) : '');
+      + (F.length ? infoRow(_t('Pole'), fmtA(area)) : '') + (E.length ? infoRow(_t('Długość'), fmtLength(len)) : '') + texPanel(F);
   } else if (!sel.length) {
     const solids = m.shapes.filter(s => isSolid(s) && s.op !== 'cut');
     html = _t`<div class="muted">Nic nie zaznaczono. Kliknij element, żeby zobaczyć jego wymiary, pole i objętość.</div>`
@@ -1094,9 +1097,51 @@ function renderInfo() {
   if (tg) tg.addEventListener('change', () => { app.checkpoint(); const v = tg.value ? +tg.value : undefined; for (const e of selectionTops()) e.tag = v; app.changed(); });
   const dt = $('#infDimText');
   if (dt) { dt.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') dt.blur(); }); dt.addEventListener('change', () => { const d = selectionTops()[0]; app.checkpoint(); d.text = dt.value.trim() || undefined; app.changed(); }); }
+  wireTexPanel();
   const tx = $('#infText');
   if (tx) { tx.addEventListener('keydown', e => e.stopPropagation()); tx.addEventListener('change', () => { const t = selectionTops()[0]; if (!tx.value.trim()) return; app.checkpoint(); t.text = tx.value.replace(/\s+$/, ''); app.changed(); }); }
 }
+// Ułożenie tekstury na zaznaczonej ścianie (fc[klucz].tx: przesunięcie x, y w metrach, obrót r w stopniach, skala sx, sy).
+// Dotyczy wszystkich wielokątów ściany; „Dopasuj do ściany” rozciąga jedno powtórzenie wzoru albo obrazu na całą ścianę.
+function texFace(F) {
+  if (F.length !== 1) return null;
+  const q = F[0], s = app.model.shapes.find(x => x.id === q.id); if (!s || !s.fc || !q.key?.startsWith('p:')) return null;
+  const idx = isMeshShape(s) ? regionOf(s, +q.key.split(':')[1]) : [+q.key.split(':')[1]], fp = s.fc['p:' + idx[0]] || s.fc[q.key];
+  return fp && fp.t && TEXTURES[fp.t] ? { s, q, idx, fp } : null;
+}
+const isMeshShape = s => Array.isArray(s.polys);
+function texPanel(F) {
+  const t = texFace(F); if (!t) return '';
+  const x = t.fp.tx || {}, f = v => String(Math.round(v * 1000) / 1000).replace('.', ',');
+  return _t`<div class="hr"></div><div class="row"><span class="lbl w70">Tekstura</span><span class="val ell">${esc(TEXTURES[t.fp.t].name)}</span></div>`
+    + _t`<div class="row"><span class="lbl w70">Przesunięcie</span><input class="fld grow num" id="txXY" value="${f(x.x || 0)}; ${f(x.y || 0)} m"></div>`
+    + _t`<div class="row"><span class="lbl w70">Obrót</span><input class="fld grow num" id="txR" value="${f(x.r || 0)}°"></div>`
+    + _t`<div class="row"><span class="lbl w70">Skala</span><input class="fld grow num" id="txS" value="${f(x.sx || 1)}; ${f(x.sy || 1)}" title="Skala w poziomie i w pionie (1 — prawdziwy wymiar wzoru)"></div>`
+    + _t`<div class="row"><button class="tb soft" id="txFit" title="Jedno powtórzenie wzoru albo obrazu na całą ścianę (np. zdjęcie elewacji)">Dopasuj do ściany</button><span class="grow"></span><button class="tb soft" id="txReset">Domyślnie</button></div>`;
+}
+function setTex(t, fn) {
+  app.checkpoint();
+  const fc = { ...t.s.fc };
+  for (const i of t.idx) { const k = 'p:' + i, cur = fc[k]; if (!cur || cur.t !== t.fp.t) continue; const tx = fn({ ...(cur.tx || {}) }); fc[k] = { ...cur }; if (tx) fc[k].tx = tx; else delete fc[k].tx; }
+  t.s.fc = fc; viewer.setModel(app.model); app.markDirty(); app.refresh(); renderInfo();
+}
+function wireTexPanel() {
+  const t = texFace(app.selection.size ? [] : app.sub.filter(q => q.kind === 'face')); if (!t) return;
+  const field = (id, fn) => { const el = $(id); el.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') el.blur(); }); el.addEventListener('change', () => { const r = fn(el.value); if (r === false) { toast(_t('Nie rozumiem wartości „') + el.value + '”.'); renderInfo(); } }); };
+  field('#txXY', v => { const L = parseLengths(v); if (!L || L.length !== 2) return false; setTex(t, x => ({ ...x, x: L[0], y: L[1] })); });
+  field('#txR', v => { const a = numIn(v.replace('°', '')); if (a == null) return false; setTex(t, x => ({ ...x, r: a })); });
+  field('#txS', v => { const L = v.split(/[;x×]/).map(numIn); if (L.length === 1) L.push(L[0]); if (L.length !== 2 || L.some(z => z == null || z <= 0)) return false; setTex(t, x => ({ ...x, sx: L[0], sy: L[1] })); });
+  $('#txReset').addEventListener('click', () => setTex(t, () => null));
+  $('#txFit').addEventListener('click', () => {
+    // te same kierunki co w widoku (Viewer.faceGeo): poziom ściany i pion w jej płaszczyźnie
+    const P = t.q.polys.flat(), n = newellOf(t.q.polys[0]);
+    let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n)))); const w = V.cross(n, u);
+    const U = P.map(p => V.dot(p, u)), W = P.map(p => V.dot(p, w)), [sw, sh] = TEXTURES[t.fp.t].size;
+    const x0 = Math.min(...U), y0 = Math.min(...W);
+    setTex(t, () => ({ x: x0, y: y0, r: 0, sx: (Math.max(...U) - x0) / sw, sy: (Math.max(...W) - y0) / sh }));
+  });
+}
+const newellOf = P => { let x = 0, y = 0, z = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]); } const L = Math.hypot(x, y, z) || 1; return [x / L, y / L, z / L]; };
 const polyAreaOf = P => { let x = 0, y = 0, z = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]); } return Math.hypot(x, y, z) / 2; };
 const V3 = { dist: (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) };
 function tagCount(id) { const m = app.model; return [...m.shapes, ...m.lines, ...m.groups, ...m.dims, ...m.texts].filter(e => e.tag === id).length; }
@@ -1438,8 +1483,9 @@ async function pickUnderlay(path) {
     app.markDirty();
   } catch (err) { toast(_t('Nie udało się odczytać pliku: ') + err.message); }
 }
-function applyUnderlay() { viewer.setUnderlay(app.underlay); snapper.setUnderlay(app.underlay); $('#underBtn').classList.toggle('on', !!app.underlay); }
+function applyUnderlay() { viewer.setUnderlay(app.underlay); snapper.setUnderlay(app.underlay); $('#underBtn').classList.toggle('on', !!(app.underlay || app.imageUnder)); }
 async function renderUnder() {
+  renderImg();
   const u = app.underlay;
   $('#underEmpty').hidden = !!u; $('#underFull').hidden = !u;
   if (!u) {
@@ -1470,6 +1516,51 @@ async function renderUnder() {
   }
 }
 $('#underBtn').addEventListener('click', () => openPop('#underPop', $('#underBtn')));
+/* ---------- obrazy: podkład i materiały ---------- */
+// Obrazy leżą w pliku szkicu poza modelem (app.images — materiały, app.imageUnder — podkład), więc nie trafiają do historii cofania.
+app.images = []; app.imageUnder = null;
+const numIn = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
+const fmtM = x => String(Math.round(x * 1000) / 1000).replace('.', ',') + ' m';
+async function readImage() {
+  const r = await api.pickImage(); if (!r) return null;
+  try { return { name: r.name.replace(/\.[a-z0-9]+$/i, ''), ...(await loadImageFile(r.data, r.type)) }; }
+  catch (e) { toast(_t('Nie udało się odczytać obrazu: ') + r.name); return null; }
+}
+async function pickImageUnder() {
+  const im = await readImage(); if (!im) return;
+  // szerokość na start: półtora rozmiaru modelu (albo 30 m), środek pod modelem
+  const b = bounds(app.model), w = b ? Math.max(10, Math.round(b.radius * 3)) : 30;
+  app.imageUnder = { name: im.name, data: im.data, px: im.px, w, rot: 0, x: b ? b.center[0] : 0, y: b ? b.center[1] : 0, height: app.underlay?.height ?? 0, opacity: 0.7 };
+  app.imageUnderChanged(); viewer.zoomExtents(); if ($('#underPop').hidden) openPop('#underPop', $('#underBtn')); else renderUnder();
+  toast(_t('Obraz wczytany. Ustaw skalę: wpisz szerokość albo użyj „Skaluj odcinkiem”.'));
+}
+app.imageUnderChanged = () => { viewer.setImageUnder(app.imageUnder); applyUnderlay(); renderImg(); app.markDirty(); };
+function renderImg() {
+  const u = app.imageUnder; $('#imgNone').hidden = !!u; $('#imgFull').hidden = !u; if (!u) return;
+  $('#imgName').textContent = u.name;
+  const set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };
+  set('#imgW', fmtM(u.w)); set('#imgRot', String(Math.round((u.rot || 0) * 100) / 100).replace('.', ',') + '°');
+  set('#imgXY', fmtM(u.x || 0).replace(' m', '') + '; ' + fmtM(u.y || 0)); set('#imgH', fmtM(u.height || 0));
+  const op = $('#imgOp'); op.value = u.opacity; setRangeFill(op);
+}
+const imgField = (id, fn) => { const el = $(id); el.addEventListener('change', () => { const u = app.imageUnder; if (u && fn(u, el.value) !== false) app.imageUnderChanged(); else renderImg(); }); el.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') el.blur(); }); };
+imgField('#imgW', (u, v) => { const L = parseLength(v); if (L == null || L <= 0) return false; u.w = L; });
+imgField('#imgRot', (u, v) => { const a = numIn(v.replace('°', '')); if (a == null) return false; u.rot = a; });
+imgField('#imgXY', (u, v) => { const L = parseLengths(v); if (!L || L.length !== 2) return false; u.x = L[0]; u.y = L[1]; });
+imgField('#imgH', (u, v) => { const L = parseLength(v); if (L == null) return false; u.height = L; });
+$('#imgOp').addEventListener('input', e => { const u = app.imageUnder; if (!u) return; u.opacity = +e.target.value; setRangeFill(e.target); viewer.setImageUnder(u); app.markDirty(); });
+$('#imgPick').addEventListener('click', () => pickImageUnder());
+$('#imgRemove').addEventListener('click', () => { app.imageUnder = null; app.imageUnderChanged(); });
+$('#imgScale').addEventListener('click', () => { closePops(); setTool('imgScale'); });
+// materiał z obrazu: wymiar jednego powtórzenia w metrach (na start szerokość 2 m), potem do wiaderka
+async function addImageMaterial() {
+  const im = await readImage(); if (!im) return;
+  const w = 2, id = Math.random().toString(36).slice(2, 10);
+  const rec = { id, name: im.name, data: im.data, px: im.px, avg: im.avg, size: [w, w * im.px[1] / im.px[0]] };
+  app.images.push(rec); registerImages([rec]); app.markDirty();
+  app.setPaint(im.avg, 1, 'img:' + id); setTool('paint'); showSec('mat');
+  toast(_t('Materiał z obrazu dodany (szerokość 2 m). Wymiar zmienisz w panelu Materiały, a ułożenie na ścianie — po zaznaczeniu ściany w panelu Element.'));
+}
 $('#underPick').addEventListener('click', () => pickUnderlay());
 $('#underClose').addEventListener('click', () => closePops());
 $('#underReload').addEventListener('click', () => (app.underlay?.path || api.web) ? pickUnderlay(app.underlay?.path) : pickUnderlay());
@@ -1603,17 +1694,27 @@ function renderSwatches() {
   // materiały z teksturą: wzór w prawdziwej skali (cegła, deski, płytki…)
   const tb = $('#texSwatches'); tb.innerHTML = '';
   for (const [id, T] of Object.entries(TEXTURES)) {
-    if (!texThumb.has(id)) texThumb.set(id, textureCanvas(id).toDataURL());
+    if (isImageMat(id) && !app.images.some(im => 'img:' + im.id === id)) continue;   // obrazy z innych szkiców
+    if (!texThumb.has(id)) texThumb.set(id, T.image || textureCanvas(id).toDataURL());
     const b = document.createElement('button'); b.className = 'sw tex' + (app.paintTex === id ? ' on' : '');
     b.style.backgroundImage = `url(${texThumb.get(id)})`; b.innerHTML = `<span>${T.name}</span>`;
     b.addEventListener('click', () => { app.setPaint(T.avg, 1, id); setTool('paint'); });
     tb.append(b);
   }
+  const im = isImageMat(app.paintTex) && app.images.find(q => 'img:' + q.id === app.paintTex);
+  $('#matImgRow').hidden = !im; if (im && document.activeElement !== $('#matImgW')) $('#matImgW').value = fmtM(im.size[0]);
   const dot = toolsEl.querySelector('[data-tool=paint] .dot'); if (dot) dot.style.background = app.paint || DEFAULT_COLOR;
   $('#paintCustom').value = app.paint || '#f6f4ee';
   const pa = $('#paintAlpha'); pa.value = app.paintAlpha; setRangeFill(pa); $('#paintAlphaLbl').textContent = Math.round(app.paintAlpha * 100) + '%';
 }
 $('#paintCustom').addEventListener('input', e => app.setPaint(e.target.value));
+$('#matImg').addEventListener('click', () => addImageMaterial());
+$('#matImgW').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); });
+$('#matImgW').addEventListener('change', e => {
+  const im = app.images.find(q => 'img:' + q.id === app.paintTex), L = parseLength(e.target.value);
+  if (im && L > 0) { im.size = [L, L * im.px[1] / im.px[0]]; registerImages([im]); viewer.refreshTexture('img:' + im.id); app.markDirty(); }
+  renderSwatches();
+});
 $('#paintAlpha').addEventListener('input', e => app.setPaint(app.paint, +e.target.value));
 renderSwatches();
 
@@ -1760,7 +1861,7 @@ async function openFileMenu() {
   try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
   const items = [['new', _t('Nowy szkic')], ['open', _t('Otwórz…')], null, ['save', _t('Zapisz')], ['saveAs', _t('Zapisz jako…')], ['saveCopy', _t('Zapisz kopię jako…')]];
   if (app.file.path) items.push(['revert', _t('Przywróć zapisaną wersję')]);
-  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], ['dxf', _t('Eksport DXF (CAD)…')], ['dae', _t('Eksport DAE…')], ['stl', _t('Eksport STL…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
+  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['imageUnder', _t('Podkład z obrazu…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], ['dxf', _t('Eksport DXF (CAD)…')], ['dae', _t('Eksport DAE…')], ['stl', _t('Eksport STL…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
   // Edycja: schowek, zaznaczenie, ukrywanie i blokada (dawne okienko Edycja)
   items.push('edit', ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej (wskaż miejsce)')], ['pasteInPlace', _t('Wklej w tym samym miejscu')], null,
     ['selectAll', _t('Zaznacz wszystko')], ['selectNone', _t('Odznacz wszystko')], ['selectInvert', _t('Odwróć zaznaczenie')], null,
@@ -1800,6 +1901,7 @@ $('#setBtn').addEventListener('click', () => {
 /* ---------- plik ---------- */
 function serialize() {
   return JSON.stringify({
+    images: app.images.length ? app.images : undefined, imageUnder: app.imageUnder || undefined,
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
     sun: viewer.sunCfg, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, eye: app.eyeH, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
@@ -1808,6 +1910,7 @@ function load(text, name, path) {
   const d = JSON.parse(text);
   if (d.app !== 'Modo') throw new Error(_t('To nie jest plik Modo'));
   app.editing = null; viewer.editGroup = null; app.editSolid = null; viewer.editSolid = null; app.clearSub();
+  registerImages(d.images || []);   // tekstury z obrazów muszą być znane, zanim widok zbuduje ściany
   app.model = fixModel(d.model || newModel()); app.undo = []; app.redo = []; app.selection.clear();
   try { absorb(app.model, null); } catch (e) { console.error('absorb', e); }   // starsze szkice: luźne bryły zlewają się we wspólną geometrię
   viewer.setModel(app.model);
@@ -1817,7 +1920,8 @@ function load(text, name, path) {
   app.opSeq++;
   viewer.showAxes = d.axes !== false;
   viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye; syncLook();
-  app.underlay = d.underlay || null; applyUnderlay();
+  app.underlay = d.underlay || null;
+  app.images = d.images || []; registerImages(app.images); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
@@ -1828,7 +1932,7 @@ async function confirmDiscard() { return !app.file.dirty || confirm(_t('Szkic ma
 async function newSketch() {
   if (!(await confirmDiscard())) return;
   app.editing = null; viewer.editGroup = null; app.clearSub();
-  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; applyUnderlay(); app.scenes = []; app.scene = -1;
+  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; app.images = []; app.imageUnder = null; viewer.setImageUnder(null); applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, _t('Bez nazwy')); app.markDirty(false); setTool('select');
   app.docId = Math.random().toString(36).slice(2); camReset(); renderViewChip();
 }
