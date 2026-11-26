@@ -344,53 +344,6 @@ function polysOf(s) {
   if (isMesh(s)) return s.polys;
   const t = JSON.parse(JSON.stringify(s)); toMesh(t, facesOf); return t.polys;
 }
-// odcinki prostej (o, d), które leżą w wielokącie P (prosta leży w jego płaszczyźnie): lista [t0, t1]
-function spans(P, n, o, d) {
-  const mm = V.cross(n, d), ts = [];
-  for (let i = 0; i < P.length; i++) {
-    const p = P[i], q = P[(i + 1) % P.length], sp = V.dot(V.sub(p, o), mm), sq = V.dot(V.sub(q, o), mm);
-    if (Math.abs(sp) < 1e-7) ts.push(V.dot(V.sub(p, o), d));
-    if ((sp > 1e-7 && sq < -1e-7) || (sp < -1e-7 && sq > 1e-7)) ts.push(V.dot(V.sub(V.lerp(p, q, sp / (sp - sq)), o), d));
-  }
-  ts.sort((x, y) => x - y);
-  const out = [];
-  for (let i = 0; i + 1 < ts.length; i++) { if (ts[i + 1] - ts[i] < 1e-6) continue; if (inPoly(V.add(o, V.mul(d, (ts[i] + ts[i + 1]) / 2)), P, n)) out.push([ts[i], ts[i + 1]]); }
-  return out;
-}
-// Krawędzie przecięcia ścian brył (jak „Intersect Faces” w SketchUpie): odcinki, wzdłuż których ściana jednej bryły
-// przechodzi przez ścianę drugiej. ids — bryły, które przecinamy z resztą (null = wszystkie luzem).
-export function intersectFaces(m, ids, G = null) {
-  const all = m.shapes.filter(s => looseSolid(m, s, G)).map(s => { const polys = polysOf(s); return { s, polys: polys.map(p => ({ p, pl: planeOf(p), box: bbox(p) })), box: bbox(polys.flat()) }; });
-  const pick = ids ? all.filter(x => ids.has(x.s.id)) : all, lines = new Map();
-  for (const A of pick) for (const B of all) {
-    if (A === B || (pick.includes(B) && B.s.id < A.s.id) || !boxHit(A.box, B.box)) continue;
-    for (const P of A.polys) { if (!boxHit(P.box, B.box)) continue; for (const Q of B.polys) {
-      if (!boxHit(P.box, Q.box)) continue;
-      const x = V.cross(P.pl.n, Q.pl.n), l2 = V.dot(x, x); if (l2 < 1e-10) continue;
-      let d = V.mul(x, 1 / Math.sqrt(l2)); if (d[0] < -1e-9 || (Math.abs(d[0]) < 1e-9 && (d[1] < -1e-9 || (Math.abs(d[1]) < 1e-9 && d[2] < 0)))) d = V.mul(d, -1);
-      let o = V.mul(V.cross(V.sub(V.mul(Q.pl.n, P.pl.w), V.mul(P.pl.n, Q.pl.w)), x), 1 / l2);
-      o = V.sub(o, V.mul(d, V.dot(o, d)));   // punkt prostej najbliższy początkowi układu — wspólny dla wszystkich par na tej prostej
-      const a = spans(P.p, P.pl.n, o, d), b = spans(Q.p, Q.pl.n, o, d);
-      for (const [a0, a1] of a) for (const [b0, b1] of b) {
-        const lo = Math.max(a0, b0), hi = Math.min(a1, b1); if (hi - lo < 1e-5) continue;
-        const key = d.map(v => Math.round(v * 1e4)).join(',') + '|' + o.map(v => Math.round(v * 1e3)).join(',');
-        if (!lines.has(key)) lines.set(key, { o, d, iv: [] });
-        lines.get(key).iv.push([lo, hi]);
-      }
-    } }
-  }
-  // kawałki na jednej prostej sklejone w całe odcinki
-  const out = [];
-  for (const { o, d, iv } of lines.values()) {
-    iv.sort((x, y) => x[0] - y[0]);
-    let cur = iv[0].slice();
-    const put = c => out.push([V.add(o, V.mul(d, c[0])), V.add(o, V.mul(d, c[1]))]);
-    for (const [lo, hi] of iv.slice(1)) { if (lo <= cur[1] + 1e-5) cur[1] = Math.max(cur[1], hi); else { put(cur); cur = [lo, hi]; } }
-    put(cur);
-  }
-  return out;
-}
-
 // Bryły luzem, które stykają się ścianami z bryłą s, łączą się z nią w jedną (jak geometria poza grupami w SketchUpie).
 // Ściany przejętej bryły zachowują jej kolor. Zwraca liczbę przyłączonych brył.
 export function mergeTouching(m, s) {

@@ -393,3 +393,117 @@ export function curveEdges(s, a, b) {
   }
   return out;
 }
+
+/* ---------- przecięcie (Intersect with Model / Selection) ---------- */
+// Krawędzie, wzdłuż których ściany z A przechodzą przez ściany z B (jak „Przetnij z modelem / z zaznaczeniem” w SketchUpie).
+// A i B: listy { s, idx } — bryła i numery jej wielokątów (null = cała). Działa także wewnątrz jednej wspólnej geometrii
+// (płaszczyzna przechodząca przez walec): pomijane są tylko odcinki leżące na brzegu obu ścian naraz — to już jest krawędź.
+// Ściany są w układzie świata (grupy w Modo nie mają własnego przekształcenia). Zwraca odcinki [[a, b], …].
+const ibox = pts => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (const p of pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); } return { lo, hi }; };
+const ihit = (a, b, e = 1e-5) => [0, 1, 2].every(k => a.lo[k] <= b.hi[k] + e && b.lo[k] <= a.hi[k] + e);
+function ispans(P, n, o, d) {
+  const mm = V.cross(n, d), ts = [];
+  for (let i = 0; i < P.length; i++) {
+    const p = P[i], q = P[(i + 1) % P.length], sp = V.dot(V.sub(p, o), mm), sq = V.dot(V.sub(q, o), mm);
+    if (Math.abs(sp) < 1e-7) ts.push(V.dot(V.sub(p, o), d));
+    if ((sp > 1e-7 && sq < -1e-7) || (sp < -1e-7 && sq > 1e-7)) ts.push(V.dot(V.sub(V.lerp(p, q, sp / (sp - sq)), o), d));
+  }
+  ts.sort((x, y) => x - y);
+  const out = [];
+  for (let i = 0; i + 1 < ts.length; i++) { if (ts[i + 1] - ts[i] < 1e-6) continue; if (inPoly(V.add(o, V.mul(d, (ts[i] + ts[i + 1]) / 2)), P, n)) out.push([ts[i], ts[i + 1]]); }
+  return out;
+}
+const onSegI = (p, a, b) => { const L = V.dist(a, b); if (L < 1e-9) return false; const d = V.mul(V.sub(b, a), 1 / L), t = V.dot(V.sub(p, a), d); return t > -1e-6 && t < L + 1e-6 && V.dist(V.add(a, V.mul(d, t)), p) < 1e-5; };
+// ściany bryły: kawałki (do liczenia odcinków) i obrysy (do sprawdzania brzegu)
+function ifaces(s, idx) {
+  const t = isMesh(s) ? s : (() => { const c = JSON.parse(JSON.stringify(s)); toMesh(c, facesOf); return c; })();
+  const want = idx ? new Set(idx) : null, out = [];
+  for (const f of topoFaces(t)) {
+    if (want && !(f.src || []).some(i => want.has(i))) continue;
+    const pieces = (f.src || []).map(i => t.polys[i]).filter(Boolean); if (!pieces.length) continue;
+    const loops = [f.outer, ...f.holes], n = newell(f.outer), w = V.dot(n, f.outer[0]);
+    out.push({ s, src: f.src || [], pieces, loops, n, w, box: ibox(f.outer) });
+  }
+  return out;
+}
+export function intersectWith(A, B) {
+  // ściany każdej bryły liczone raz; ta sama ściana w A i w B to ten sam obiekt (para ze sobą odpada, para liczona raz)
+  const cache = new Map(), facesOfS = s => { if (!cache.has(s)) cache.set(s, ifaces(s, null).map((f, i) => ({ ...f, i: cache.size * 1e6 + i }))); return cache.get(s); };
+  const pickF = L => { const out = new Set(); for (const x of L) { const all = facesOfS(x.s), want = x.idx ? new Set(x.idx) : null; for (const f of all) if (!want || (f.src || []).some(i => want.has(i))) out.add(f); } return [...out]; };
+  const union = F => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (const f of F) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], f.box.lo[k]); hi[k] = Math.max(hi[k], f.box.hi[k]); } return { lo, hi }; };
+  let FA = pickF(A), FB = pickF(B);
+  const uA = union(FA), uB = union(FB);
+  FA = FA.filter(f => ihit(f.box, uB)); FB = FB.filter(f => ihit(f.box, uA));
+  // siatka przestrzenna z kratką ok. 2× typowej ściany: para jest liczona tylko dla ścian z sąsiednich kratek
+  // (duże ściany, które zajęłyby za dużo kratek, idą na osobną listę sprawdzaną z każdą)
+  const sizes = FB.map(f => Math.max(f.box.hi[0] - f.box.lo[0], f.box.hi[1] - f.box.lo[1], f.box.hi[2] - f.box.lo[2])).sort((x, y) => x - y);
+  const cell = Math.max(2 * (sizes[sizes.length >> 1] || 1), 1e-3), grid = new Map(), big = [];
+  const range = b => [0, 1, 2].map(k => [Math.floor((b.lo[k] - 1e-5) / cell), Math.floor((b.hi[k] + 1e-5) / cell)]);
+  const cells = (r, fn) => { for (let x = r[0][0]; x <= r[0][1]; x++) for (let y = r[1][0]; y <= r[1][1]; y++) for (let z = r[2][0]; z <= r[2][1]; z++) fn(x + ',' + y + ',' + z); };
+  const count = r => (r[0][1] - r[0][0] + 1) * (r[1][1] - r[1][0] + 1) * (r[2][1] - r[2][0] + 1);
+  for (const Q of FB) { const r = range(Q.box); if (count(r) > 64) { big.push(Q); continue; } cells(r, k => { let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(Q); }); }
+  const near = P => { const r = range(P.box), out = new Set(big); if (count(r) > 512) return FB; cells(r, k => { const a = grid.get(k); if (a) for (const Q of a) out.add(Q); }); return out; };
+  const lines = [], seen = new Set();
+  const onB = (F, p) => F.loops.some(L => L.some((a, i) => onSegI(p, a, L[(i + 1) % L.length])));
+  // ta sama prosta z różnych par ścian: klucz z kierunku i punktu zaokrąglonych do 0,01 mm (zbiega się z dokładnością modelu)
+  const byKey = new Map(), lineOf = (o, d) => { const k = d.map(v => Math.round(v * 1e6)).join(',') + '|' + o.map(v => Math.round(v * 1e5)).join(','); let l = byKey.get(k); if (!l) { l = { o, d, iv: [] }; byKey.set(k, l); lines.push(l); } return l; };
+  for (const P of FA) {
+    for (const Q of near(P)) {
+      if (P === Q || !ihit(P.box, Q.box)) continue;
+      const pk = Math.min(P.i, Q.i) + ':' + Math.max(P.i, Q.i); if (seen.has(pk)) continue; seen.add(pk);
+      const x = V.cross(P.n, Q.n), l2 = V.dot(x, x); if (l2 < 1e-10) continue;
+      let d = V.mul(x, 1 / Math.sqrt(l2)); if (d[0] < -1e-9 || (Math.abs(d[0]) < 1e-9 && (d[1] < -1e-9 || (Math.abs(d[1]) < 1e-9 && d[2] < 0)))) d = V.mul(d, -1);
+      let o = V.mul(V.cross(V.sub(V.mul(Q.n, P.w), V.mul(P.n, Q.w)), x), 1 / l2);
+      o = V.sub(o, V.mul(d, V.dot(o, d)));
+      const a = P.pieces.flatMap(p => ispans(p, P.n, o, d)), b = Q.pieces.flatMap(p => ispans(p, Q.n, o, d));
+      for (const [a0, a1] of a) for (const [b0, b1] of b) {
+        const lo = Math.max(a0, b0), hi = Math.min(a1, b1); if (hi - lo < 1e-5) continue;
+        const mid = V.add(o, V.mul(d, (lo + hi) / 2));
+        if (onB(P, mid) && onB(Q, mid)) continue;   // wspólna krawędź obu ścian — już jest
+        lineOf(o, d).iv.push([lo, hi]);   // d ma ustalony zwrot, a o — punkt prostej najbliższy początkowi układu: ta sama prosta ma te same parametry
+      }
+    }
+  }
+  const out = [];
+  for (const { o, d, iv } of lines) {
+    iv.sort((x, y) => x[0] - y[0]);
+    let cur = iv[0].slice();
+    const put = c => out.push([V.add(o, V.mul(d, c[0])), V.add(o, V.mul(d, c[1]))]);
+    for (const [lo, hi] of iv.slice(1)) { if (lo <= cur[1] + 1e-5) cur[1] = Math.max(cur[1], hi); else { put(cur); cur = [lo, hi]; } }
+    put(cur);
+  }
+  return out;
+}
+// Zamknięte pętle z odcinków przecięcia, które leżą na ścianie bryły s, dzielą tę ścianę jak narysowany na niej okrąg
+// (same linie dzielą ścianę tylko wtedy, gdy biegną od brzegu do brzegu). Zwraca liczbę wstawionych pętli.
+export function intersectLoops(s, segs) {
+  const nb = new Map(), pt = new Map(), K = KC;
+  for (const [a, b] of segs) for (const [p, q] of [[a, b], [b, a]]) { const k = K(p); pt.set(k, p); if (!nb.has(k)) nb.set(k, []); nb.get(k).push(K(q)); }
+  const used = new Set(), loops = [];
+  for (const start of nb.keys()) {
+    if (used.has(start) || nb.get(start).length !== 2) continue;
+    const L = [start]; used.add(start); let prev = null, cur = start, ok = false;
+    for (let g = 0; g < 100000; g++) {
+      const nx = nb.get(cur).find(k => k !== prev && (k === start ? L.length > 2 : !used.has(k)));
+      if (!nx || nb.get(nx).length !== 2) break;
+      if (nx === start) { ok = true; break; }
+      L.push(nx); used.add(nx); prev = cur; cur = nx;
+    }
+    if (ok && L.length >= 3) loops.push(L.map(k => pt.get(k)));
+  }
+  let n = 0, faces = null;
+  const onL = (p, L) => L.some((a, i) => onSegI(p, a, L[(i + 1) % L.length]));
+  // punkt na ścianie: w obrysie (albo na nim) i nie w głębi otworu
+  const inFace = (f, p) => (inPoly(p, f.outer, f.n) || onL(p, f.outer)) && !f.holes.some(h => inPoly(p, h, f.n) && !onL(p, h));
+  for (const loop of loops) {
+    const nn = newell(loop), w = V.dot(nn, loop[0]);
+    if (loop.some(p => Math.abs(V.dot(nn, p) - w) > 1e-5)) continue;
+    // cała pętla (punkty i środki boków) musi leżeć na jednej ścianie — inaczej addFace dołożyłby ścianę w pustym miejscu
+    const probe = [...loop, ...loop.map((p, i) => V.lerp(p, loop[(i + 1) % loop.length], 0.5))];
+    faces = faces || topoFaces(s);
+    const host = faces.find(f => Math.abs(Math.abs(V.dot(f.n, nn)) - 1) < 1e-6 && Math.abs(V.dot(f.n, f.outer[0]) - V.dot(f.n, loop[0])) < 1e-5 && probe.every(p => inFace(f, p)));
+    if (!host) continue;
+    addFace(s, loop); n++; faces = null;
+  }
+  return n;
+}

@@ -4,8 +4,8 @@ import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper, setAxes } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
 import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat, seamlessBlob } from './textures.js';
-import { stitch, intersectFaces } from './stitch.js';
-import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces, curveEdges, curveInfo, respaceCurve } from './geo.js';
+import { stitch } from './stitch.js';
+import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces, curveEdges, curveInfo, respaceCurve, intersectWith, intersectLoops } from './geo.js';
 import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, drawSeg, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -199,7 +199,7 @@ app.liftSub = () => {
   app.sub = []; showSub(); app.selection.add(t.id); viewer.setModel(app.model);
   return t;
 };
-const LIFT = new Set(['group', 'comp', 'hideSel', 'hideRest', 'hideSimilar', 'lock', 'copy', 'cutClip', 'flipX', 'flipY', 'flipZ', 'solidUnion', 'solidIntersect', 'solidSubtract', 'solidTrim', 'cut', 'intersect']);
+const LIFT = new Set(['group', 'comp', 'hideSel', 'hideRest', 'hideSimilar', 'lock', 'copy', 'cutClip', 'flipX', 'flipY', 'flipZ', 'solidUnion', 'solidIntersect', 'solidSubtract', 'solidTrim', 'cut']);
 
 /* ---------- grupy i komponenty ---------- */
 app.editing = null;
@@ -670,7 +670,8 @@ function run(act) {
     case 'selSameMat': selectSameMaterial(); break;
     case 'reverseFaces': faceSidesOp(false); break;
     case 'orientFaces': faceSidesOp(true); break;
-    case 'intersect': intersectSel(); break;
+    case 'intersect': intersectRun('model'); break;
+    case 'intersectSel': intersectRun('sel'); break;
     case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
     case 'selectInvert': selectInvert(); break;
@@ -1031,7 +1032,7 @@ $('#setBtn').innerHTML = ic('gear');
 // Operacje na bryłach (dawniej w okienku Edycja): menu wysuwane w prawo od przycisku na lewym pasku
 const OPS = [[['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')]],
   [['solidUnion', _t('Suma brył')], ['solidIntersect', _t('Część wspólna')], ['solidSubtract', _t('Odejmij od pierwszej')], ['solidTrim', _t('Przytnij pierwszą')]],
-  [['intersect', _t('Przetnij ściany brył')], ['makeFaces', _t('Ściany z zaznaczonych linii')], ['cleanLines', _t('Usuń luźne krawędzie')]],
+  [['intersect', _t('Przetnij z modelem')], ['intersectSel', _t('Przetnij z zaznaczeniem')], ['makeFaces', _t('Ściany z zaznaczonych linii')], ['cleanLines', _t('Usuń luźne krawędzie')]],
   [['soften', _t('Wygładź krawędzie (do 30°)')], ['unsoften', _t('Przywróć wygładzone krawędzie')]],
   [['reverseFaces', _t('Odwróć ściany')], ['orientFaces', _t('Ujednolić orientację ścian')]]];
 function openOps(btn) {
@@ -1935,20 +1936,38 @@ function underlayToLines() {
   app.noStitch = true; app.changed(); app.noStitch = false; app.selectionChanged();
   toast(_t`Podkład zamieniony na ${made} linii w jednej grupie. Dwuklik wchodzi do grupy; „Ściany z linii” wypełnia zamknięte pola.`, [_t('Ściany z linii'), () => makeFaces()], 9000);
 }
-// „Przetnij ściany” (Intersect Faces): tam, gdzie ściany brył przechodzą przez siebie, powstają krawędzie, które dzielą te ściany.
-// Z zaznaczeniem — zaznaczone bryły z resztą; bez — wszystkie bryły luzem (w edytowanej grupie: jej bryły).
-function intersectSel() {
-  const m = app.model, ids = new Set([...app.selection].filter(i => typeof i === 'number'));
-  const segs = intersectFaces(m, ids.size ? ids : null, app.editing ?? null);
-  if (!segs.length) return toast(ids.size ? _t('Zaznaczone bryły nie przecinają się z żadną inną.') : _t('Żadne bryły się nie przecinają.'));
-  if (segs.length > 1500) return toast(_t('Za dużo krawędzi przecięcia naraz. Zaznacz mniej brył.'));
+// „Przetnij z modelem / z zaznaczeniem” (Intersect Faces with Model / Selection, jak w SketchUpie): tam, gdzie zaznaczone
+// ściany przechodzą przez inne, powstają krawędzie. Także wewnątrz jednej wspólnej geometrii (płaszczyzna przez walec).
+// Krawędzie trafiają do bieżącego kontekstu (cały szkic albo edytowana grupa) i dzielą jego ściany; zamknięta pętla
+// leżąca na ścianie wycina z niej osobną ścianę (krążek), jak narysowany okrąg.
+function intersectRun(mode) {
+  const m = app.model, A = [];
+  const byId = new Map(); for (const q of app.sub) if (q.kind === 'face') { const s = m.shapes.find(x => x.id === q.id); if (!s || !s.polys) continue; if (!byId.has(s)) byId.set(s, new Set()); for (const i of facesOfPolys(s, [+q.key.split(':')[1]]).flatMap(f => f.idx)) byId.get(s).add(i); }
+  for (const [s, idx] of byId) A.push({ s, idx: [...idx] });
+  for (const id of app.selection) { if (typeof id !== 'number') continue; const s = m.shapes.find(x => x.id === id); if (s && isSolidOrFace(s) && !isHidden(m, s)) A.push({ s, idx: null }); }
+  if (!A.length) return toast(mode === 'sel' ? _t('Zaznacz co najmniej dwie przecinające się ściany albo bryły.') : _t('Zaznacz ściany, bryły albo grupy, które mają przeciąć model.'));
+  let B = A;
+  if (mode === 'model') {
+    // reszta modelu: tylko to, co widać i co leży w zasięgu zaznaczenia
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9], grow = pts => { for (const p of pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); } };
+    for (const x of A) grow(x.idx ? x.idx.flatMap(i => x.s.polys[i] || []) : vertices(x.s));   // zaznaczone ściany — ich własne punkty, nie cała geometria
+    const near = s => { const v = vertices(s); if (!v.length) return false; const l = [1e9, 1e9, 1e9], h = [-1e9, -1e9, -1e9]; for (const p of v) for (let k = 0; k < 3; k++) { l[k] = Math.min(l[k], p[k]); h[k] = Math.max(h[k], p[k]); } return [0, 1, 2].every(k => l[k] <= hi[k] + 1e-5 && lo[k] <= h[k] + 1e-5); };
+    B = m.shapes.filter(s => isSolidOrFace(s) && !isHidden(m, s) && near(s)).map(s => ({ s, idx: null }));
+  }
+  const segs = intersectWith(A, B);
+  if (!segs.length) return toast(mode === 'sel' ? _t('Zaznaczone elementy nie przecinają się.') : _t('Zaznaczenie nie przecina się z resztą modelu.'));
+  if (segs.length > 3000) return toast(_t('Za dużo krawędzi przecięcia naraz. Zaznacz mniej.'));
   app.checkpoint();
-  const lines0 = new Set(m.lines);
-  for (const [a, b] of segs) { const l = { id: m.next++, a, b }; if (app.editing) l.g = app.editing; m.lines.push(l); }
-  app.stitchLimit = 2000; app.selection.clear(); app.changed(); app.stitchLimit = 0; app.selectionChanged();
+  const G = app.editing ?? null, lines0 = new Set(m.lines);
+  for (const [a, b] of segs) { const l = { id: m.next++, a, b }; if (G != null) l.g = G; m.lines.push(l); }
+  app.stitchLimit = 4000; app.selection.clear(); app.changed();
+  const geo = app.model.shapes.find(s => s.geo && (s.g ?? null) === G && Array.isArray(s.polys));
+  if (geo && intersectLoops(geo, segs)) app.changed();
+  app.stitchLimit = 0; app.selectionChanged();
   const left = app.model.lines.filter(l => !lines0.has(l)).length;
   toast(_t`Krawędzie przecięcia: ${segs.length}. Ściany są podzielone wzdłuż nich` + (left ? _t`; ${left} zostało jako luźne linie.` : '.'));
 }
+const isSolidOrFace = s => s.op !== 'cut' && !s.bill && (Array.isArray(s.polys) ? s.polys.length > 0 : true);
 // „Wygładź krawędzie”: krawędzie między ścianami, które stykają się pod kątem do 30°, przestają być rysowane (zostaje kontur),
 // a ściany cieniują się gładko — do powierzchni obłych i skręconych. Z zaznaczonymi ścianami działa tylko na nie.
 function softenSel(on) {
@@ -2308,7 +2327,7 @@ function openContext(x, y, cx, cy) {
     if (groups.some(g => g.kind === 'comp')) items.push(['unique', _t('Zrób unikalny')]);
     items.push(null);
     if (solids.length) items.push(['cut', solids.every(s => s.op === 'cut') ? _t('Bryła zwykła (nie wycina)') : _t('Bryła wycinająca')]);
-    if (solids.some(s => s.op !== 'cut')) items.push(['intersect', _t('Przetnij ściany z modelem')]);
+    if (solids.some(s => s.op !== 'cut')) items.push(['intersect', _t('Przetnij z modelem')], ['intersectSel', _t('Przetnij z zaznaczeniem')]);
     if (solids.filter(s => s.op !== 'cut').length >= 2) items.push(['solidUnion', _t('Suma brył')], ['solidIntersect', _t('Część wspólna')], ['solidSubtract', _t('Odejmij od pierwszej')], ['solidTrim', _t('Przytnij pierwszą')]);
     items.push(null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')]);
     if (sel.filter(i => String(i)[0] === 'l').length >= 3) items.push(null, ['makeFaces', _t('Ściany z linii')]);
@@ -2316,7 +2335,7 @@ function openContext(x, y, cx, cy) {
     items.push(null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], ['zoomSel', _t('Pokaż zaznaczenie')], null, ['delete', _t('Usuń')]);
   } else if (app.sub.length) {
     // zaznaczone ściany albo krawędzie wspólnej geometrii
-    if (app.sub.some(q => q.kind === 'face')) items.push(['selSameMat', _t('Zaznacz ściany z tym samym materiałem')], ['soften', _t('Wygładź krawędzie')], ['unsoften', _t('Przywróć wygładzone krawędzie')], null, ['reverseFaces', _t('Odwróć ściany')], ['orientFaces', _t('Ujednolić orientację ścian')], null, ['group', _t('Utwórz grupę')], ['comp', _t('Utwórz komponent')], null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], null, ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], null);
+    if (app.sub.some(q => q.kind === 'face')) items.push(['selSameMat', _t('Zaznacz ściany z tym samym materiałem')], ['soften', _t('Wygładź krawędzie')], ['unsoften', _t('Przywróć wygładzone krawędzie')], null, ['reverseFaces', _t('Odwróć ściany')], ['orientFaces', _t('Ujednolić orientację ścian')], null, ['intersect', _t('Przetnij z modelem')], ['intersectSel', _t('Przetnij z zaznaczeniem')], null, ['group', _t('Utwórz grupę')], ['comp', _t('Utwórz komponent')], null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], null, ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], null);
     else items.push(['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null);
     items.push(['delete', _t('Usuń')]);
   } else {

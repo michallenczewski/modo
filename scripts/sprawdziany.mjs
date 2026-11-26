@@ -12,7 +12,7 @@ globalThis.localStorage ??= { getItem: () => null, setItem: () => {} };
 const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
-const { absorb, reverseFaces, orientFaces, facesOfPolys, curveEdges, curveInfo, respaceCurve } = await import(R + 'geo.js');
+const { absorb, reverseFaces, orientFaces, facesOfPolys, curveEdges, curveInfo, respaceCurve, intersectWith, intersectLoops } = await import(R + 'geo.js');
 const { deleteEdge, deleteFace, curveOf, moveSub, subFaces } = await import(R + 'tools.js');
 const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
@@ -325,6 +325,15 @@ przypadek('skalowanie górnej ściany walca', 'Walec r=1, h=2 (24 odcinki), gór
   const v = Math.round(s.volume * 100) / 100, oczek = Math.round(2 * Math.PI / 3 * 1.75 * 24 / (2 * Math.PI) * Math.sin(2 * Math.PI / 24) * 100) / 100;
   const gl = s.geo.softs || [], naBoku = gl.filter(([a, b]) => Math.abs(a[2]) < 1e-6 && Math.abs(b[2] - 2) < 1e-6 && Math.abs(Math.hypot(b[0], b[1]) - 0.5) < 1e-6).length;
   return { 'boki gładkie po skalowaniu': [naBoku, 24], ściany: [s.faces, 26], otwarte: [s.open, 0], 'jedna bryła': [s.m.shapes.length, 1], objętość: [v, oczek], 'górna ściana mniejsza': [s.faceArea([0, 0, 2]) < 0.8, true] };
+});
+// przecinanie (Intersect with Model / Selection): także wewnątrz jednej wspólnej geometrii
+przypadek('przetnij — płaszczyzna przez walec', 'Płaska ściana 4×4 na wysokości 1 i walec r=0,5, h=2 (24 odcinki) przechodzący przez nią — jedna wspólna geometria. Po przecięciu: płaszczyzna z otworem i krążek w walcu, boki walca podzielone na wysokości 1 (2 + 48 + 2 = 52 ściany).', () => {
+  const s = new Szkic().circle([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.5, 24); wyciagnij(s, [0, 0, 0], 2);
+  s.rectXY(-2, -2, 1, 4, 4);
+  const f0 = s.faces, all = s.geo.polys.map((_, i) => i), segs = intersectWith([{ s: s.geo, idx: all }], [{ s: s.geo, idx: all }]);   // jak w programie: zaznaczone ściany
+  s.edit(m => { for (const [a, b] of segs) m.lines.push({ id: m.next++, a, b }); });
+  s.edit(m => intersectLoops(m.shapes.find(q => q.geo), segs));
+  return { 'ściany przed': [f0, 27], 'odcinki przecięcia': [segs.length, 24], ściany: [s.faces, 52], 'luźne linie': [s.m.lines.length, 0], 'krążek w walcu': [s.has([0, 0, 1]), true], 'płaszczyzna obok': [s.has([1.5, 1.5, 1]), true] };
 });
 przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });
