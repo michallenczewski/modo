@@ -245,9 +245,14 @@ function makeGroup(kind) {
 }
 // Ramka grupy jak w SketchUpie: prostopadłościan otaczający w kierunkach ramy grupy (komponent obrócony — ramka też),
 // niebieska przy zaznaczeniu, cienka przy najechaniu narzędziem Zaznacz.
+const boxCache = new Map();
 function groupBox(g) {
-  const m = app.model, ids = membersOf(m, g.id), pts = [];
-  for (const id of ids) { if (typeof id === 'number') { const s = m.shapes.find(q => q.id === id); if (s && !isHidden(m, s)) pts.push(...vertices(s)); } else if (String(id)[0] === 'l') { const l = m.lines.find(q => 'l' + q.id === id); if (l && !isHidden(m, l)) pts.push(l.a, l.b); } }
+  const key = g.id + '|' + viewer.rebuilds, hit = boxCache.get(g.id); if (hit && hit.key === key) return hit.box;
+  const box = groupBoxCalc(g); boxCache.set(g.id, { key, box }); return box;
+}
+function groupBoxCalc(g) {
+  const m = app.model, ids = membersOf(m, g.id), pts = [], byId = new Map(m.shapes.map(q => [q.id, q]));
+  for (const id of ids) { if (typeof id === 'number') { const s = byId.get(id); if (s && !isHidden(m, s)) pts.push(...vertices(s)); } else if (String(id)[0] === 'l') { const l = m.lines.find(q => 'l' + q.id === id); if (l && !isHidden(m, l)) pts.push(l.a, l.b); } }
   if (!pts.length) return null;
   const f = g.frame, E = f ? [f.x, f.y, f.z].map(a => V.norm(a)) : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -259,7 +264,8 @@ function groupBox(g) {
 function drawGroupBoxes(c, v) {
   const sel = selectedGroups(), col = viewer.dark ? '#7f9bd0' : '#3f5f99';
   if (sel.length <= 40) for (const g of sel) for (const [a, b] of groupBox(g) || []) drawSeg(c, v, a, b, col, { width: 1.4 });
-  const h = toolId === 'select' && app.hoverGroup && !sel.includes(app.hoverGroup) ? app.hoverGroup : null;
+  const hg = app.hoverGroup && app.model.groups.find(q => q.id === app.hoverGroup.id);
+  const h = ['select', 'move', 'rotate', 'scale'].includes(toolId) && hg && !sel.some(q => q.id === hg.id) ? hg : null;
   if (h) for (const [a, b] of groupBox(h) || []) drawSeg(c, v, a, b, col, { width: 1, dash: [4, 3] });
 }
 function selectedGroups() { const out = new Set(); for (const id of app.selection) { const g = topUnder(app.model, id, app.editing); if (g) out.add(g); } return [...out]; }
@@ -334,7 +340,7 @@ function moveInd() {
   const on = toolsEl.querySelector('.ib.on'); toolInd.style.opacity = on ? 1 : 0;
   if (on) toolInd.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
 }
-addEventListener('resize', moveInd);
+new ResizeObserver(() => moveInd()).observe(toolsEl);   // zmiana układu (okno, tryb Tab) — wskaźnik wraca pod narzędzie
 // wysuwane menu wariantów
 let flyEl = null, flyTimer = null;
 function showFlyout(b, fam) {
@@ -386,7 +392,7 @@ function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl
 function setTool(id) {
   if (!tools[id]) return;
   if (id === 'zoomWin' && toolId !== 'zoomWin') toolBefore = toolId;
-  tool.deactivate(); tool = tools[id]; toolId = id; tool.activate();
+  tool.deactivate(); tool = tools[id]; toolId = id; tool.activate(); app.hoverGroup = null;
   app.lockAxis = null; app.lockDir = null; vcbBuf = ''; snapper.forget();
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
@@ -505,7 +511,7 @@ view.addEventListener('dblclick', e => { const [x, y] = xy(e); tool.dbl(e, x, y)
 view.addEventListener('click', e => { if (e.detail === 3 && e.button === 0 && tool.triple) { const [x, y] = xy(e); tool.triple(e, x, y); app.refresh(); } });
 view.addEventListener('contextmenu', e => e.preventDefault());
 view.addEventListener('auxclick', e => e.preventDefault());
-view.addEventListener('pointerleave', () => { curIcon.hidden = true; viewer.redraw(); });
+view.addEventListener('pointerleave', () => { curIcon.hidden = true; app.hoverGroup = null; viewer.redraw(); });
 // kółko myszy: powiększanie do kursora; gładzik: dwa palce obracają (z ⇧ przesuwają), szczypanie powiększa
 view.addEventListener('wheel', e => {
   e.preventDefault();
@@ -817,8 +823,9 @@ function deleteSelection() {
 // po cofnięciu albo ponowieniu: bryły wyjęte do polecenia wracają do wspólnej geometrii
 function regeo() { for (const s of app.model.shapes) delete s.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } }
 function undo() {
-  if (tool.active || tool.anchor || tool.p0) tool.cancel();
-  if (!app.undo.length) { ack($('#undoBtn'), false); return toast(_t('Nie ma czego cofnąć.')); }
+  const busy = tool.active || tool.anchor || tool.p0;
+  if (busy) tool.cancel();
+  if (!app.undo.length) { if (!busy) { ack($('#undoBtn'), false); toast(_t('Nie ma czego cofnąć.')); } return; }
   app.clearSub();
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
@@ -1043,12 +1050,12 @@ function togglePanel(v) {
 }
 $('#panelBtn').addEventListener('click', () => togglePanel());
 // Tryb minimalistyczny (Tab): zostaje sam widok i pływające pole wymiaru; skróty działają jak zwykle.
-// W oknie programu zostaje pusty pasek u góry — trzyma przyciski okna i daje się za niego przeciągać okno.
+// W oknie programu okno przeciąga się za plakietkę narzędzia; na Windows przyciski okna leżą na prawym górnym rogu widoku.
 function toggleMinimal(v) {
   const on = v ?? !document.body.classList.contains('minimal');
   if (on) { closePops(); hideTip(); }
   document.body.classList.toggle('minimal', on);
-  renderMini(); app.updateVcb();
+  renderMini(); app.updateVcb(); setTimeout(moveInd, 30);
 }
 // plakietka z bieżącym narzędziem (lewy górny róg, za nią można przeciągać okno) i przypomnienie, jak wrócić
 const miniBadge = document.createElement('div'); miniBadge.id = 'miniBadge'; $('#view').append(miniBadge);
@@ -1407,7 +1414,7 @@ function renderViewPop() {
 // sceny są w panelu (sekcja Sceny)
 function renderScenes() {
   const L = $('#sceneList');
-  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num thumb" title="${_t('Pokaż scenę')}"${sc.thumb ? ` style="background-image:url(${sc.thumb})"` : ''}><span>${i + 1}</span></button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
+  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num thumb" title="${_t('Pokaż scenę')}"${okThumb(sc.thumb) ? ` style="background-image:url(${sc.thumb})"` : ''}><span>${i + 1}</span></button><input class="fld" value="${esc(sc.name)}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
   L.querySelectorAll('.scene').forEach(row => {
     const i = +row.dataset.i;
     row.querySelector('.no').addEventListener('click', () => showScene(i));
@@ -1429,12 +1436,14 @@ $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
 const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
+const okThumb = t => typeof t === 'string' && /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(t);
 // miniatura sceny: mały obraz bieżącego widoku (JPEG, zapisywany w pliku razem ze sceną)
 async function sceneThumb(sc) {
   try {
-    const blob = await viewer.exportPng(240, 150, { minLine: 1 }), img = await createImageBitmap(blob);
+    // z obrazu, który okno właśnie narysowało (kadr środka w proporcjach 8:5) — bez przebudowy sceny i bez dużej mapy cieni
     const c = document.createElement('canvas'); c.width = 240; c.height = 150; const x = c.getContext('2d');
-    x.fillStyle = viewer.st().paper; x.fillRect(0, 0, 240, 150); x.drawImage(img, 0, 0);
+    viewer.render(); const cv = viewer.canvas, k = Math.min(cv.width / 240, cv.height / 150), sw = 240 * k, sh = 150 * k;
+    x.fillStyle = viewer.st().paper; x.fillRect(0, 0, 240, 150); x.drawImage(cv, (cv.width - sw) / 2, (cv.height - sh) / 2, sw, sh, 0, 0, 240, 150);
     sc.thumb = c.toDataURL('image/jpeg', 0.8); renderScenes();
   } catch (e) { console.error('miniatura sceny', e); }
 }
@@ -1453,7 +1462,7 @@ function showScene(i) {
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
-  if (!sc.thumb) requestAnimationFrame(() => sceneThumb(sc));   // starsze sceny dostają miniaturę przy pierwszym pokazaniu
+  if (!okThumb(sc.thumb)) requestAnimationFrame(() => sceneThumb(sc));   // starsze sceny dostają miniaturę przy pierwszym pokazaniu
 }
 function goScene(d) {
   if (!app.scenes.length) return toast(_t('Nie ma jeszcze scen — dodaj je w panelu, w sekcji Sceny.'));
@@ -1501,8 +1510,8 @@ function renderSun() {
 var sunArcRange = { h0: 0, h1: 24 };
 {
   const arc = $('#sunArc');
-  const hourAt = e => { const r = arc.getBoundingClientRect(), x = (e.clientX - r.left) * 288 / r.width, { h0, h1 } = sunArcRange; return Math.round(Math.max(h0, Math.min(h1, h0 + (x - 10) / 268 * (h1 - h0))) * 4) / 4; };
-  arc.addEventListener('pointerdown', e => { arc.setPointerCapture(e.pointerId); arc.classList.add('drag'); setSun({ hour: hourAt(e) }); });
+  const hourAt = e => { const r = arc.getBoundingClientRect(), x = (e.clientX - r.left) * 288 / r.width, { h0, h1 } = sunArcRange; return Math.max(h0, Math.min(h1, Math.round((h0 + (x - 10) / 268 * (h1 - h0)) * 4) / 4)); };
+  arc.addEventListener('pointerdown', e => { if (e.button !== 0) return; arc.setPointerCapture(e.pointerId); arc.classList.add('drag'); setSun({ hour: hourAt(e) }); });
   arc.addEventListener('pointermove', e => { if (arc.hasPointerCapture(e.pointerId)) { const h = hourAt(e); if (h !== viewer.sunCfg.hour) setSun({ hour: h }); } });
   const end = e => { if (arc.hasPointerCapture(e.pointerId)) arc.releasePointerCapture(e.pointerId); arc.classList.remove('drag'); };
   arc.addEventListener('pointerup', end); arc.addEventListener('pointercancel', end);

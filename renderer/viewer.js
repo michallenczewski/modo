@@ -317,6 +317,7 @@ export class Viewer {
     this.rebuild(opts);
   }
   rebuild({ highlight } = {}) {
+    this.rebuilds = (this.rebuilds || 0) + 1;   // licznik dla pamięci podręcznych zależnych od geometrii (ramki grup)
     for (const c of [...this.modelGroup.children]) { if (!c.geometry.userData.cached) c.geometry.dispose(); for (const m of [].concat(c.material)) if (m.dispose && m !== this.edgeMat && !c.userData.depthOnly) m.dispose(); this.modelGroup.remove(c); }
     // Geometria ścian każdej bryły jest pamiętana, dopóki bryła się nie zmieni — zaznaczenie albo zmiana stylu
     // przebudowuje wtedy tylko materiały, a nie dziesiątki tysięcy trójkątów.
@@ -657,7 +658,7 @@ export class Viewer {
   sides(mat) {
     if (!this.faceSides) return mat;
     mat.side = THREE.DoubleSide;
-    mat.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.47, 0.56, 0.71);'); };
+    mat.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.47, 0.56, 0.71), 0.75);'); };
     mat.customProgramCacheKey = () => 'modo-sides';
     return mat;
   }

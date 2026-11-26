@@ -1525,7 +1525,7 @@ export class MoveTool extends Tool {
   }
   finish() {
     if (!this.start) return;
-    if (V.len(this.d) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
+    if (V.len(this.d) < 1e-9) { this.app.setModelLive(this.start); this.orig = null; this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
     if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
     // orig — pierwotne przesunięcie (z myszy albo z wpisanej długości): szyk „x5” i podział „/6” zawsze liczą się od niego,
@@ -1653,7 +1653,7 @@ export class RotateTool extends Tool {
   }
   finish() {
     if (!this.start) return;
-    if (Math.abs(this.ang) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
+    if (Math.abs(this.ang) < 1e-9) { this.app.setModelLive(this.start); this.orig = null; this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
     if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
     this.last = { start: this.start, targets: this.targets, sub: this.sub, c: this.c, n: this.n, ref: this.ref, ang: this.ang, orig: this.orig ?? this.ang, copy: this.copy, count: this.count, seq: this.app.opSeq };

@@ -132,6 +132,16 @@ Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model,
 
 **Osie rysowania** (`model.axes`: początek `o` i kierunki `x`, `y`; `z = x × y`) ustawia narzędzie Osie (trzy kliknięcia, jak w SketchUpie). `setAxes` zmienia tablice `AXES` i `ORIGIN` w miejscu, więc przyciąganie, blokada strzałkami, linie śledzenia i kierunek prostokąta, okręgu i kątomierza (`planeU`) idą za nowymi osiami; `app.refresh` (`syncAxes`) wyrównuje je z modelem po każdej zmianie, cofnięciu i wczytaniu. Rdzeń geometrii liczy dalej w osiach świata.
 
+**Język interakcji** jest wspólny dla rodziny programów (`WYTYCZNE_INTERAKCJE.md`): krzywa „sprężyna” (`--spring`), przyciski z ikoną unoszą się i uginają, jeden przeskakujący wskaźnik wybranego narzędzia na lewym pasku (`moveInd`), przełączniki włączone w kolorze akcentu, podpowiedzi po 1,5 s (`showTip`), „tak” i „nie” na przyciskach (`ack`), menu ustawień jako ostatni przycisk górnego paska: motyw, skróty, język, wersja i aktualizacje.
+
+**Tryb Tab** (`toggleMinimal`): pełna imersja jak w Rysiu — sam widok na całe okno, plakietka z bieżącym narzędziem (`#miniBadge`, za nią przeciąga się okno), przypomnienie „Tab — pełny widok” i wpisywany wymiar przy kursorze (`#miniType`).
+
+**Grupy**: dopóki nie wejdziesz do grupy, jej ściany nie podświetlają się pod kursorem (`hoverShape` → `app.hoverGroup`); grupa pod kursorem ma przerywaną ramkę, zaznaczona — niebieską (`groupBox`: prostopadłościan w kierunkach ramy grupy).
+
+**Szyk i podział po kopii** liczą się od pierwotnego przesunięcia (`last.orig` w Przesuń, kąta w Obróć), więc „/6” po „/4” dzieli cały pierwotny odcinek.
+
+**Słońce i sceny**: słońce w okienku Słońce przeciąga się po łuku jego drogi (godzina co 15 minut); scena ma miniaturę (`thumb`, JPEG 240 × 150 z `exportPng` z najmniejszą grubością kreski `minLine`), robioną przy dodaniu i aktualizacji sceny, a w starszych szkicach przy pierwszym pokazaniu.
+
 ## Rysunek
 
 Ściany to zwykłe `MeshLambertMaterial` z cieniami (`PCFShadowMap` — mapa głębi z miękkim filtrem; promień = „Miękkość”; zakres głębi kamery cienia jest ciasno dopasowany do modelu). Wcześniejszy `VSMShadowMap` dawał przy niskim słońcu i dużych modelach kwadratowe plamy na ścianach. Ziemia to `ShadowMaterial` — widać na niej tylko cień, reszta to kolor papieru.
@@ -149,7 +159,7 @@ Krawędzie rysuje własny shader (`EDGE_VS` w `viewer.js`): każda krawędź jes
 
 **Cień otoczenia** (styl Model, przełącznik w okienku Wygląd widoku, `modo.ao`): po zwykłym obrazie `aoPass` rysuje nieprzezroczyste ściany i ziemię (warstwa 1) materiałem z kierunkiem ściany do bufora z głębią, liczy zasłonięcie półkulą 16 próbek w połowie rozdzielczości (promień ok. 3,5% wielkości modelu, 0,25–2 m), wygładza je z uwzględnieniem głębi i mnoży przez gotowy obraz. Działa też w eksporcie PNG.
 
-Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic, Kreska, Model. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
+Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic (ołówek: każda kreska rysowana dwa razy z innym drżeniem — `strokes: 2`, `edge2Mesh`, `seedOff` w shaderze — z lekkim wyjściem za narożnik), Kreska (domyślny, czysty), Model (bez kresek; przełącznik „Krawędzie w stylu Model” podmienia parametry w `Viewer.st`). „Strony ścian” (`Viewer.sides`) pokazuje tył każdej ściany na niebiesko-szaro, jak w SketchUpie. Tryb ciemny podmienia w nich papier, kreskę, kolor ścian i cień (`DARK`, `styleOf`); interfejs przełącza zmienne CSS `[data-theme=dark]` jak w Gapie. Eksport PNG renderuje do bufora o zadanej rozdzielczości i skaluje grubość linii razem z rozdzielczością.
 
 ## Render przez Gemini
 

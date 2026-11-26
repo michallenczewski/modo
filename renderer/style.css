@@ -79,7 +79,8 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .sep{width:1px;height:16px;background:var(--line);margin:0 6px;flex:none}
 
 /* --- narzędzia --- */
-#tools{grid-column:1;grid-row:2/4;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0 12px;position:relative}
+#tools{grid-column:1;grid-row:2/4;display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px 0;position:relative;justify-self:center;width:36px;margin:0 0 12px;border-radius:10px;background:var(--soft);overflow-y:auto;scrollbar-width:none}
+#tools::-webkit-scrollbar{display:none}
 /* jeden wspólny wskaźnik wybranego narzędzia, przeskakuje ze sprężyną */
 #tools .ind{position:absolute;top:0;left:0;width:30px;height:28px;border-radius:7px;background:var(--toolon);box-shadow:0 0 0 1px var(--cardline),0 1px 2px rgba(0,0,0,.06);transition:transform .42s var(--spring),opacity .15s;pointer-events:none}
 #tools .ib{z-index:1}
