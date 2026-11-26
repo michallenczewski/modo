@@ -1046,9 +1046,10 @@ function openOps(btn) {
 }
 
 /* ---------- okienka ---------- */
-// Okienko i menu spod górnego paska zaczynają się równo z górną krawędzią widoku i kart panelu (a nie tuż pod przyciskiem),
-// żeby wszystkie pola po tej stronie paska trzymały jedną linię.
-const belowBar = (anchor, r) => anchor.closest('header') ? $('#view').getBoundingClientRect().top : r.bottom + 6;
+// Okienko i menu spod górnego paska unoszą się nad widokiem: odsunięte od jego górnej krawędzi o tyle, ile wynosi odstęp
+// między widokiem a panelem (12 px), żeby nie stykały się z krawędzią i nie wyglądały na przyklejone.
+const POP_GAP = 12;
+const belowBar = (anchor, r) => anchor.closest('header') ? $('#view').getBoundingClientRect().top + POP_GAP : r.bottom + 6;
 function openPop(sel, anchor, side) {
   const p = $(sel); const was = !p.hidden;
   closePops(); if (was) return;

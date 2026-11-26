@@ -139,7 +139,7 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .lbl{font-size:11.5px;color:var(--muted)}
 
 /* --- okienka --- */
-.pop{position:fixed;z-index:30;background:var(--card);border-radius:12px;box-shadow:var(--menush);padding:14px 16px;display:flex;flex-direction:column;gap:12px;width:320px;max-height:calc(100vh - 70px);overflow:auto}
+.pop{position:fixed;z-index:30;background:var(--card);border-radius:12px;box-shadow:var(--menush);padding:14px 16px;display:flex;flex-direction:column;gap:12px;width:320px;max-height:calc(100vh - 90px);overflow:auto}
 .pop[hidden]{display:none}
 .row{display:flex;align-items:center;gap:10px;min-width:0}
 .row.between{justify-content:space-between}
