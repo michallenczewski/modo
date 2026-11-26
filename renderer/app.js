@@ -1046,13 +1046,16 @@ function openOps(btn) {
 }
 
 /* ---------- okienka ---------- */
+// Okienko i menu spod górnego paska zaczynają się równo z górną krawędzią widoku i kart panelu (a nie tuż pod przyciskiem),
+// żeby wszystkie pola po tej stronie paska trzymały jedną linię.
+const belowBar = (anchor, r) => anchor.closest('header') ? $('#view').getBoundingClientRect().top : r.bottom + 6;
 function openPop(sel, anchor, side) {
   const p = $(sel); const was = !p.hidden;
   closePops(); if (was) return;
   p.hidden = false;
   const r = anchor.getBoundingClientRect(), w = p.offsetWidth;
   if (side === 'right') { p.style.left = (r.right + 8) + 'px'; p.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - p.offsetHeight - 8)) + 'px'; }
-  else { p.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px'; p.style.top = (r.bottom + 6) + 'px'; }
+  else { p.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px'; p.style.top = belowBar(anchor, r) + 'px'; }
   anchor.classList.add('open');
   if (sel === '#sunPop') renderSun();
   if (sel === '#pngPop') renderPng();
@@ -2120,7 +2123,7 @@ async function openFileMenu() {
   }));
   m.hidden = false;
   const r = $('#fileBtn').getBoundingClientRect();
-  m.style.left = Math.max(8, r.left) + 'px'; m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = Math.max(8, r.left) + 'px'; m.style.top = belowBar($('#fileBtn'), r) + 'px';
   $('#fileBtn').classList.add('open');
 }
 // Ustawienia: wygląd programu, język, skróty
@@ -2144,7 +2147,7 @@ $('#setBtn').addEventListener('click', () => {
   }));
   m.hidden = false;
   const r = $('#setBtn').getBoundingClientRect();
-  m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = belowBar($('#setBtn'), r) + 'px';
   $('#setBtn').classList.add('open');
 });
 
