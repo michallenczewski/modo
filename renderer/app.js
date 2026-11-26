@@ -1407,14 +1407,14 @@ function renderViewPop() {
 // sceny są w panelu (sekcja Sceny)
 function renderScenes() {
   const L = $('#sceneList');
-  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num" title="${_t('Pokaż scenę')}">${i + 1}</button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
+  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num thumb" title="${_t('Pokaż scenę')}"${sc.thumb ? ` style="background-image:url(${sc.thumb})"` : ''}><span>${i + 1}</span></button><input class="fld" value="${sc.name.replace(/"/g, '&quot;')}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
   L.querySelectorAll('.scene').forEach(row => {
     const i = +row.dataset.i;
     row.querySelector('.no').addEventListener('click', () => showScene(i));
     const inp = row.querySelector('input');
     inp.addEventListener('change', () => { app.scenes[i].name = inp.value.trim() || _t('Scena ') + (i + 1); app.markDirty(); });
     inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); });
-    row.querySelector('[data-u]').addEventListener('click', () => { app.scenes[i] = { ...captureScene(), name: app.scenes[i].name }; app.scene = i; app.markDirty(); renderViewPop(); toast(_t('Zaktualizowano scenę „') + app.scenes[i].name + '”'); });
+    row.querySelector('[data-u]').addEventListener('click', () => { app.scenes[i] = { ...captureScene(), name: app.scenes[i].name }; app.scene = i; app.markDirty(); renderViewPop(); sceneThumb(app.scenes[i]); toast(_t('Zaktualizowano scenę „') + app.scenes[i].name + '”'); });
     row.querySelector('[data-d]').addEventListener('click', () => { app.scenes.splice(i, 1); if (app.scene >= app.scenes.length) app.scene = app.scenes.length - 1; app.markDirty(); renderViewPop(); });
   });
 }
@@ -1429,9 +1429,18 @@ $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
 const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
+// miniatura sceny: mały obraz bieżącego widoku (JPEG, zapisywany w pliku razem ze sceną)
+async function sceneThumb(sc) {
+  try {
+    const blob = await viewer.exportPng(240, 150, { minLine: 1 }), img = await createImageBitmap(blob);
+    const c = document.createElement('canvas'); c.width = 240; c.height = 150; const x = c.getContext('2d');
+    x.fillStyle = viewer.st().paper; x.fillRect(0, 0, 240, 150); x.drawImage(img, 0, 0);
+    sc.thumb = c.toDataURL('image/jpeg', 0.8); renderScenes();
+  } catch (e) { console.error('miniatura sceny', e); }
+}
 function addScene() {
   app.scenes.push({ name: _t('Scena ') + (app.scenes.length + 1), ...captureScene() });
-  app.scene = app.scenes.length - 1; app.markDirty();
+  app.scene = app.scenes.length - 1; app.markDirty(); sceneThumb(app.scenes[app.scene]);
   toast(_t('Dodano scenę „') + app.scenes[app.scene].name + '”');
   renderViewPop();
 }
@@ -1444,6 +1453,7 @@ function showScene(i) {
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
+  if (!sc.thumb) requestAnimationFrame(() => sceneThumb(sc));   // starsze sceny dostają miniaturę przy pierwszym pokazaniu
 }
 function goScene(d) {
   if (!app.scenes.length) return toast(_t('Nie ma jeszcze scen — dodaj je w panelu, w sekcji Sceny.'));
@@ -1482,7 +1492,20 @@ function renderSun() {
   const sx = t => 10 + 268 * (t - h0) / (h1 - h0), sy = a => 70 - Math.max(a, -6) * (58 / maxA);
   const d = pts.map(([t, a], i) => (i ? 'L' : 'M') + sx(t).toFixed(1) + ' ' + sy(a).toFixed(1)).join(' ');
   const cx = sx(Math.max(h0, Math.min(h1, c.hour))), cy = sy(p.alt);
-  $('#sunArc').innerHTML = `<path d="M4 70h280" style="stroke:var(--line)"/><path d="${d}" fill="none" style="stroke:var(--muted2)" stroke-width="1.2" stroke-dasharray="2 3"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" style="fill:var(--card);stroke:var(--text)" stroke-width="1.4"/><line x1="${cx.toFixed(1)}" y1="${(cy + 6).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" style="stroke:var(--text)" stroke-dasharray="1.5 2.5"/>`;
+  sunArcRange = { h0, h1 };
+  // słońce z promieniami — chwyć i przesuń po łuku (pionowa kreska pokazuje wysokość nad horyzontem)
+  const rays = [...Array(8)].map((_, i) => { const a = i * Math.PI / 4, x1 = cx + Math.cos(a) * 8.5, y1 = cy + Math.sin(a) * 8.5, x2 = cx + Math.cos(a) * 11.5, y2 = cy + Math.sin(a) * 11.5; return `M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`; }).join('');
+  $('#sunArc').innerHTML = `<path d="M4 70h280" style="stroke:var(--line)"/><path d="${d}" fill="none" style="stroke:var(--muted2)" stroke-width="1.2" stroke-dasharray="2 3"/><line x1="${cx.toFixed(1)}" y1="${(cy + 12).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" style="stroke:var(--text)" stroke-dasharray="1.5 2.5"/><g class="sunKnob"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="14" style="fill:transparent"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5.5" style="fill:var(--card);stroke:var(--text)" stroke-width="1.4"/><path d="${rays}" style="stroke:var(--text)" stroke-width="1.4" stroke-linecap="round"/></g>`;
+}
+// przeciąganie słońca po łuku: położenie w poziomie to godzina (co 15 minut), cienie zmieniają się na bieżąco
+var sunArcRange = { h0: 0, h1: 24 };
+{
+  const arc = $('#sunArc');
+  const hourAt = e => { const r = arc.getBoundingClientRect(), x = (e.clientX - r.left) * 288 / r.width, { h0, h1 } = sunArcRange; return Math.round(Math.max(h0, Math.min(h1, h0 + (x - 10) / 268 * (h1 - h0))) * 4) / 4; };
+  arc.addEventListener('pointerdown', e => { arc.setPointerCapture(e.pointerId); arc.classList.add('drag'); setSun({ hour: hourAt(e) }); });
+  arc.addEventListener('pointermove', e => { if (arc.hasPointerCapture(e.pointerId)) { const h = hourAt(e); if (h !== viewer.sunCfg.hour) setSun({ hour: h }); } });
+  const end = e => { if (arc.hasPointerCapture(e.pointerId)) arc.releasePointerCapture(e.pointerId); arc.classList.remove('drag'); };
+  arc.addEventListener('pointerup', end); arc.addEventListener('pointercancel', end);
 }
 const placeName = c => (Math.abs(c.lat - 52.23) < 0.05 && Math.abs(c.lon - 21.01) < 0.05) ? _t('Warszawa') : _t('własne miejsce');
 $('#sunBtn').addEventListener('click', () => openPop('#sunPop', $('#sunBtn')));

@@ -1012,7 +1012,7 @@ export class Viewer {
   redraw() { this.needs = true; }
 
   // obraz PNG w dowolnej rozdzielczości; grubość linii rośnie razem z rozdzielczością
-  async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false } = {}) {
+  async exportPng(W, H, { transparent = false, axes = false, underlay = false, dark = this.dark, guides = false, minLine = 0 } = {}) {
     // w eksporcie bez zaznaczenia i bez przygaszenia przy edycji grupy
     const keepSel = [...this.selected], keepEdit = this.editGroup, keepSolid = this.editSolid;
     this.selected.clear(); this.editGroup = null; this.editSolid = null;
@@ -1030,7 +1030,7 @@ export class Viewer {
     const bg = this.scene.background; this.scene.background = transparent ? null : new THREE.Color(st.paper);
     const dpr = r.getPixelRatio();
     // skala linii: ten sam wygląd co w oknie, tylko w większej rozdzielczości
-    const scale = W / (this.w * dpr);
+    const scale = Math.max(minLine, W / (this.w * dpr));   // minLine: miniatury — kreski nie mogą zniknąć
     this.applyStyleUniforms(scale, this.w, this.h);
     this.edgeMat.uniforms.res.value.set(W, H);
     r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.scene, this.vc()); if (this.aoOn()) { const k = Math.min(1, 2400 / Math.max(W, H)); this.aoPass(rt, Math.round(W * k), Math.round(H * k)); } r.setRenderTarget(null);

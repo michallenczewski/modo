@@ -200,6 +200,11 @@ details.more[open]{display:flex;flex-direction:column;gap:10px}
 .scenes:empty{display:none}
 .scene{display:flex;align-items:center;gap:4px}
 .scene .no{width:26px;height:28px;border-radius:7px;background:var(--soft);font-size:12px;color:var(--muted);flex:none}
+/* miniatura sceny: obraz widoku z numerem w rogu */
+.scene .no.thumb{position:relative;width:64px;height:40px;background-size:cover;background-position:center;transition:transform .35s var(--spring)}
+.scene .no.thumb:hover{transform:translateY(-1px)}
+.scene .no.thumb span{position:absolute;left:3px;bottom:3px;min-width:15px;height:15px;padding:0 3px;border-radius:4px;background:var(--card);font-size:10.5px;line-height:15px;color:var(--text2)}
+.scene.on .no.thumb{box-shadow:0 0 0 1.5px var(--accent)}
 .scene .no:hover,.scene.on .no{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
 .scene input{flex:1;min-width:0;height:28px}
 .scene .ib{width:26px;height:28px;flex:none}
@@ -325,3 +330,8 @@ body.minimal #miniType.on{display:flex}
 .tip{opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .2s var(--spring)}
 .tip.on{opacity:.94;transform:none}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+/* łuk słońca: chwyć słońce i przesuń */
+#sunArc{cursor:grab;touch-action:none}
+#sunArc.drag{cursor:grabbing}
+#sunArc .sunKnob{transition:transform .2s var(--spring);transform-box:fill-box;transform-origin:center}
+#sunArc:hover .sunKnob{transform:scale(1.08)}
