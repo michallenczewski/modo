@@ -38,41 +38,56 @@
 <aside id="panel" hidden aria-label="Panel">
   <section class="psec" data-sec="info"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Element</span></button></div><div id="infoBody" class="pbody"></div></section>
   <section class="psec" data-sec="mat"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Materiały</span></button></div><div id="matBody" class="pbody">
-  <div id="swatches"></div>
-  <div id="texSwatches"></div>
-  <div class="row" id="matImgRow" hidden><span class="lbl w60">Szerokość</span><input id="matImgW" class="fld grow num" title="Szerokość jednego powtórzenia obrazu"></div>
-  <div class="row"><span class="lbl w60">Dodaj</span><button class="tb soft" id="matImg" title="Materiał z obrazu na dysku">Z obrazu…</button><button class="tb soft" id="matGenBtn" aria-expanded="false" title="Materiał narysowany przez Gemini według opisu">Z opisu…</button><span class="grow"></span></div>
-  <div id="matGen" hidden>
-    <div id="matGenNoKey" class="row"><span class="lbl note grow">Potrzebny jest Twój klucz API Gemini — ten sam co do renderu.</span><button class="tb soft" id="matGenKey">Ustaw klucz</button></div>
-    <div id="matGenMain" hidden>
-      <textarea id="matGenPrompt" class="fld" rows="3" spellcheck="false" placeholder="np. stara czerwona cegła z jasną fugą" aria-label="Opis materiału"></textarea>
-      <div class="row"><span class="lbl w60">Rozmiar</span><input id="matGenW" class="fld grow num" value="2 m" title="Szerokość jednego powtórzenia wzoru"></div>
-      <label class="row"><span class="grow">Bez szwów <span class="lbl">wygładza łączenia powtórzeń</span></span><input type="checkbox" class="tg" id="matGenSeam" role="switch" checked></label>
-      <div class="lbl note">Opis trafia do Gemini (Google); każdy obraz jest płatny według cennika Google. Model jest ten sam co w sekcji Render.</div>
-      <div class="row"><span class="lbl grow ell" id="matGenStatus"></span><button class="primary" id="matGenGo">Wygeneruj</button></div>
+  <div class="row" id="matCur"></div>
+  <div class="seg stretch" id="matTabs" role="group" aria-label="Materiały: wybór albo edycja"><button data-t="pick" class="on">Wybierz</button><button data-t="edit">Edytuj</button></div>
+  <div id="matPick">
+    <div class="row"><select id="matCat" class="fld grow" aria-label="Kategoria materiałów"></select><input id="matQ" class="fld w90" type="search" placeholder="Szukaj" aria-label="Szukaj materiału po nazwie" spellcheck="false"></div>
+    <div id="matGrid" class="matgrid"></div>
+    <div class="lbl note" id="matEmpty" hidden></div>
+    <div class="row addrow"><button class="tb soft" id="matColAdd" title="Nowy własny kolor — ustawisz go w zakładce Edytuj">+ Kolor</button><button class="tb soft" id="matImg" title="Materiał z obrazu na dysku">Z obrazu…</button><button class="tb soft" id="matGenBtn" aria-expanded="false" title="Materiał narysowany przez Gemini według opisu">Z opisu…</button></div>
+    <div id="matGen" hidden>
+      <div id="matGenNoKey" class="row"><span class="lbl note grow">Potrzebny jest Twój klucz API Gemini — ten sam co do renderu.</span><button class="tb soft" id="matGenKey">Ustaw klucz</button></div>
+      <div id="matGenMain" hidden>
+        <textarea id="matGenPrompt" class="fld" rows="3" spellcheck="false" placeholder="np. stara czerwona cegła z jasną fugą" aria-label="Opis materiału"></textarea>
+        <div class="row"><span class="lbl w60">Rozmiar</span><input id="matGenW" class="fld grow num" value="2 m" title="Szerokość jednego powtórzenia wzoru"></div>
+        <label class="row"><span class="grow">Bez szwów <span class="lbl">wygładza łączenia powtórzeń</span></span><input type="checkbox" class="tg" id="matGenSeam" role="switch" checked></label>
+        <div class="lbl note">Opis trafia do Gemini (Google); każdy obraz jest płatny według cennika Google. Model jest ten sam co w sekcji Render.</div>
+        <div class="row"><span class="lbl grow ell" id="matGenStatus"></span><button class="primary" id="matGenGo">Wygeneruj</button></div>
+      </div>
     </div>
+    <div class="lbl note" id="matHint"></div>
   </div>
-  <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
-  <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
-  <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>
+  <div id="matEdit" hidden>
+    <div class="row"><span class="lbl w70">Nazwa</span><input id="meName" class="fld grow" spellcheck="false" aria-label="Nazwa materiału"><span id="meNameRO" class="val ell"></span></div>
+    <div class="row" id="meColRow"><span class="lbl w70">Kolor</span><input type="color" id="paintCustom" aria-label="Kolor"><span class="lbl num grow" id="meHex"></span></div>
+    <div class="row" title="Krycie poniżej 100% (szkło) dotyczy zawsze całej bryły"><span class="lbl w70">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow" aria-label="Krycie"><span class="lbl num" id="paintAlphaLbl"></span></div>
+    <div class="row" id="meSizeRow"><span class="lbl w70">Rozmiar</span><input id="matImgW" class="fld grow num" title="Szerokość jednego powtórzenia obrazu" aria-label="Szerokość jednego powtórzenia"><span id="meSizeRO" class="val"></span></div>
+    <div class="row"><span class="lbl w70">W modelu</span><span class="val" id="meUse"></span><button class="tb soft" id="meSel" title="Zaznacza ściany z tym materiałem (w bieżącej geometrii)">Zaznacz</button></div>
+    <div id="meSwapRow" hidden><div class="lbl note" id="meSwapNote"></div><div class="row"><span class="grow"></span><button class="tb soft" id="meUndo">Przywróć</button><button class="primary" id="meSwap">Podmień w modelu</button></div></div>
+    <div class="row" id="meDelRow" hidden><span class="lbl note grow" id="meDelNote"></span><button class="tb soft" id="meDel">Usuń materiał</button></div>
+  </div>
   </div></section>
   <section class="psec" data-sec="tags"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Warstwy</span></button><span class="grow"></span><button class="tb soft" id="tagAdd">Dodaj</button></div><div id="tagList" class="pbody"></div></section>
-  <section class="psec" data-sec="scenes"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Sceny</span></button><span class="grow"></span><button class="tb soft" id="sceneAdd">Dodaj</button></div><div class="pbody"><div id="sceneList" class="scenes"></div><div class="lbl note" id="sceneNote">Scena zapamiętuje widok, styl i słońce. <kbd>PgUp</kbd> <kbd>PgDn</kbd> przełączają sceny.</div></div></section>
+  <section class="psec" data-sec="scenes"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Sceny</span></button><span class="grow"></span><button class="tb soft" id="sceneAdd">Dodaj</button></div><div class="pbody"><div id="sceneList" class="scenes"></div><div class="lbl note" id="sceneNote">Scena zapamiętuje widok, styl, słońce i osie. <kbd>PgUp</kbd> <kbd>PgDn</kbd> przełączają sceny, przeciągnięcie zmienia kolejność.</div></div></section>
   <section class="psec grow" data-sec="tree"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Struktura</span></button></div><div id="tree" class="pbody"></div></section>
   <section class="psec" data-sec="render"><div class="phead"><button class="pfold" aria-expanded="true"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span class="ttl">Render</span></button><span class="lbl grow right">Gemini · Nano Banana</span></div><div id="renderBody" class="pbody">
   <div id="aiKeyBox">
     <div class="lbl note">Potrzebny jest Twój klucz API Gemini (z Google AI Studio). Zostaje na tym komputerze.</div>
-    <div class="row"><input id="aiKey" class="fld grow" type="password" autocomplete="off" spellcheck="false" placeholder="Klucz API" aria-label="Klucz API Gemini"><button class="tb soft" id="aiKeySave">Zapisz</button></div>
+    <div class="row"><input id="aiKey" class="fld grow" type="password" autocomplete="off" spellcheck="false" placeholder="Klucz API" aria-label="Klucz API Gemini"><button class="tb soft" id="aiKeySave">Zapisz</button><button class="tb soft" id="aiKeyCancel" hidden>Anuluj</button></div>
   </div>
   <div id="aiMain">
     <div class="row"><span class="lbl w60">Model</span><select id="aiModel" class="fld grow" aria-label="Model"></select></div>
     <div class="row" id="aiCustomRow" hidden><span class="lbl w60">Nazwa</span><input id="aiCustom" class="fld grow" spellcheck="false" placeholder="identyfikator modelu" aria-label="Identyfikator modelu"></div>
     <div class="row"><span class="lbl w60">Rozmiar</span><div class="seg stretch grow" id="aiSize" role="group" aria-label="Rozmiar obrazu"><button data-s="1K">1K</button><button data-s="2K">2K</button><button data-s="4K">4K</button></div></div>
-    <textarea id="aiPrompt" class="fld" rows="6" spellcheck="false" aria-label="Opis renderu"></textarea>
-    <div class="row"><button class="tb soft" id="aiPromptReset">Przywróć opis</button><span class="grow"></span><button class="tb soft" id="aiKeyChange">Zmień klucz</button></div>
+    <button class="pfold sub" id="aiPromptFold" aria-expanded="false"><svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg><span>Opis dla Gemini</span><span class="lbl" id="aiPromptState"></span></button>
+    <div id="aiPromptBox" hidden>
+      <textarea id="aiPrompt" class="fld" rows="6" spellcheck="false" aria-label="Opis renderu"></textarea>
+      <div class="row"><span class="lbl note grow">Po angielsku — tak Gemini rozumie go najlepiej.</span><button class="tb soft" id="aiPromptReset">Przywróć</button></div>
+    </div>
     <div class="lbl note">Do Gemini trafia bieżący widok w wybranym stylu, bez osi i prowadnic. Każdy render jest płatny według cennika Google.</div>
     <div class="hr"></div>
     <div class="row"><span class="lbl grow ell" id="aiStatus"></span><button class="primary" id="aiGo">Renderuj</button></div>
+    <button id="aiLastBtn" class="ailast" hidden title="Otwórz ostatni render"><img id="aiLastImg" alt=""><span><span class="ell" id="aiLastInfo"></span><span class="lbl">Ostatni render — kliknij, żeby otworzyć</span></span></button>
   </div>
   </div></section>
 </aside>

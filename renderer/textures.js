@@ -1,7 +1,7 @@
 import { _t } from './i18n.js';
 // Materiały z teksturą dla wiaderka. Tekstury są rysowane w kodzie (bez plików graficznych), powtarzalne w obu
 // kierunkach i mają prawdziwą skalę: `size` to szerokość i wysokość jednego powtórzenia w metrach.
-// `avg` to kolor zastępczy (miniatury, eksport OBJ, style bez tekstur).
+// `avg` to kolor zastępczy (miniatury, eksport OBJ, style bez tekstur), `cat` — kategoria w panelu Materiały.
 
 // stały generator liczb losowych — tekstura wygląda zawsze tak samo
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -16,7 +16,7 @@ function grain(c, W, H, r, n, colors, size = 1.6) {
 
 export const TEXTURES = {
   cegla: {
-    name: _t('cegła'), avg: '#b06a4c', size: [0.52, 0.3], px: [256, 148],
+    name: _t('cegła'), cat: 'mur', avg: '#b06a4c', size: [0.52, 0.3], px: [256, 148],
     draw(c, W, H) {
       const r = rng(11), rows = 4, bh = H / rows, bw = W / 2, j = 5;
       c.fillStyle = '#d9d2c4'; c.fillRect(0, 0, W, H);
@@ -29,7 +29,7 @@ export const TEXTURES = {
     }
   },
   drewno: {
-    name: _t('deski'), avg: '#b8946a', size: [1.2, 0.6], px: [256, 128],
+    name: _t('deski'), cat: 'drewno', avg: '#b8946a', size: [1.2, 0.6], px: [256, 128],
     draw(c, W, H) {
       const r = rng(23), n = 5, ph = H / n;
       for (let k = 0; k < n; k++) {
@@ -43,7 +43,7 @@ export const TEXTURES = {
     }
   },
   beton: {
-    name: _t('beton'), avg: '#b9b6ae', size: [2.4, 2.4], px: [256, 256],
+    name: _t('beton'), cat: 'beton', avg: '#b9b6ae', size: [2.4, 2.4], px: [256, 256],
     draw(c, W, H) {
       const r = rng(37); c.fillStyle = '#bcb9b1'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 2600, ['rgba(255,255,255,.10)', 'rgba(70,68,62,.10)', 'rgba(120,116,108,.08)'], 2.4);
@@ -54,7 +54,7 @@ export const TEXTURES = {
     }
   },
   plytki: {
-    name: _t('płytki'), avg: '#d6d3cb', size: [0.6, 0.6], px: [128, 128],
+    name: _t('płytki'), cat: 'posadzki', avg: '#d6d3cb', size: [0.6, 0.6], px: [128, 128],
     draw(c, W, H) {
       const r = rng(41); c.fillStyle = '#dad7cf'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 300, ['rgba(255,255,255,.18)', 'rgba(90,88,80,.07)'], 2);
@@ -62,7 +62,7 @@ export const TEXTURES = {
     }
   },
   dachowka: {
-    name: _t('dachówka'), avg: '#9a4f3c', size: [0.6, 0.66], px: [128, 140],
+    name: _t('dachówka'), cat: 'dachy', avg: '#9a4f3c', size: [0.6, 0.66], px: [128, 140],
     draw(c, W, H) {
       const r = rng(53), rows = 2, cols = 3, rh = H / rows, cw = W / cols;
       c.fillStyle = '#6e3527'; c.fillRect(0, 0, W, H);
@@ -74,7 +74,7 @@ export const TEXTURES = {
     }
   },
   blacha: {
-    name: _t('blacha'), avg: '#8f959a', size: [0.5, 0.5], px: [128, 128],
+    name: _t('blacha'), cat: 'dachy', avg: '#8f959a', size: [0.5, 0.5], px: [128, 128],
     draw(c, W, H) {
       const g = c.createLinearGradient(0, 0, W, 0);
       g.addColorStop(0, '#7b8187'); g.addColorStop(0.06, '#a9afb4'); g.addColorStop(0.14, '#93999e'); g.addColorStop(0.92, '#8d9398'); g.addColorStop(1, '#7b8187');
@@ -82,17 +82,93 @@ export const TEXTURES = {
     }
   },
   trawa: {
-    name: _t('trawa'), avg: '#8fa573', size: [2, 2], px: [256, 256],
+    name: _t('trawa'), cat: 'teren', avg: '#8fa573', size: [2, 2], px: [256, 256],
     draw(c, W, H) {
       const r = rng(67); c.fillStyle = '#90a674'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 5200, ['rgba(60,90,40,.22)', 'rgba(190,205,140,.20)', 'rgba(110,140,80,.25)'], 2.2);
     }
   },
   zwir: {
-    name: _t('żwir'), avg: '#a6a299', size: [1.5, 1.5], px: [256, 256],
+    name: _t('żwir'), cat: 'teren', avg: '#a6a299', size: [1.5, 1.5], px: [256, 256],
     draw(c, W, H) {
       const r = rng(71); c.fillStyle = '#a8a49b'; c.fillRect(0, 0, W, H);
       grain(c, W, H, r, 4200, ['rgba(255,255,255,.22)', 'rgba(60,58,52,.22)', 'rgba(150,140,120,.3)'], 3);
+    }
+  },
+  kamien: {
+    name: _t('kamień łamany'), cat: 'mur', avg: '#a8a093', size: [1.2, 0.6], px: [256, 128],
+    draw(c, W, H) {
+      const r = rng(83), rows = 3, rh = H / rows, j = 4;
+      c.fillStyle = '#d4cec2'; c.fillRect(0, 0, W, H);
+      for (let k = 0; k < rows; k++) {
+        // kamienie w rzędzie: szerokości losowe, razem dokładnie W, przesunięcie rzędu — z zawinięciem przez krawędź
+        const ws = []; let sum = 0; while (sum < W - 30) { const w = 34 + r() * 46; ws.push(w); sum += w; }
+        const kk = W / sum, off = r() * W; let x = off;
+        for (const w0 of ws) {
+          const w = w0 * kk, t = r(), g = 150 + t * 40 | 0;
+          c.fillStyle = `rgb(${g},${g - 8 - r() * 10 | 0},${g - 20 - r() * 14 | 0})`;
+          const dy = r() * 2, dh = r() * 3;
+          for (const dx of [0, -W]) { c.beginPath(); c.roundRect(x + dx + j / 2, k * rh + j / 2 + dy, w - j, rh - j - dh, 5); c.fill(); }
+          x += w;
+        }
+      }
+      grain(c, W, H, r, 900, ['rgba(255,255,255,.12)', 'rgba(50,45,40,.12)'], 2);
+    }
+  },
+  tynk: {
+    name: _t('tynk'), cat: 'beton', avg: '#e6e1d6', size: [1.5, 1.5], px: [256, 256],
+    draw(c, W, H) {
+      const r = rng(89); c.fillStyle = '#e7e2d7'; c.fillRect(0, 0, W, H);
+      grain(c, W, H, r, 6000, ['rgba(255,255,255,.35)', 'rgba(120,112,98,.10)', 'rgba(160,150,132,.10)'], 1.8);
+    }
+  },
+  parkiet: {
+    name: _t('parkiet'), cat: 'drewno', avg: '#b98a5c', size: [0.8, 0.4], px: [256, 128],
+    draw(c, W, H) {
+      const r = rng(97), rows = 4, ph = H / rows, pw = W / 4;
+      // każda deska losowana raz i rysowana też o W w lewo — deska na krawędzi kafla ma po obu stronach ten sam odcień
+      for (let k = 0; k < rows; k++) for (let i = 0; i < 4; i++) {
+        const x0 = i * pw + (k % 2 ? pw / 2 : 0), t = r(), ys = [0, 1, 2].map(() => [k * ph + 3 + r() * (ph - 6), (r() - 0.5) * 2]);
+        for (const x of [x0, x0 - W]) {
+          c.fillStyle = `rgb(${176 + t * 30 | 0},${128 + t * 24 | 0},${82 + t * 20 | 0})`; c.fillRect(x, k * ph, pw, ph);
+          c.strokeStyle = 'rgba(90,56,26,.14)'; c.lineWidth = 1;
+          for (const [y, dy] of ys) { c.beginPath(); c.moveTo(x, y); c.lineTo(x + pw, y + dy); c.stroke(); }
+          c.fillStyle = 'rgba(70,44,22,.5)'; c.fillRect(x, k * ph, 1.2, ph);
+        }
+      }
+      c.fillStyle = 'rgba(70,44,22,.5)'; for (let k = 0; k < rows; k++) c.fillRect(0, k * ph, W, 1.2);
+    }
+  },
+  kostka: {
+    name: _t('kostka brukowa'), cat: 'posadzki', avg: '#a19d96', size: [0.4, 0.4], px: [128, 128],
+    draw(c, W, H) {
+      const r = rng(101), rows = 4, rh = H / rows, bw = W / 2, j = 3;
+      c.fillStyle = '#6f6c66'; c.fillRect(0, 0, W, H);
+      for (let k = 0; k < rows; k++) for (let i = 0; i < 2; i++) {
+        const x0 = i * bw + (k % 2 ? bw / 2 : 0), t = r(), g = 150 + t * 26 | 0;
+        c.fillStyle = `rgb(${g},${g - 4},${g - 10})`;
+        for (const x of [x0, x0 - W]) { c.beginPath(); c.roundRect(x + j / 2, k * rh + j / 2, bw - j, rh - j, 3); c.fill(); }
+      }
+      grain(c, W, H, r, 500, ['rgba(255,255,255,.14)', 'rgba(40,38,34,.14)'], 1.6);
+    }
+  },
+  asfalt: {
+    name: _t('asfalt'), cat: 'teren', avg: '#5d5d5b', size: [2, 2], px: [256, 256],
+    draw(c, W, H) {
+      const r = rng(103); c.fillStyle = '#5c5c5a'; c.fillRect(0, 0, W, H);
+      grain(c, W, H, r, 6500, ['rgba(255,255,255,.10)', 'rgba(20,20,20,.22)', 'rgba(140,136,128,.14)'], 2);
+    }
+  },
+  woda: {
+    name: _t('woda'), cat: 'teren', avg: '#7d9fb0', size: [3, 3], px: [256, 256],
+    draw(c, W, H) {
+      const r = rng(107); c.fillStyle = '#7c9eaf'; c.fillRect(0, 0, W, H);
+      // fale: sinusoidy o okresie W, więc powtórzenia się zgadzają
+      for (let i = 0; i < 26; i++) {
+        const y0 = r() * H, a = 1.5 + r() * 2.5, ph = r() * 7, k = 2 * Math.PI / W * (1 + (r() * 3 | 0));
+        c.strokeStyle = r() < 0.5 ? 'rgba(255,255,255,.22)' : 'rgba(40,70,90,.16)'; c.lineWidth = 1.4;
+        for (const dy of [0, H, -H]) { c.beginPath(); for (let x = 0; x <= W; x += 4) { const y = y0 + dy + Math.sin(x * k + ph) * a; x ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); }
+      }
     }
   }
 };

@@ -853,7 +853,7 @@ export class CircleTool extends Tool {
   value(str) {
     // „32s” ustawia liczbę boków okręgu (jak w SketchUpie); zostaje do zmiany
     const sides = String(str).trim().match(/^(\d+)\s*s$/i);
-    if (sides && this.constructor === CircleTool) { this.app.circleSeg = Math.max(6, Math.min(200, +sides[1])); this.app.toast?.(_t('Okrąg: ') + this.app.circleSeg + _t(' boków')); this.app.refresh(); return true; }
+    if (sides && this.constructor === CircleTool) { this.app.setCircleSeg(+sides[1]); this.app.toast?.(_t('Okrąg: ') + this.app.circleSeg + _t(' boków')); this.app.refresh(); return true; }
     const r = parseLength(str); if (r == null || r <= 0) return false;
     if (this.c) { this.create(r); return true; }
     if (this.lastValid() && this.app.revertLast()) { const l = this.last; this.c = l.c; this.plane = l.plane; this.create(r, l.a0); return true; }
@@ -971,7 +971,7 @@ export class CenterArcTool extends Tool {
   }
   points() {
     const a = toPlane(this.plane, this.p1), r = Math.hypot(a[0], a[1]), a0 = Math.atan2(a[1], a[0]);
-    const n = Math.max(2, Math.round(Math.abs(this.ang) / (2 * Math.PI) * CIRCLE_SEGMENTS));
+    const n = Math.max(2, Math.round(Math.abs(this.ang) / (2 * Math.PI) * (this.app.circleSeg || CIRCLE_SEGMENTS)));
     const pts = []; for (let i = 0; i <= n; i++) { const t = a0 + this.ang * i / n; pts.push([r * Math.cos(t), r * Math.sin(t)]); }
     return pts;
   }
@@ -1225,7 +1225,7 @@ export class ArcTool extends Tool {
     const mid = V.lerp(this.p1, this.p2, 0.5), ctr = V.add(mid, V.mul(m, sg * (Math.abs(h) - r)));
     const a1 = V.sub(this.p1, ctr), sweep = 2 * Math.asin(Math.min(1, L / (2 * r))) * (Math.abs(h) > r ? -1 : 1);
     const total = Math.abs(h) > r ? 2 * Math.PI - Math.abs(sweep) : Math.abs(sweep);
-    const n = Math.max(4, Math.round(total / (2 * Math.PI) * CIRCLE_SEGMENTS));
+    const n = Math.max(4, Math.round(total / (2 * Math.PI) * (this.app.circleSeg || CIRCLE_SEGMENTS)));
     const axis = V.mul(this.plane.n, -sg);
     const pts = []; for (let i = 0; i <= n; i++) pts.push(V.add(ctr, rotVec3(a1, axis, total * i / n)));
     pts[n] = this.p2.slice();
@@ -1274,7 +1274,7 @@ export class Arc3Tool extends Tool {
     const ctr = V.add(this.p1, V.mul(V.add(V.mul(V.cross(ab, a), V.dot(b, b)), V.mul(V.cross(b, ab), V.dot(a, a))), 1 / d));
     const n = V.norm(ab), u = V.norm(V.sub(this.p1, ctr)), w = V.cross(n, u), r = V.dist(this.p1, ctr);
     let a3 = Math.atan2(V.dot(V.sub(p3, ctr), w), V.dot(V.sub(p3, ctr), u)); if (a3 <= 0) a3 += 2 * Math.PI;
-    const k = Math.max(4, Math.round(a3 / (2 * Math.PI) * CIRCLE_SEGMENTS)), pts = [];
+    const k = Math.max(4, Math.round(a3 / (2 * Math.PI) * (this.app.circleSeg || CIRCLE_SEGMENTS))), pts = [];
     for (let i = 0; i <= k; i++) { const t = a3 * i / k; pts.push(V.add(ctr, V.add(V.mul(u, r * Math.cos(t)), V.mul(w, r * Math.sin(t))))); }
     pts[0] = this.p1.slice(); pts[k] = p3.slice();
     return pts;

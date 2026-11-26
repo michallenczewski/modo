@@ -13,7 +13,7 @@
 import { V, faces as facesOf, edges as edgesOf, isHidden } from './model.js';
 import { isMesh, toMesh, newell, planeOf, inPoly, triangulatePoly, triangulateHoles, regionOf, regions, regionLoops, simplify, keepPaint, splitMesh, segKey } from './mesh.js';
 import { arrange, inLoop, inner, tidy } from './stitch.js';
-import { addLoop, push } from './topo.js';
+import { addLoop, push, facesOf as topoFaces, writeFaces } from './topo.js';
 
 const basisOf = n => { let u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n)); u = V.norm(V.sub(u, V.mul(n, V.dot(u, n)))); return { u, v: V.cross(n, u) }; };
 function frame(n, w) {
@@ -251,4 +251,145 @@ export function orientFaces(s, seeds) {
     }
   }
   return [...flip].filter(([, f]) => f).map(([i]) => i);
+}
+
+/* ---------- okręgi i łuki: liczba odcinków ---------- */
+// Okrąg i łuk po narysowaniu to zwykłe odcinki geometrii (jak w SketchUpie, ale bez osobnego obiektu „krzywej”).
+// Krzywą rozpoznajemy po krawędziach (curveOf w tools.js): punkty po kolei, środek i promień z trzech punktów; wszystkie
+// punkty muszą leżeć na okręgu. Zmiana liczby odcinków wymienia punkty krzywej w obrysach ścian leżących w jej płaszczyźnie,
+// a gdy krzywa jest wyciągnięta prosto (walec, zaokrąglona ściana) — także w drugiej podstawie i w bokach.
+const KC = p => Math.round(p[0] * 1e5) + ',' + Math.round(p[1] * 1e5) + ',' + Math.round(p[2] * 1e5);
+export function curveInfo(edges) {
+  if (!edges || edges.length < 3) return null;
+  const nb = new Map(), pt = new Map();
+  for (const e of edges) for (const [p, q] of [[e.a, e.b], [e.b, e.a]]) { const k = KC(p); pt.set(k, p); if (!nb.has(k)) nb.set(k, []); nb.get(k).push(KC(q)); }
+  if ([...nb.values()].some(l => l.length > 2)) return null;
+  const ends = [...nb.keys()].filter(k => nb.get(k).length === 1), closed = !ends.length;
+  if (!closed && ends.length !== 2) return null;
+  const order = [closed ? nb.keys().next().value : ends[0]], seen = new Set(order);
+  for (;;) { const nx = nb.get(order[order.length - 1]).find(k => !seen.has(k)); if (!nx) break; order.push(nx); seen.add(nx); }
+  if (order.length !== nb.size) return null;
+  const pts = order.map(k => pt.get(k)), m = pts.length;
+  const p0 = pts[0], p1 = pts[Math.floor(m / 3)], p2 = pts[Math.floor(2 * m / 3)];
+  const a = V.sub(p1, p0), b = V.sub(p2, p0), ab = V.cross(a, b), L = V.dot(ab, ab); if (L < 1e-14) return null;
+  const c = V.add(p0, V.mul(V.cross(V.sub(V.mul(b, V.dot(a, a)), V.mul(a, V.dot(b, b))), ab), 1 / (2 * L)));
+  const r = V.dist(c, p0), n = V.norm(ab);
+  if (pts.some(p => Math.abs(V.dist(p, c) - r) > 1e-4 * Math.max(1, r) || Math.abs(V.dot(V.sub(p, c), n)) > 1e-5)) return null;
+  const u = V.mul(V.sub(p0, c), 1 / r), v = V.cross(n, u), ang = p => Math.atan2(V.dot(V.sub(p, c), v), V.dot(V.sub(p, c), u));
+  let sweep = 0; for (let i = 1; i < m + (closed ? 1 : 0); i++) { let d = ang(pts[i % m]) - ang(pts[i - 1]); while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; sweep += d; }
+  return { pts, closed, c, r, n, u, v, sweep, segs: closed ? m : m - 1 };
+}
+// nowe punkty krzywej (ten sam początek, ten sam kierunek obiegu, łuk — te same końce)
+function curvePoints(C, segs) {
+  const out = [], k = C.closed ? segs : segs + 1;
+  for (let i = 0; i < k; i++) { const t = C.sweep * i / segs; out.push(V.add(C.c, V.add(V.mul(C.u, C.r * Math.cos(t)), V.mul(C.v, C.r * Math.sin(t))))); }
+  if (!C.closed) { out[0] = C.pts[0].slice(); out[segs] = C.pts[C.pts.length - 1].slice(); }
+  return out;
+}
+// w pętli L ciąg punktów O (cały, po kolei, w jedną albo w drugą stronę) zamieniony na N; null — gdy L zawiera punkty O inaczej
+function swapRun(L, O, N, closed) {
+  const n = L.length, m = O.length, at = L.findIndex(p => KC(p) === KC(O[0]));
+  if (at < 0) return null;
+  for (const dir of [1, -1]) {
+    let ok = true; for (let k = 0; k < m && ok; k++) ok = KC(L[((at + dir * k) % n + n) % n]) === KC(O[k]);
+    if (!ok) continue;
+    if (closed && n !== m) return null;
+    const rest = []; for (let k = m; k < n; k++) rest.push(L[((at + dir * k) % n + n) % n]);
+    const out = [...N.map(p => p.slice()), ...rest];
+    return dir > 0 ? out : out.reverse();
+  }
+  return null;
+}
+// Zmiana liczby odcinków krzywej w bryle s. Zwraca true, albo napis z przyczyną, dlaczego się nie da (nic nie zmienia).
+export function respaceCurve(s, edges, segs) {
+  const C = curveInfo(edges); if (!C) return 'curve';
+  segs = Math.round(segs); if (!(segs >= 3) || segs > 1000) return 'segs';
+  if (segs === C.segs) return 'same';
+  const faces = topoFaces(s), O = C.pts, N = curvePoints(C, segs);
+  const inner = new Set((C.closed ? O : O.slice(1, -1)).map(KC));
+  const touches = (L, set) => L.some(p => set.has(KC(p)));
+  const flat = f => Math.abs(Math.abs(V.dot(f.n, C.n)) - 1) < 1e-6;
+  const inPl = (f, o) => flat(f) && Math.abs(V.dot(V.sub(f.outer[0], o), C.n)) < 1e-5;
+  // ściany boczne wyciągnięcia: czworokąty O[k], O[k+1], O[k+1]+d, O[k]+d — to samo d dla wszystkich
+  let d = null; const sides = [];
+  for (const f of faces) {
+    const loops = [f.outer, ...f.holes]; if (!loops.some(L => touches(L, inner))) continue;
+    if (inPl(f, C.c)) continue;
+    if (f.holes.length || f.outer.length !== 4) return 'shape';
+    const on = f.outer.map(p => O.findIndex(q => KC(q) === KC(p))), k = on.findIndex((x, i) => x >= 0 && on[(i + 1) % 4] >= 0);
+    if (k < 0) return 'shape';
+    const A = f.outer[k], B = f.outer[(k + 1) % 4], Bd = f.outer[(k + 2) % 4], Ad = f.outer[(k + 3) % 4], dd = V.sub(Ad, A);
+    if (V.dist(V.sub(Bd, B), dd) > 1e-5 || Math.abs(V.dot(dd, C.n)) < 1e-6) return 'shape';
+    if (d && V.dist(d, dd) > 1e-5) return 'shape';
+    d = d || dd; sides.push({ f, fwd: on[(k + 1) % 4] === (on[k] + 1) % O.length });
+  }
+  if (sides.length && sides.length !== C.segs) return 'shape';
+  const Od = d ? O.map(p => V.add(p, d)) : null, Nd = d ? N.map(p => V.add(p, d)) : null, innerD = d ? new Set((C.closed ? Od : Od.slice(1, -1)).map(KC)) : null;
+  const out = [];
+  for (const f of faces) {
+    if (sides.some(q => q.f === f)) continue;
+    let loops = [f.outer, ...f.holes];
+    for (const [set, OO, NN, o] of [[inner, O, N, C.c], ...(d ? [[innerD, Od, Nd, V.add(C.c, d)]] : [])]) {
+      if (!loops.some(L => touches(L, set))) continue;
+      if (!inPl(f, o)) return 'shape';
+      loops = loops.map(L => touches(L, set) ? swapRun(L, OO, NN, C.closed) : L);
+      if (loops.some(L => !L)) return 'shape';
+    }
+    out.push({ ...f, outer: loops[0], holes: loops.slice(1) });
+  }
+  if (d) {
+    // bok dostaje materiał starego boku, który leży w tym samym miejscu (najbliższy środek)
+    const fwd = sides[0].fwd, mid = q => V.mul(q.reduce((t, p) => V.add(t, p), [0, 0, 0]), 1 / q.length);
+    const old = sides.map(q => ({ m: mid(q.f.outer), paint: q.f.paint }));
+    for (let i = 0; i < segs; i++) {
+      const A = N[i], B = N[(i + 1) % N.length];
+      const q = fwd ? [A, B, V.add(B, d), V.add(A, d)] : [B, A, V.add(A, d), V.add(B, d)], m = mid(q);
+      const paint = old.reduce((b, o) => V.dist(o.m, m) < V.dist(b.m, m) ? o : b).paint;
+      out.push({ outer: q.map(p => p.slice()), holes: [], n: newell(q), paint });
+    }
+  }
+  // krawędzie wygładzone i ukryte przy starych punktach krzywej wypadają; boki nowej krzywej są gładkie jak po wypchnięciu
+  // (skręt między bokami mniejszy niż ok. 25°)
+  const gone = new Set([...inner, ...(innerD || [])]), hit = ([a, b]) => gone.has(KC(a)) || gone.has(KC(b));
+  for (const k of ['softs', 'hid']) if (s[k]) { s[k] = s[k].filter(e => !hit(e)); if (!s[k].length) delete s[k]; }
+  if (d && Math.cos(Math.abs(C.sweep) / segs) > 0.9) {
+    const soft = []; for (let i = C.closed ? 0 : 1; i < (C.closed ? segs : segs); i++) soft.push([N[i].slice(), V.add(N[i], d)]);
+    if (soft.length) s.softs = [...(s.softs || []), ...soft];
+  }
+  writeFaces(s, out);
+  return true;
+}
+// Krawędzie krzywej od krawędzi (a, b): w każdym wierzchołku dalej idzie jedyna krawędź tej samej długości, która skręca
+// łagodnie (do 60° — sześciokąt), o ten sam kąt, w płaszczyźnie krzywej i w tę samą stronę co poprzednie. Inne krawędzie w wierzchołku (boki walca, przekątne)
+// nie przerywają krzywej, ale dwie pasujące — tak (rozwidlenie).
+export function curveEdges(s, a, b) {
+  const all = edgesOf(s).filter(e => !e.hid), at = new Map(), ek = (p, q) => { const x = KC(p), y = KC(q); return x < y ? x + '|' + y : y + '|' + x; };
+  for (const e of all) for (const p of [e.a, e.b]) { const k = KC(p); if (!at.has(k)) at.set(k, []); at.get(k).push(e); }
+  const start = all.find(e => ek(e.a, e.b) === ek(a, b)); if (!start) return [];
+  const out = [start], seen = new Set([ek(start.a, start.b)]), cos = Math.cos(61 * Math.PI / 180);
+  let n = null, turn0 = 0; const len0 = V.dist(start.a, start.b);
+  const step = (p, q) => {
+    const d1 = V.norm(V.sub(q, p)), cand = [];
+    for (const e of at.get(KC(q)) || []) {
+      if (seen.has(ek(e.a, e.b))) continue;
+      const r = KC(e.a) === KC(q) ? e.b : e.a, d2 = V.norm(V.sub(r, q)), c = V.dot(d1, d2);
+      if (c < cos || c > 1 - 1e-9) continue;
+      const t = V.norm(V.cross(d1, d2)), turn = Math.acos(Math.min(1, c));
+      if (n && (Math.abs(V.dot(d2, n)) > 1e-5 || V.dot(t, n) < 0.999)) continue;
+      // odcinki krzywej są równe i skręcają o ten sam kąt — prosta styczna do łuku już do niego nie należy
+      if (Math.abs(V.dist(q, r) - len0) > 0.05 * len0 + 1e-6 || (turn0 && Math.abs(turn - turn0) > 0.15 * turn0 + 1e-4)) continue;
+      cand.push({ e, r, t, turn });
+    }
+    return cand.length === 1 ? cand[0] : null;
+  };
+  for (const dir of [0, 1]) {
+    let p = dir ? start.b : start.a, q = dir ? start.a : start.b;
+    if (dir && n) n = V.mul(n, -1);
+    for (let g = 0; g < 10000; g++) {
+      const nx = step(p, q); if (!nx) break;
+      if (!n) { n = nx.t; turn0 = nx.turn; }
+      seen.add(ek(nx.e.a, nx.e.b)); out.push(nx.e); p = q; q = nx.r;
+    }
+  }
+  return out;
 }

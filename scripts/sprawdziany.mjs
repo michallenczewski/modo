@@ -12,7 +12,7 @@ globalThis.localStorage ??= { getItem: () => null, setItem: () => {} };
 const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
-const { absorb, reverseFaces, orientFaces, facesOfPolys } = await import(R + 'geo.js');
+const { absorb, reverseFaces, orientFaces, facesOfPolys, curveEdges, curveInfo, respaceCurve } = await import(R + 'geo.js');
 const { deleteEdge, deleteFace, curveOf } = await import(R + 'tools.js');
 const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
@@ -297,6 +297,24 @@ przypadek('strony ścian — odwróć i ujednolić', 'Pudło 4×3×2: dach odwr�
   reverseFaces(g(), facesOfPolys(g(), [s.faceAt([2, 0, 1])])[0].idx);
   const n2 = reverseFaces(g(), orientFaces(g(), [s.faceAt([2, 0, 1], Y)]));
   return { 'nowa tablica ścian (widok ją przebuduje)': [nowa, true], 'dach w dół po odwróceniu': [wDol, true], 'ściany po odwróceniu': [ileDach, f0], 'ujednolicenie odwraca dach': [n1 > 0 && wGore, true], 'objętość po ujednoliceniu': [Math.round(v1 * 1e6) / 1e6, Math.round(v0 * 1e6) / 1e6], 'całość odwrócona od frontu': [Math.round(meshVolume(g()) * 1e6) / 1e6, -Math.round(v0 * 1e6) / 1e6], 'odwróconych przy całości': [n2 > 0, true] };
+});
+// liczba odcinków okręgu i łuku (panel Element, jak „Segmenty” w Informacjach o elemencie SketchUpa)
+przypadek('odcinki okręgu i łuku', 'Walec r=1 z 24 odcinków zmieniony na 8: obie podstawy po 8 odcinków, 10 ścian. Okrąg w prostokącie 12 → 36: dalej 2 ściany. Zaokrąglony narożnik (łuk 90°, 6 odcinków) wyciągnięty o 1,5 → 3 odcinki: 9 ścian, prosta styczna nie należy do łuku.', () => {
+  const krzywa = (g, p) => { let best, bd = 1e9; for (const e of meshEdges(g)) { const d = V.dist(V.lerp(e.a, e.b, 0.5), p); if (d < bd) { bd = d; best = e; } } return curveEdges(g, best.a, best.b); };
+  const w = new Szkic().circle([0, 0, 0], [1, 0, 0], [0, 1, 0], 1, 24); wyciagnij(w, [0, 0, 0], 2);
+  const okW = w.edit(() => respaceCurve(w.geo, krzywa(w.geo, [0.99, 0.13, 0]), 8));
+  const gora = curveInfo(krzywa(w.geo, [0.92, 0.38, 2]))?.segs, dol = curveInfo(krzywa(w.geo, [0.92, 0.38, 0]))?.segs, scW = w.faces;
+  const o = new Szkic().rectXY(0, 0, 0, 4, 3).circle([2, 1.5, 0], [1, 0, 0], [0, 1, 0], 1, 12);
+  o.edit(() => respaceCurve(o.geo, krzywa(o.geo, [2.97, 1.63, 0]), 36));
+  const P = [[0, 0], [3, 0]]; for (let i = 0; i <= 6; i++) { const t = i / 6 * Math.PI / 2; P.push([2 + Math.cos(t), 1 + Math.sin(t)]); } P.push([0, 2]);
+  const z = new Szkic().edit(m => makeShape(m, { o: [0, 0, 0], u: [1, 0, 0], v: [0, 1, 0] }, P, 0)); wyciagnij(z, [1, 1, 0], 1.5);
+  const luk = curveInfo(krzywa(z.geo, [2.71, 1.71, 0]));
+  z.edit(() => respaceCurve(z.geo, krzywa(z.geo, [2.71, 1.71, 0]), 3));
+  const w2 = new Szkic().circle([0, 0, 0], [1, 0, 0], [0, 1, 0], 1, 24); wyciagnij(w2, [0, 0, 0], 2);
+  { const g = w2.geo, i = g.polys.findIndex(P => P.length === 4 && P.some(p => Math.abs(p[0] - 1) < 1e-6 && Math.abs(p[1]) < 1e-6)); g.fc = { ...(g.fc || {}), ['p:' + i]: { c: '#ff0000' } }; }
+  w2.edit(() => respaceCurve(w2.geo, krzywa(w2.geo, [0.99, 0.13, 0]), 36));
+  const g2 = w2.geo, miekkie = (g2.softs || []).length, czerwone = g2.polys.filter((_, i) => g2.fc && g2.fc['p:' + i] && g2.fc['p:' + i].c === '#ff0000').length;
+  return { 'walec 36: gładkie krawędzie boku': [miekkie, 36], 'walec 36: czerwony tylko w miejscu starego boku': [czerwone > 0 && czerwone <= 3, true], 'walec: podstawa górna': [gora, 8], 'walec: dolna': [dol, 8], 'walec: ściany': [scW, 10], 'walec: objętość < π·2': [w.volume < Math.PI * 2 && w.volume > 5.6, true], 'okrąg w prostokącie: ściany': [o.faces, 2], 'okrąg: odcinki': [curveInfo(krzywa(o.geo, [2.997, 1.54, 0]))?.segs, 36], 'łuk rozpoznany (6, 90°)': [luk && luk.segs === 6 && Math.round(luk.sweep * 180 / Math.PI) === 90, true], 'łuk po zmianie: ściany': [z.faces, 9], otwarte: [z.open, 0] };
 });
 przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });

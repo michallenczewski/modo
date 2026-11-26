@@ -5,7 +5,7 @@ import { Snapper, setAxes } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
 import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat, seamlessBlob } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
-import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces } from './geo.js';
+import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces, curveEdges, curveInfo, respaceCurve } from './geo.js';
 import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, drawSeg, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -14,7 +14,7 @@ import { exportObj, exportDxf, exportDae, exportStl } from './export.js';
 import { initSolid, solidReady } from './solid.js';
 import { booleanMesh, toMesh as meshOf } from './mesh.js';
 import { faces as facesOfShape, isSolid, removeIds, isHidden, bounds, viewHide } from './model.js';
-import { meshVolume, meshArea, regionOf } from './mesh.js';
+import { meshVolume, meshArea, regionOf, regions } from './mesh.js';
 import { LIBRARY, loadUserLib, saveUserLib } from './lib.js';
 import { translateShape, groupsWhollyIn, edges as edgesOf } from './model.js';
 import { fmtNum, fmtLength } from './units.js';
@@ -136,7 +136,7 @@ function autoClear() { auto.saved = auto.seq; if (auto.written) { auto.written =
 app.markDirty = (v = true) => { app.file.dirty = v; api.setDirty(v); $('#saved').textContent = v ? _t('zmieniono') : (app.file.path || api.web ? _t('zapisano') : ''); if (v) auto.seq++; else autoClear(); };
 // po każdej zakończonej operacji blokada osi strzałką się zwalnia (jak w SketchUpie) — następna zaczyna bez niej
 const unlockAxis = () => { if (!app.lockByShift) { app.lockAxis = null; app.lockDir = null; } };
-app.changed = () => { app.clearSub(); unlockAxis(); postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); };
+app.changed = () => { app.clearSub(); unlockAxis(); postEdit(); viewer.setModel(app.model); app.markDirty(); app.refresh(); app.renderViewChip?.(); app.matsChanged?.(); };
 // po każdej zmianie: nowe elementy w edytowanej grupie należą do niej, a inne wystąpienia komponentu dostają tę samą zmianę
 function postEdit(prev = app.undo[app.undo.length - 1]) {
   const m = app.model;
@@ -200,7 +200,6 @@ app.liftSub = () => {
   return t;
 };
 const LIFT = new Set(['group', 'comp', 'hideSel', 'hideRest', 'hideSimilar', 'lock', 'copy', 'cutClip', 'flipX', 'flipY', 'flipZ', 'solidUnion', 'solidIntersect', 'solidSubtract', 'solidTrim', 'cut', 'intersect']);
-app.setPaint = (c, a, t) => { app.paint = c; if (a !== undefined) app.paintAlpha = a; app.paintTex = t || null; renderSwatches(); };
 
 /* ---------- grupy i komponenty ---------- */
 app.editing = null;
@@ -442,14 +441,14 @@ app.ack = ack;
 // Wciśnięcie: :active trwa tyle co kliknięcie (~0,1 s), więc przy szybkim kliknięciu ugięcia prawie nie widać.
 // Klasa .wcis od pointerdown do puszczenia, ale nie krócej niż 90 ms.
 document.addEventListener('pointerdown', e => {
-  const b = e.target.closest && e.target.closest('.ib, .tb, .primary, .menu button, .seg > button'); if (!b || e.button || b.disabled) return;
+  const b = e.target.closest && e.target.closest('.ib, .tb, .primary, .menu button, .seg > button, button.mt, .ailast, .scene .thumb'); if (!b || e.button || b.disabled) return;
   b.classList.add('wcis'); const t0 = performance.now();
   const up = () => { removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
     setTimeout(() => b.classList.remove('wcis'), Math.max(0, 90 - (performance.now() - t0))); };
   addEventListener('pointerup', up); addEventListener('pointercancel', up);
 });
 // Po kliknięciu przycisku z tekstem — „tak”: tło błyska kolorem najechania (na głównym ciemnym przycisku przezroczystość).
-document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.tb, .primary'); if (b && !b.disabled) zagraj(b, 'tak'); });
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.tb, .primary, .ailast'); if (b && !b.disabled) zagraj(b, 'tak'); });
 // Zakładki (.seg): wspólny wskaźnik przeskakuje pod wybraną opcję. Pilnuje go zmiana klasy .on i zmiana rozmiaru.
 for (const seg of document.querySelectorAll('.seg')) {
   const ind = document.createElement('div'); ind.className = 'ind cicho'; seg.prepend(ind); seg.classList.add('zind');
@@ -866,7 +865,7 @@ function undo() {
   app.clearSub();
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
-  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip(); app.matsChanged?.();
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 function redo() {
@@ -874,7 +873,7 @@ function redo() {
   app.clearSub();
   app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
-  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip();
+  app.selection.clear(); app.sub = []; regeo(); viewer.setModel(app.model); app.markDirty(); app.refresh(); renderViewChip(); app.matsChanged?.();
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 
@@ -1130,6 +1129,7 @@ function setFold(name, closed) {
   sec.classList.toggle('closed', closed); sec.querySelector('.pfold').setAttribute('aria-expanded', String(!closed));
   try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch (e) {}
   if (!closed && name === 'render') renderAi();
+  if (!closed && name === 'mat') { useMemo.clear(); renderSwatches(); }
 }
 for (const sec of document.querySelectorAll('#panel .psec')) {
   const name = sec.dataset.sec;
@@ -1172,6 +1172,51 @@ function renderPanel() {
   if (!app.panel) return;
   renderInfo(); renderTags(); renderTree(); renderScenes();
 }
+// liczba odcinków nowych okręgów i łuków (na pełny obrót) — zapamiętana na tym komputerze
+app.circleSeg = (() => { try { const n = +localStorage.getItem('modo.circleSeg'); return n >= 6 && n <= 200 ? n : 24; } catch (e) { return 24; } })();
+app.setCircleSeg = n => { app.circleSeg = Math.max(6, Math.min(200, Math.round(n) || 24)); try { localStorage.setItem('modo.circleSeg', String(app.circleSeg)); } catch (e) {} };
+// okrąg albo łuk, do którego należą zaznaczone krawędzie (wszystkie z jednej krzywej): { s, edges, C }
+function selCurve(E) {
+  if (!E.length || E.some(q => q.id !== E[0].id)) return null;
+  const s = app.model.shapes.find(x => x.id === E[0].id); if (!s || !s.geo || !s.polys) return null;
+  // krzywa zapamiętana dla tej samej tablicy wielokątów i tej samej krawędzi (panel odświeża się często, a duża geometria to dużo krawędzi)
+  const ck = E[0].a.join() + '|' + E[0].b.join() + '|' + (s.hid ? s.hid.length : 0); let hit = curveCache.get(s.polys);
+  if (!hit || hit.k !== ck) {
+    const edges = curveEdges(s, E[0].a, E[0].b), C = curveInfo(edges), K = p => p.map(x => Math.round(x * 1e5)).join(',');
+    hit = { k: ck, edges, C, has: new Set(edges.map(e => [K(e.a), K(e.b)].sort().join('|'))), K }; curveCache.set(s.polys, hit);
+  }
+  if (!hit.C) return null;
+  return E.every(q => hit.has.has([hit.K(q.a), hit.K(q.b)].sort().join('|'))) ? { s, edges: hit.edges, C: hit.C } : null;
+}
+const curveCache = new WeakMap();
+const subEdges = (s, edges) => edges.map(e => ({ id: s.id, kind: 'edge', a: e.a.slice(), b: e.b.slice(), pts: [e.a.slice(), e.b.slice()] }));
+function setCurveSegs(n) {
+  const cur = selCurve(app.sub.filter(q => q.kind === 'edge')); if (!cur) return;
+  const { s, edges, C } = cur;
+  // najpierw próba na kopii — bez zmiany nie ma pustego kroku cofania
+  const r = respaceCurve(JSON.parse(JSON.stringify(s)), edges, n);
+  if (r === 'same') return;
+  if (r === 'segs') { toast(C.closed ? _t('Okrąg może mieć od 3 do 1000 odcinków.') : _t('Łuk może mieć od 3 do 1000 odcinków.')); return renderInfo(); }
+  if (r !== true) { toast(_t('Tej krzywej nie da się przebudować — ściany przy niej nie leżą w jej płaszczyźnie ani nie są wyciągnięte prosto.')); return renderInfo(); }
+  app.checkpoint(); respaceCurve(s, edges, n); app.changed();
+  // zaznaczenie: cała nowa krzywa (jej początek się nie zmienia)
+  const g = app.model.shapes.find(x => x.id === s.id && x.polys);
+  const e0 = g && edgesOf(g).find(e => { const o = V.dist(e.a, C.pts[0]) < 1e-6 ? e.b : V.dist(e.b, C.pts[0]) < 1e-6 ? e.a : null; return o && Math.abs(V.dist(o, C.c) - C.r) < 1e-4 * Math.max(1, C.r) && Math.abs(V.dot(V.sub(o, C.c), C.n)) < 1e-5; });
+  app.sub = e0 ? subEdges(g, curveEdges(g, e0.a, e0.b)) : [];
+  app.selectionChanged();
+}
+// nazwa i próbka materiału ściany
+const matOf = (s, key) => { const f = s.fc && s.fc[key]; return { c: (f ? f.c : s.color) || null, t: (f ? f.t : s.tex) || null, a: (f && f.a) ?? s.alpha ?? 1 }; };
+const matSig = m => m.c + '|' + m.t + '|' + m.a;
+function matLabel(m) {
+  const pal = PALETTE.find(p => (p.c || null) === m.c && Math.abs(p.a - m.a) < 0.01);
+  const name = m.t && TEXTURES[m.t] ? TEXTURES[m.t].name : pal ? pal.name : m.c ? m.c.toUpperCase() : _t('domyślny');
+  return name + (m.a < 0.999 && !pal ? ' · ' + Math.round(m.a * 100) + '%' : '');
+}
+function matSwatch(m) {
+  if (m.t && TEXTURES[m.t]) { if (!texThumb.has(m.t)) texThumb.set(m.t, TEXTURES[m.t].image || textureCanvas(m.t).toDataURL()); return `<span class="msw" style="background-image:url(${texThumb.get(m.t)})"></span>`; }
+  return `<span class="msw${m.a < 0.999 ? ' glass' : ''}" style="--c:${m.c || DEFAULT_COLOR};--a:${m.a}"></span>`;
+}
 function infoRow(label, value) { return `<div class="row"><span class="lbl w70">${label}</span><span class="val num">${value}</span></div>`; }
 function renderInfo() {
   const m = app.model, sel = [...app.selection], B = $('#infoBody');
@@ -1184,11 +1229,28 @@ function renderInfo() {
     const F = app.sub.filter(q => q.kind === 'face'), E = app.sub.filter(q => q.kind === 'edge');
     const polyArea = p => { let s = [0, 0, 0]; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s = [s[0] + a[1] * b[2] - a[2] * b[1], s[1] + a[2] * b[0] - a[0] * b[2], s[2] + a[0] * b[1] - a[1] * b[0]]; } return Math.hypot(...s) / 2; };
     const area = F.reduce((t, q) => t + q.polys.reduce((u, p) => u + polyArea(p), 0), 0), len = E.reduce((t, q) => t + Math.hypot(q.a[0] - q.b[0], q.a[1] - q.b[1], q.a[2] - q.b[2]), 0);
-    html = _t`<div class="muted">${F.length && E.length ? _t('Ściany i krawędzie bryły') : F.length > 1 ? _t('Ściany bryły: ') + F.length : F.length ? _t('Ściana bryły') : E.length > 1 ? _t('Krawędzie bryły: ') + E.length : _t('Krawędź bryły')}. Dwuklik zaznacza całą bryłę.</div>`
-      + (F.length ? infoRow(_t('Pole'), fmtA(area)) : '') + (E.length ? infoRow(_t('Długość'), fmtLength(len)) : '') + texPanel(F);
+    const cur = !F.length ? selCurve(E) : null;
+    if (cur) {
+      const { C } = cur, deg = Math.round(Math.abs(C.sweep) * 180 / Math.PI);
+      html = `<div class="muted">${C.closed ? _t('Okrąg') : _t('Łuk ') + deg + '°'}. ${_t('Dwuklik zaznacza całą bryłę.')}</div>`
+        + infoRow(_t('Promień'), fmtLength(C.r))
+        + _t`<div class="row"><span class="lbl w70">Odcinki</span><input class="fld grow num" id="infSegs" inputmode="numeric" value="${C.segs}" title="Liczba odcinków, z których składa się krzywa (jak w SketchUpie)"></div>`
+        + infoRow(_t('Długość'), fmtLength(cur.edges.reduce((t, e) => t + V.dist(e.a, e.b), 0)));
+    } else {
+      // materiał ścian: jeden wspólny albo „różne”
+      const mats = F.map(q => { const s = m.shapes.find(x => x.id === q.id); return s ? matOf(s, q.key) : null; }).filter(Boolean);
+      const same = mats.length && mats.every(x => matSig(x) === matSig(mats[0]));
+      const matRow = !mats.length ? '' : same
+        ? `<div class="row"><span class="lbl w70">${_t('Materiał')}</span>${matSwatch(mats[0])}<span class="val ell">${esc(matLabel(mats[0]))}</span><button class="tb soft" id="infPick" title="${_t('Weź ten materiał do wiaderka')}">${_t('Pobierz')}</button></div>`
+        : infoRow(_t('Materiał'), _t('różne'));
+      const sideRow = F.length ? `<div class="row"><span class="lbl w70">${_t('Strony')}</span><span class="grow"></span><button class="tb soft" id="infRev" title="${_t('Odwraca przód i tył zaznaczonych ścian')}">${_t('Odwróć')}</button><button class="tb soft" id="infOrient" title="${_t('Ustawia połączone ściany tak samo jak zaznaczona')}">${_t('Ujednolić')}</button></div>` : '';
+      html = _t`<div class="muted">${F.length && E.length ? _t('Ściany i krawędzie bryły') : F.length > 1 ? _t('Ściany bryły: ') + F.length : F.length ? _t('Ściana bryły') : E.length > 1 ? _t('Krawędzie bryły: ') + E.length : _t('Krawędź bryły')}. Dwuklik zaznacza całą bryłę.</div>`
+        + (F.length ? infoRow(_t('Pole'), fmtA(area)) : '') + (E.length ? infoRow(_t('Długość'), fmtLength(len)) : '') + matRow + sideRow + texPanel(F);
+    }
   } else if (!sel.length) {
     const solids = m.shapes.filter(s => isSolid(s) && s.op !== 'cut');
     html = _t`<div class="muted">Nic nie zaznaczono. Kliknij element, żeby zobaczyć jego wymiary, pole i objętość.</div>`
+      + _t`<div class="row"><span class="lbl grow">Odcinki nowych okręgów</span><input class="fld w62 num" id="infCircSeg" inputmode="numeric" value="${app.circleSeg}" title="Na pełny obrót; łuki dostają odpowiednią część. Podczas rysowania okręgu można też wpisać np. 36s."></div>`
       + infoRow(_t('Bryły'), solids.length) + infoRow(_t('Grupy'), m.groups.filter(g => g.kind !== 'comp').length) + infoRow(_t('Komponenty'), new Set(m.groups.filter(g => g.kind === 'comp').map(g => g.def)).size + _t(' rodz. · ') + m.groups.filter(g => g.kind === 'comp').length + _t(' wyst.'))
       + vol(solids);
   } else {
@@ -1229,6 +1291,12 @@ function renderInfo() {
   const dt = $('#infDimText');
   if (dt) { dt.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') dt.blur(); }); dt.addEventListener('change', () => { const d = selectionTops()[0]; app.checkpoint(); d.text = dt.value.trim() || undefined; app.changed(); }); }
   wireTexPanel();
+  const numFld = (el, fn) => { if (!el) return; el.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') el.blur(); }); el.addEventListener('change', () => { const n = parseInt(el.value, 10); if (Number.isFinite(n)) fn(n); else renderInfo(); }); };
+  numFld($('#infSegs'), setCurveSegs);
+  numFld($('#infCircSeg'), n => { app.setCircleSeg(n); renderInfo(); toast(_t('Nowe okręgi: ') + app.circleSeg + _t(' odcinków')); });
+  $('#infRev')?.addEventListener('click', () => run('reverseFaces'));
+  $('#infOrient')?.addEventListener('click', () => run('orientFaces'));
+  $('#infPick')?.addEventListener('click', () => { const q = app.sub.find(x => x.kind === 'face'), s = q && m.shapes.find(x => x.id === q.id); if (!s) return; const k = matOf(s, q.key); app.setPaint(k.c, k.a, k.t); toast(_t('W wiaderku: ') + matLabel(k)); });
   const tx = $('#infText');
   if (tx) { tx.addEventListener('keydown', e => e.stopPropagation()); tx.addEventListener('change', () => { const t = selectionTops()[0]; if (!tx.value.trim()) return; app.checkpoint(); t.text = tx.value.replace(/\s+$/, ''); app.changed(); }); }
 }
@@ -1475,17 +1543,56 @@ function renderViewPop() {
 // sceny są w panelu (sekcja Sceny)
 function renderScenes() {
   const L = $('#sceneList');
-  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}"><button class="no num thumb" title="${_t('Pokaż scenę')}"${okThumb(sc.thumb) ? ` style="background-image:url(${sc.thumb})"` : ''}><span>${i + 1}</span></button><input class="fld" value="${esc(sc.name)}" aria-label="${_t('Nazwa sceny')}"><button class="ib" data-u title="${_t('Zapisz bieżący widok w tej scenie')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></button><button class="ib" data-d title="${_t('Usuń scenę')}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>`).join('');
+  const upd = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg>`;
+  const del = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>`;
+  L.innerHTML = app.scenes.map((sc, i) => `<div class="scene${i === app.scene ? ' on' : ''}" data-i="${i}" draggable="true">`
+    + `<button class="thumb" title="${_t('Pokaż scenę')}"${okThumb(sc.thumb) ? ` style="background-image:url(${sc.thumb})"` : ''}${i === app.scene ? ' aria-current="true"' : ''}></button>`
+    + `<div class="sbody"><input class="fld" value="${esc(sc.name)}" aria-label="${_t('Nazwa sceny')}">`
+    + `<div class="sfoot"><span class="lbl">${i + 1}${i === app.scene ? ' · ' + _t('bieżąca') : ''}</span><span class="grow"></span>`
+    + `<button class="ib sm" data-u title="${_t('Zapisz bieżący widok w tej scenie')}" aria-label="${_t('Zaktualizuj scenę')}">${upd}</button>`
+    + `<button class="ib sm" data-d title="${_t('Usuń scenę')}" aria-label="${_t('Usuń scenę')}">${del}</button></div></div></div>`).join('');
   L.querySelectorAll('.scene').forEach(row => {
     const i = +row.dataset.i;
-    row.querySelector('.no').addEventListener('click', () => showScene(i));
+    row.querySelector('.thumb').addEventListener('click', () => showScene(i));
     const inp = row.querySelector('input');
     inp.addEventListener('change', () => { app.scenes[i].name = inp.value.trim() || _t('Scena ') + (i + 1); app.markDirty(); });
     inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); });
     row.querySelector('[data-u]').addEventListener('click', () => { app.scenes[i] = { ...captureScene(), name: app.scenes[i].name }; app.scene = i; app.markDirty(); renderViewPop(); sceneThumb(app.scenes[i]); toast(_t('Zaktualizowano scenę „') + app.scenes[i].name + '”'); });
-    row.querySelector('[data-d]').addEventListener('click', () => { app.scenes.splice(i, 1); if (app.scene >= app.scenes.length) app.scene = app.scenes.length - 1; app.markDirty(); renderViewPop(); });
+    row.querySelector('[data-d]').addEventListener('click', () => {
+      const list = app.scenes, sc = list[i], cur = list[app.scene]; list.splice(i, 1);
+      if (app.scene === i) app.scene = -1; else if (app.scene > i) app.scene--;
+      app.markDirty(); renderViewPop();
+      // „Przywróć” pamięta same sceny (nie numery) i działa tylko w tym samym szkicu
+      toast(_t('Usunięto scenę „') + sc.name + '”', [_t('Przywróć'), () => {
+        if (app.scenes !== list || list.includes(sc)) return;
+        const now = list[app.scene]; list.splice(Math.min(i, list.length), 0, sc);
+        app.scene = list.indexOf(cur === sc ? sc : now ?? cur); app.markDirty(); renderViewPop();
+      }]);
+    });
+    // kolejność: przeciąganie wiersza (miniatura albo wolne miejsce wiersza); w polu nazwy przeciąganie zaznacza tekst
+    inp.addEventListener('pointerdown', () => { row.draggable = false; addEventListener('pointerup', () => { row.draggable = true; }, { once: true }); });
+    row.addEventListener('dragstart', e => { sceneDrag = i; row.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('application/x-modo-scene', String(i)); } catch (x) {} });
+    row.addEventListener('dragend', () => { sceneDrag = null; L.querySelectorAll('.scene').forEach(r => r.classList.remove('drag', 'dropA', 'dropB')); });
   });
 }
+// miejsce upuszczenia liczone na całej liście (także w szczelinie między wierszami): przed / za najbliższym wierszem
+function sceneDropAt(y) {
+  const rows = [...$('#sceneList').querySelectorAll('.scene')]; if (!rows.length) return null;
+  for (let k = 0; k < rows.length; k++) { const r = rows[k].getBoundingClientRect(); if (y < r.top + r.height / 2) return { row: rows[k], to: k, after: false }; }
+  return { row: rows[rows.length - 1], to: rows.length, after: true };
+}
+$('#sceneList').addEventListener('dragover', e => {
+  if (sceneDrag == null) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const d = sceneDropAt(e.clientY); $('#sceneList').querySelectorAll('.scene').forEach(x => x.classList.remove('dropA', 'dropB')); if (d) d.row.classList.add(d.after ? 'dropB' : 'dropA');
+});
+$('#sceneList').addEventListener('drop', e => {
+  if (sceneDrag == null) return; e.preventDefault();
+  const d = sceneDropAt(e.clientY), from = sceneDrag; sceneDrag = null; if (!d) return renderViewPop();
+  let to = d.to; if (from < to) to--;
+  if (to !== from) { const cur = app.scenes[app.scene], [sc] = app.scenes.splice(from, 1); app.scenes.splice(to, 0, sc); app.scene = cur ? app.scenes.indexOf(cur) : -1; app.markDirty(); }
+  renderViewPop();
+});
+let sceneDrag = null;
 document.querySelectorAll('#projSeg button').forEach(b => b.addEventListener('click', () => {
   const want = b.dataset.proj;
   if (want === 'ortho') { if (!viewer.ortho) viewer.toggleOrtho(); }
@@ -1924,34 +2031,175 @@ function makeFaces() {
   toast(_t`Powstało ścian: ${r.faces.length}. Każdą możesz wypchnąć.` + (r.skipped ? _t` Pominięte linie poza płaszczyzną: ${r.skipped}.` : ''));
 }
 
-/* ---------- kolor bryły ---------- */
-const PALETTE = [[null, _t('biały')], ['#e4dfd3', _t('jasny beton')], ['#c9c3b5', _t('beton')], ['#8d8980', _t('grafit')], ['#c99a7c', _t('cegła')], ['#bfa17c', _t('drewno')], ['#a9b49a', _t('zieleń')], ['#a7b6c2', _t('szkło'), 0.3]];
+/* ---------- materiały ---------- */
+// Wbudowane kolory: [kolor, nazwa, krycie, kategoria]; wzory z teksturą mają kategorię w TEXTURES (pole cat).
+// Własne materiały („Twoje”): obrazy z dysku i z Gemini (app.images) oraz własne kolory (app.colors) — oba w pliku szkicu.
+const PALETTE = [
+  [null, _t('biały')], ['#f1ece0', _t('kremowy')], ['#e4dfd3', _t('jasny beton')], ['#c9c3b5', _t('szary ciepły')], ['#a9a59c', _t('szary')],
+  ['#8d8980', _t('grafit')], ['#5b5955', _t('antracyt')], ['#2f2e2c', _t('czarny')], ['#d8c6a4', _t('piaskowy')], ['#c99a7c', _t('terakota')],
+  ['#bfa17c', _t('jasne drewno')], ['#8a6a4c', _t('orzech')], ['#c9a44f', _t('ochra')], ['#a9b49a', _t('szałwia')], ['#6f8466', _t('mech')],
+  ['#a7b6c2', _t('błękit szary')], ['#4d5f73', _t('granat')], ['#a4453a', _t('czerwień')],
+  ['#a7b6c2', _t('szkło'), 0.3, 'szklo'], ['#d6e2e4', _t('szkło przezroczyste'), 0.18, 'szklo'], ['#7f8a8c', _t('szkło przydymione'), 0.45, 'szklo'],
+  ['#9fc0b0', _t('szkło zielonkawe'), 0.3, 'szklo'], ['#ffffff', _t('szkło mleczne'), 0.6, 'szklo']
+].map(([c, n, a = 1, cat = 'kolory']) => ({ c, name: n, a, cat }));
+const MAT_CATS = [['model', _t('W modelu')], ['kolory', _t('Kolory')], ['szklo', _t('Szkło')], ['mur', _t('Mur i kamień')], ['beton', _t('Beton i tynk')], ['drewno', _t('Drewno')], ['posadzki', _t('Posadzki')], ['dachy', _t('Dachy i metal')], ['teren', _t('Teren')], ['twoje', _t('Twoje')]];
+app.colors = [];
 const texThumb = new Map();
-function renderSwatches() {
-  const box = $('#swatches'); box.innerHTML = '';
-  for (const [c, n, a = 1] of PALETTE) {
-    const b = document.createElement('button'); b.className = 'sw' + (!app.paintTex && (app.paint || null) === c && Math.abs(app.paintAlpha - a) < 0.01 ? ' on' : '') + (a < 1 ? ' glass' : '');
-    b.style.setProperty('--c', c || DEFAULT_COLOR); b.style.setProperty('--a', a); b.textContent = n;
-    b.addEventListener('click', () => { app.setPaint(c, a); setTool('paint'); });
-    box.append(b);
+const thumbOf = id => { if (!texThumb.has(id)) texThumb.set(id, TEXTURES[id].image || textureCanvas(id).toDataURL()); return texThumb.get(id); };
+let matCat = 'kolory', matTab = 'pick', matQ = '';
+try { const c = localStorage.getItem('modo.matCat'); if (MAT_CATS.some(x => x[0] === c)) matCat = c; } catch (e) {}
+// materiał w wiaderku: { c, t, a } i to, od czego zaczęła się jego edycja (do „Podmień w modelu”)
+const paintMat = () => ({ c: app.paintTex ? null : app.paint || null, t: app.paintTex || null, a: app.paintAlpha ?? 1 });
+const sameMat = (x, y) => (x.t || null) === (y.t || null) && (x.t ? true : (x.c || null) === (y.c || null)) && Math.abs((x.a ?? 1) - (y.a ?? 1)) < 0.01;
+app.matFrom = null; app.paintUser = null;
+// wszystkie ściany modelu: fn(bryła, klucz ściany) — ściana geometrii to obszar (pierwszy wielokąt obszaru jest kluczem)
+function eachFace(fn) {
+  for (const s of app.model.shapes) {
+    if (s.op === 'cut') continue;
+    if (Array.isArray(s.polys)) { const r = regions(s), seen = new Set(); r.forEach((g, i) => { if (!seen.has(g)) { seen.add(g); fn(s, 'p:' + i); } }); }
+    else for (const f of facesOfShape(s)) fn(s, f.key);
   }
-  // materiały z teksturą: wzór w prawdziwej skali (cegła, deski, płytki…)
-  const tb = $('#texSwatches'); tb.innerHTML = '';
-  for (const [id, T] of Object.entries(TEXTURES)) {
-    if (isImageMat(id) && !app.images.some(im => 'img:' + im.id === id)) continue;   // obrazy z innych szkiców
-    if (!texThumb.has(id)) texThumb.set(id, T.image || textureCanvas(id).toDataURL());
-    const b = document.createElement('button'); b.className = 'sw tex' + (app.paintTex === id ? ' on' : '');
-    b.style.backgroundImage = `url(${texThumb.get(id)})`; b.innerHTML = `<span>${esc(T.name)}</span>`;
-    b.addEventListener('click', () => { app.setPaint(T.avg, 1, id); setTool('paint'); });
-    tb.append(b);
-  }
-  const im = isImageMat(app.paintTex) && app.images.find(q => 'img:' + q.id === app.paintTex);
-  $('#matImgRow').hidden = !im; if (im && document.activeElement !== $('#matImgW')) $('#matImgW').value = fmtM(im.size[0]);
-  const dot = toolsEl.querySelector('[data-tool=paint] .dot'); if (dot) dot.style.background = app.paint || DEFAULT_COLOR;
-  $('#paintCustom').value = app.paint || '#f6f4ee';
-  const pa = $('#paintAlpha'); pa.value = app.paintAlpha; setRangeFill(pa); $('#paintAlphaLbl').textContent = Math.round(app.paintAlpha * 100) + '%';
 }
-$('#paintCustom').addEventListener('input', e => app.setPaint(e.target.value));
+const faceMat = (s, key) => { const k = matOf(s, key); return k.t ? { c: null, t: k.t, a: k.a } : k; };
+function modelMats() {
+  const out = [];
+  eachFace((s, k) => { const m = faceMat(s, k), o = out.find(x => sameMat(x, m)); if (o) o.n++; else out.push({ ...m, n: 1 }); });
+  return out;
+}
+// „1 ściana, 2 ściany, 5 ścian” (po angielsku: face / faces)
+const nFaces = n => lang === 'en' ? n + (n === 1 ? ' face' : ' faces') : n + ' ' + (n === 1 ? 'ściana' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'ściany' : 'ścian');   // i18n-ok
+// liczba ścian z materiałem — zapamiętana do następnej zmiany modelu (suwak koloru nie liczy całego modelu przy każdym ruchu)
+const useMemo = new Map();
+const usesOf = m => { const k = matSig(m); if (useMemo.has(k)) return useMemo.get(k); let n = 0; eachFace((s, key) => { if (sameMat(faceMat(s, key), m)) n++; }); useMemo.set(k, n); return n; };
+// lista materiałów do siatki: { c, t, a, name, cat, user?, n? }
+function matList() {
+  const L = [];
+  for (const p of PALETTE) L.push({ c: p.c, t: null, a: p.a, name: p.name, cat: p.cat });
+  for (const [id, T] of Object.entries(TEXTURES)) {
+    if (isImageMat(id)) { const im = app.images.find(q => 'img:' + q.id === id); if (im) L.push({ c: null, t: id, a: 1, name: T.name, cat: 'twoje', user: { kind: 'img', rec: im } }); continue; }
+    L.push({ c: null, t: id, a: 1, name: T.name, cat: T.cat || 'teren' });
+  }
+  for (const u of app.colors) L.push({ c: u.c, t: null, a: u.a ?? 1, name: u.name, cat: 'twoje', user: { kind: 'color', rec: u } });
+  return L;
+}
+const matName = m => { const x = matList().find(q => sameMat(q, m) && (!app.paintUser || !q.user || q.user.rec === app.paintUser)); return x ? x.name : matLabel(m); };
+function matTile(m, on) {
+  const sw = m.t && TEXTURES[m.t] ? `<span class="msq" style="background-image:url(${thumbOf(m.t)})"></span>` : `<span class="msq${m.a < 0.999 ? ' glass' : ''}" style="--c:${m.c || DEFAULT_COLOR}"></span>`;
+  const tip = m.name + (m.n ? ' · ' + nFaces(m.n) : '');
+  return `<button class="mt${on ? ' on' : ''}" title="${esc(tip)}">${sw}<span class="mn">${esc(m.name)}</span></button>`;
+}
+function renderSwatches() {
+  const cur = paintMat(), list = matList();
+  // pasek bieżącego materiału
+  const T = cur.t && TEXTURES[cur.t], hex = (cur.c || DEFAULT_COLOR).toUpperCase(), nm = matName(cur);
+  const cat = MAT_CATS.find(c => c[0] === (list.find(m => sameMat(m, cur))?.cat))?.[1];
+  const meta = [cat, T ? fmtM(T.size[0]) + ' × ' + fmtM(T.size[1]) : nm.toUpperCase() !== hex ? hex : _t('kolor spoza listy'), cur.a < 0.999 ? _t('krycie ') + Math.round(cur.a * 100) + '%' : ''].filter(Boolean).join(' · ');
+  $('#matCur').innerHTML = matTile({ ...cur, name: '' }, false).replace('<button class="mt" title=""', '<span class="mt big"').replace('</button>', '</span>')
+    + `<div class="grow mcur"><div class="ell">${esc(nm)}</div><div class="lbl ell">${esc(meta)}</div></div>`;
+  // kategorie z liczbą materiałów
+  // „W modelu” liczone tylko wtedy, gdy ta kategoria jest otwarta (duży model to dużo ścian)
+  const used = matCat === 'model' && !matQ.trim() ? modelMats() : [];
+  const count = id => id === 'model' ? (matCat === 'model' ? ' (' + used.length + ')' : '') : ' (' + list.filter(m => m.cat === id).length + ')';
+  $('#matCat').innerHTML = MAT_CATS.map(([id, n]) => `<option value="${id}"${id === matCat ? ' selected' : ''}>${esc(n)}${count(id)}</option>`).join('');
+  const q = matQ.trim().toLowerCase();
+  let show = q ? list.filter(m => m.name.toLowerCase().includes(q)) : matCat === 'model' ? used.map(m => ({ ...m, name: matName(m) })) : list.filter(m => m.cat === matCat);
+  const G = $('#matGrid'); G.innerHTML = show.map(m => matTile(m, sameMat(m, cur) && (!m.user || m.user.kind !== 'color' || app.paintUser === m.user.rec))).join('');
+  G.querySelectorAll('.mt').forEach((b, i) => b.addEventListener('click', () => { const m = show[i]; app.setPaint(m.t ? TEXTURES[m.t].avg : m.c, m.a, m.t, m.user && m.user.kind === 'color' ? m.user.rec : null); setTool('paint'); }));
+  const empty = $('#matEmpty'); empty.hidden = !!show.length;
+  empty.textContent = q ? _t('Nie ma materiału o takiej nazwie.') : matCat === 'model' ? _t('W modelu nie ma jeszcze ścian.') : matCat === 'twoje' ? _t('Tu pojawią się Twoje kolory i materiały z obrazów albo z opisu.') : '';
+  $('#matHint').innerHTML = _t('Klik maluje ścianę, z ⇧ — całą bryłę.') + ' ' + (isMac ? _t('⌘-klik pobiera materiał ze ściany.') : _t('Alt-klik pobiera materiał ze ściany.'));
+  renderMatEdit(cur, list);
+  const dot = toolsEl.querySelector('[data-tool=paint] .dot'); if (dot) dot.style.background = (cur.t ? TEXTURES[cur.t]?.avg : cur.c) || DEFAULT_COLOR;
+}
+function renderMatEdit(cur, list) {
+  const own = app.paintUser || (cur.t && isImageMat(cur.t) ? app.images.find(q => 'img:' + q.id === cur.t) : null);
+  const nm = $('#meName'), ro = $('#meNameRO');
+  nm.hidden = !own; ro.hidden = !!own;
+  if (own && document.activeElement !== nm) nm.value = own.name;
+  ro.textContent = matName(cur);
+  $('#meColRow').hidden = !!cur.t;
+  $('#paintCustom').value = cur.c || '#ffffff'; $('#meHex').textContent = (cur.c || DEFAULT_COLOR).toUpperCase();
+  const pa = $('#paintAlpha'); pa.value = cur.a; setRangeFill(pa); $('#paintAlphaLbl').textContent = Math.round(cur.a * 100) + '%';
+  const T = cur.t && TEXTURES[cur.t], im = cur.t && isImageMat(cur.t) && app.images.find(q => 'img:' + q.id === cur.t);
+  $('#meSizeRow').hidden = !T; $('#matImgW').hidden = !im; $('#meSizeRO').hidden = !!im;
+  if (im && document.activeElement !== $('#matImgW')) $('#matImgW').value = fmtM(im.size[0]);
+  if (T) $('#meSizeRO').textContent = fmtM(T.size[0]) + ' × ' + fmtM(T.size[1]);
+  if ($('#matEdit').hidden) return;
+  const n = usesOf(cur); $('#meUse').textContent = n ? nFaces(n) : _t('nie użyty'); $('#meSel').disabled = !n;
+  // podmiana: materiał zmieniony w edytorze, a ten, od którego zaczęto, jest na ścianach modelu
+  const from = app.matFrom, nf = from && !sameMat(from, cur) ? usesOf(from) : 0;
+  $('#meSwapRow').hidden = !nf;
+  if (nf) $('#meSwapNote').textContent = _t('Materiał zmieniony. Poprzednia wersja jest na ścianach: ') + nf + _t('. Podmienić ją na nową?');
+  // usuwanie własnych: tylko nieużytych
+  $('#meDelRow').hidden = !own; $('#meDel').disabled = n > 0;
+  $('#meDelNote').textContent = n > 0 ? _t('Używany w modelu — usunąć można dopiero nieużyty.') : '';
+}
+// podmiana materiału na wszystkich ścianach modelu (z krokiem cofania)
+function replaceMat(from, to) {
+  const n = usesOf(from); app.checkpoint();
+  for (const s of app.model.shapes) {
+    if (s.op === 'cut') continue;
+    const b = { c: s.color || null, t: s.tex || null, a: s.alpha ?? 1 };
+    // kolor bazowy bryły (ściany bez własnego wpisu)
+    if (sameMat(b.t ? { c: null, t: b.t, a: b.a } : b, from)) { s.color = to.t ? TEXTURES[to.t].avg : to.c; if (to.t) s.tex = to.t; else delete s.tex; if (to.a < 0.999) s.alpha = to.a; else delete s.alpha; }
+    if (s.fc) {
+      const fc = { ...s.fc };
+      for (const [k, f] of Object.entries(fc)) { if (!sameMat(faceMat(s, k), from)) continue; const o = { ...f }; if (o.t !== to.t) delete o.tx; o.c = to.t ? null : to.c; if (to.t) o.t = to.t; else delete o.t; if (to.a < 0.999) o.a = to.a; else delete o.a; fc[k] = o; }
+      s.fc = fc;
+    }
+  }
+  app.changed(); return n;
+}
+app.setPaint = (c, a, t, user) => {
+  app.paint = c; if (a !== undefined) app.paintAlpha = a; app.paintTex = t || null;
+  if (user !== undefined) app.paintUser = user;
+  else { const m = paintMat(); app.paintUser = m.t ? null : app.colors.find(u => sameMat({ c: u.c, t: null, a: u.a ?? 1 }, m)) || null; }
+  app.matFrom = paintMat();
+  renderSwatches();
+};
+// zmiana w edytorze: wiaderko i własny kolor zmieniają się, punkt wyjścia do podmiany zostaje
+function editPaint(c, a) {
+  app.paint = c; app.paintAlpha = a; app.paintTex = null;
+  if (app.paintUser) { app.paintUser.c = c; if (a < 0.999) app.paintUser.a = a; else delete app.paintUser.a; app.markDirty(); }
+  renderSwatches();
+}
+$('#paintCustom').addEventListener('input', e => editPaint(e.target.value, app.paintAlpha));
+$('#paintAlpha').addEventListener('input', e => { if (app.paintTex) { app.paintAlpha = +e.target.value; app.matFrom = null; renderSwatches(); } else editPaint(app.paint, +e.target.value); });
+$('#matCat').addEventListener('change', e => { matCat = e.target.value; matQ = ''; $('#matQ').value = ''; try { localStorage.setItem('modo.matCat', matCat); } catch (x) {} renderSwatches(); });
+$('#matQ').addEventListener('input', e => { matQ = e.target.value; renderSwatches(); });
+$('#matQ').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { e.target.value = ''; matQ = ''; e.target.blur(); renderSwatches(); } });
+document.querySelectorAll('#matTabs button').forEach(b => b.addEventListener('click', () => {
+  matTab = b.dataset.t; document.querySelectorAll('#matTabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('#matPick').hidden = matTab !== 'pick'; $('#matEdit').hidden = matTab !== 'edit'; renderSwatches();
+}));
+$('#matColAdd').addEventListener('click', () => {
+  const u = { id: Math.random().toString(36).slice(2, 10), name: _t('Kolor ') + (app.colors.length + 1), c: app.paintTex ? (TEXTURES[app.paintTex]?.avg || '#d8d2c4') : app.paint || '#d8d2c4' };
+  app.colors.push(u); app.markDirty(); matCat = 'twoje'; try { localStorage.setItem('modo.matCat', matCat); } catch (x) {}
+  app.setPaint(u.c, 1, null, u); setTool('paint');
+  $('#matTabs [data-t=edit]').click(); requestAnimationFrame(() => { $('#meName').focus(); $('#meName').select(); });
+});
+$('#meName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); });
+$('#meName').addEventListener('change', e => {
+  const v = e.target.value.trim(); if (!v) return renderSwatches();
+  const im = isImageMat(app.paintTex) && app.images.find(q => 'img:' + q.id === app.paintTex);
+  if (app.paintUser) app.paintUser.name = v; else if (im) { im.name = v; registerImages([im]); }
+  app.markDirty(); renderSwatches();
+});
+$('#meSel').addEventListener('click', () => {
+  const cur = paintMat(), G = app.editing ?? null; app.selection.clear(); app.sub = [];
+  for (const s of app.model.shapes) if (s.geo && Array.isArray(s.polys) && (s.g ?? null) == G && !s.locked && !isHidden(app.model, s)) { const idx = []; const r = regions(s), seen = new Set(); r.forEach((g, i) => { if (!seen.has(g)) { seen.add(g); if (sameMat(faceMat(s, 'p:' + i), cur)) idx.push(i); } }); if (idx.length) app.sub.push(...subFaces(s, idx)); }
+  app.selectionChanged(); toast(app.sub.length ? _t('Zaznaczono ścian: ') + app.sub.length : _t('W bieżącej geometrii nie ma ścian z tym materiałem.'));
+});
+$('#meSwap').addEventListener('click', () => { const from = app.matFrom, to = paintMat(); if (!from) return; const n = replaceMat(from, to); app.matFrom = to; renderSwatches(); toast(_t('Podmieniono na ścianach: ') + n); });
+$('#meUndo').addEventListener('click', () => { const f = app.matFrom; if (!f) return; if (app.paintUser) { app.paintUser.c = f.c; if (f.a < 0.999) app.paintUser.a = f.a; else delete app.paintUser.a; app.markDirty(); } app.paint = f.t ? TEXTURES[f.t].avg : f.c; app.paintAlpha = f.a; app.paintTex = f.t; renderSwatches(); });
+$('#meDel').addEventListener('click', () => {
+  const cur = paintMat(); if (usesOf(cur)) return;
+  const name = matName(cur);
+  if (app.paintUser) app.colors = app.colors.filter(u => u !== app.paintUser);
+  else if (isImageMat(cur.t)) app.images = app.images.filter(q => 'img:' + q.id !== cur.t);
+  else return;
+  app.markDirty(); app.setPaint(null, 1, null); toast(_t('Usunięto materiał „') + name + '”');
+});
 $('#matImg').addEventListener('click', () => addImageMaterial());
 $('#matImgW').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); });
 $('#matImgW').addEventListener('change', e => {
@@ -1959,7 +2207,9 @@ $('#matImgW').addEventListener('change', e => {
   if (im && L > 0) { im.size = [L, L * im.px[1] / im.px[0]]; registerImages([im]); viewer.refreshTexture('img:' + im.id); app.markDirty(); }
   renderSwatches();
 });
-$('#paintAlpha').addEventListener('input', e => app.setPaint(app.paint, +e.target.value));
+// po zmianie modelu: lista „W modelu” i liczby w edytorze (z opóźnieniem — po serii zmian jedno przeliczenie)
+let matsTimer = 0;
+app.matsChanged = () => { useMemo.clear(); if (!app.panel || folded.has('mat') || (matCat !== 'model' && matTab !== 'edit')) return; clearTimeout(matsTimer); matsTimer = setTimeout(renderSwatches, 250); };
 renderSwatches();
 
 /* ---------- skróty ---------- */
@@ -2139,7 +2389,7 @@ $('#setBtn').addEventListener('click', () => {
   const groups = [
     [['theme:light', _t('Jasny motyw'), theme === 'light'], ['theme:dark', _t('Ciemny motyw'), theme === 'dark'], ['theme:auto', _t('Motyw jak w systemie'), theme === 'auto']],
     [['keys', _t('Skróty klawiszowe')]],
-    [['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]]]   // i18n-ok
+    [['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['geminiKey', _t('Klucz API Gemini…')]]   // i18n-ok
   ];
   const ver = u.current ? `<div class="mver">Modo ${u.current}</div>` : '';
   const upd = api.web ? '' : u.state === 'available' ? `<button role="menuitem" data-a="updInstall"><span>${_t('Zainstaluj wersję ')}${u.version}</span></button>` : `<button role="menuitem" data-a="updateCheck"><span>${_t('Sprawdź aktualizacje')}</span></button>`;
@@ -2147,7 +2397,7 @@ $('#setBtn').addEventListener('click', () => {
     + (ver || upd ? '<div class="msep"></div>' + ver + upd : '');
   m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     closePops(); const a = b.dataset.a;
-    if (a.startsWith('theme:')) setTheme(a.slice(6)); else if (a === 'updInstall') api.updateInstall(); else run(a);
+    if (a.startsWith('theme:')) setTheme(a.slice(6)); else if (a === 'updInstall') api.updateInstall(); else if (a === 'geminiKey') { showSec('render'); renderAi(true); } else run(a);
   }));
   m.hidden = false;
   const r = $('#setBtn').getBoundingClientRect();
@@ -2168,7 +2418,7 @@ function adoptImages() {
 function serialize() {
   adoptImages();
   return JSON.stringify({
-    images: app.images.length ? app.images : undefined, imageUnder: app.imageUnder || undefined,
+    images: app.images.length ? app.images : undefined, colors: app.colors.length ? app.colors : undefined, imageUnder: app.imageUnder || undefined,
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
     sun: viewer.sunCfg, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, eye: app.eyeH, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
@@ -2188,7 +2438,7 @@ function load(text, name, path) {
   viewer.showAxes = d.axes !== false;
   viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye; syncLook();
   app.underlay = d.underlay || null;
-  app.images = d.images || []; registerImages(app.images); for (const im of app.images) viewer.refreshTexture('img:' + im.id); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
+  app.images = d.images || []; app.colors = Array.isArray(d.colors) ? d.colors.filter(u => u && typeof u.c === 'string' && /^#[0-9a-f]{6}$/i.test(u.c)).map(u => ({ id: String(u.id || ''), name: String(u.name || ''), c: u.c, ...(u.a > 0 && u.a < 1 ? { a: +u.a } : {}) })) : []; app.paintUser = null; app.matFrom = null; useMemo.clear(); renderSwatches(); registerImages(app.images); for (const im of app.images) viewer.refreshTexture('img:' + im.id); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
@@ -2199,7 +2449,7 @@ async function confirmDiscard() { return !app.file.dirty || confirm(_t('Szkic ma
 async function newSketch() {
   if (!(await confirmDiscard())) return;
   app.editing = null; viewer.editGroup = null; app.clearSub();
-  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; app.images = []; app.imageUnder = null; viewer.setImageUnder(null); applyUnderlay(); app.scenes = []; app.scene = -1;
+  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; app.images = []; app.colors = []; app.paintUser = null; app.matFrom = null; useMemo.clear(); renderSwatches(); app.imageUnder = null; viewer.setImageUnder(null); applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, _t('Bez nazwy')); app.markDirty(false); setTool('select');
   app.docId = Math.random().toString(36).slice(2); camReset(); renderViewChip();
 }
@@ -2315,6 +2565,7 @@ $('#aiModel').innerHTML = AI_MODELS.map(([id, n]) => `<option value="${id}">${n}
 async function renderAi(forceKey) {
   const has = await api.geminiHasKey();
   $('#aiKeyBox').hidden = has && !forceKey; $('#aiMain').hidden = !has || !!forceKey;
+  $('#aiKeyCancel').hidden = !has;
   if (!has || forceKey) { $('#aiKey').value = ''; setTimeout(() => $('#aiKey').focus(), 30); return; }
   const model = aiGet('model', AI_MODELS[0][0]);
   $('#aiModel').value = AI_MODELS.some(m => m[0] === model) ? model : '';
@@ -2322,18 +2573,20 @@ async function renderAi(forceKey) {
   const size = aiGet('size', '2K');
   document.querySelectorAll('#aiSize button').forEach(b => b.classList.toggle('on', b.dataset.s === size));
   if (document.activeElement !== $('#aiPrompt')) $('#aiPrompt').value = aiGet('prompt', AI_PROMPT);
+  $('#aiPromptState').textContent = aiGet('prompt', AI_PROMPT).trim() === AI_PROMPT.trim() ? _t('domyślny') : _t('własny');
   $('#aiGo').disabled = aiBusy; if (!aiBusy) $('#aiStatus').textContent = '';
 }
 $('#aiKey').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') $('#aiKeySave').click(); });
 $('#aiKeySave').addEventListener('click', async () => { const k = $('#aiKey').value.trim(); if (!k) return; await api.geminiSetKey(k); $('#aiKey').value = ''; renderAi(); renderMatGen(); });
-$('#aiKeyChange').addEventListener('click', () => renderAi(true));
+$('#aiKeyCancel').addEventListener('click', () => renderAi());
+$('#aiPromptFold').addEventListener('click', e => { const b = e.currentTarget, open = b.getAttribute('aria-expanded') !== 'true'; b.setAttribute('aria-expanded', String(open)); $('#aiPromptBox').hidden = !open; if (open) $('#aiPrompt').focus(); });
 $('#aiModel').addEventListener('change', e => { if (e.target.value) aiSet('model', e.target.value); else aiSet('model', $('#aiCustom').value.trim()); renderAi(); });
 $('#aiCustom').addEventListener('keydown', e => e.stopPropagation());
 $('#aiCustom').addEventListener('change', e => aiSet('model', e.target.value.trim()));
 document.querySelectorAll('#aiSize button').forEach(b => b.addEventListener('click', () => { aiSet('size', b.dataset.s); renderAi(); }));
 $('#aiPrompt').addEventListener('keydown', e => e.stopPropagation());
-$('#aiPrompt').addEventListener('change', e => aiSet('prompt', e.target.value));
-$('#aiPromptReset').addEventListener('click', () => { aiSet('prompt', AI_PROMPT); $('#aiPrompt').value = AI_PROMPT; });
+$('#aiPrompt').addEventListener('change', e => { aiSet('prompt', e.target.value); renderAi(); });
+$('#aiPromptReset').addEventListener('click', () => { aiSet('prompt', AI_PROMPT); $('#aiPrompt').value = AI_PROMPT; renderAi(); });
 const b64 = async blob => { const u = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
 async function aiRender() {
   if (aiBusy) return;
@@ -2364,12 +2617,16 @@ async function aiRender() {
     if (aiLast) { URL.revokeObjectURL(aiLast.url); URL.revokeObjectURL(aiLast.source); }
     aiLast = { url: URL.createObjectURL(blob), blob, source: URL.createObjectURL(src) };
     closePops();
-    $('#aiImg').src = aiLast.url; $('#aiInfo').textContent = (AI_MODELS.find(m => m[0] === model)?.[1] || model) + ' · ' + size + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s';
-    $('#aiModal').hidden = false;
+    aiLast.info = (AI_MODELS.find(m => m[0] === model)?.[1] || model) + ' · ' + size + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s';
+    // ostatni render zostaje w panelu (do końca pracy z programem) — można go otworzyć jeszcze raz
+    $('#aiLastImg').src = aiLast.url; $('#aiLastInfo').textContent = aiLast.info; $('#aiLastBtn').hidden = false;
+    aiOpen();
   } catch (err) { toast(_t('Render się nie udał: ') + (err.message || err)); $('#aiStatus').textContent = ''; }
   finally { aiBusy = false; $('#aiGo').disabled = false; if ([_t('Przygotowuję widok…'), _t('Gemini renderuje… to trwa zwykle kilkanaście sekund')].includes($('#aiStatus').textContent)) $('#aiStatus').textContent = ''; }
 }
 $('#aiGo').addEventListener('click', aiRender);
+function aiOpen() { if (!aiLast) return; $('#aiImg').src = aiLast.url; $('#aiInfo').textContent = aiLast.info; $('#aiModal').hidden = false; }
+$('#aiLastBtn').addEventListener('click', aiOpen);
 const aiClose = () => { $('#aiModal').hidden = true; };
 $('#aiClose').addEventListener('click', aiClose);
 $('#aiModal .scrim').addEventListener('click', aiClose);
