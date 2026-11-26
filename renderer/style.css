@@ -88,7 +88,7 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .seg button.on{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
 /* zakładki: jeden wspólny wskaźnik przeskakuje pod wybraną (jak w grupie narzędzi); buttons nad nim */
 .seg{position:relative;overflow:hidden}
-.seg>.ind{position:absolute;top:2px;left:0;height:26px;border-radius:6px;background:var(--pill);box-shadow:var(--pillsh);pointer-events:none;transition:transform .42s var(--spring),width .42s var(--spring)}
+.seg>.ind{position:absolute;top:2px;bottom:2px;left:0;border-radius:6px;background:var(--pill);box-shadow:var(--pillsh);pointer-events:none;transition:transform .42s var(--spring),width .42s var(--spring)}
 .seg>.ind.cicho{transition:none}
 .seg.zind>button{position:relative;z-index:1}
 .seg.zind>button.on{background:transparent;box-shadow:none}
@@ -221,6 +221,10 @@ details.more[open]{display:flex;flex-direction:column;gap:10px}
 #fovLbl{width:auto;min-width:86px;white-space:nowrap;text-align:center}
 .views button{height:30px;border-radius:7px;background:var(--soft);color:var(--text);font-size:12px;display:flex;align-items:center;justify-content:space-between;padding:0 10px}
 .views button:hover{background:var(--hover)}
+.views button.on{background:var(--pill);box-shadow:0 0 0 1px var(--cardline),var(--pillsh)}   /* bieżący widok — lekko, jak wybrana zakładka */
+/* okienko Widok: wszystkie pola tej samej wysokości (28 px, jak pola liczbowe i przyciski z ikonami) */
+#viewPop .views button{height:28px}
+#viewPop .seg>button{height:24px}
 .views button kbd{background:none;box-shadow:none;color:var(--muted2);padding:0;font-size:11px}
 .scenes{display:flex;flex-direction:column;gap:4px}
 .scenes:empty{display:none}

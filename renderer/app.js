@@ -1443,11 +1443,19 @@ const iconBtn = ([id, name], on) => `<button class="ib${on ? ' on' : ''}" data-a
 app.scenes = []; app.scene = -1;
 const mmOf = fov => Math.round(12 / Math.tan(fov * Math.PI / 360));
 $('#viewBtn').addEventListener('click', () => openPop('#viewPop', $('#viewBtn')));
+// który widok standardowy jest teraz na ekranie (kierunek kamery zgodny z jednym z nich), albo null
+const VIEW_DIRS = { viewTop: [0, 0, -1], viewBottom: [0, 0, 1], viewFront: [0, 1, 0], viewBack: [0, -1, 0], viewRight: [-1, 0, 0], viewLeft: [1, 0, 0], viewIso: [-1, 1, -0.82] };
+function currentView() {
+  viewer.cam.updateMatrixWorld(); const e = viewer.cam.matrixWorld.elements, f = [-e[8], -e[9], -e[10]], fl = Math.hypot(...f) || 1;   // kamera patrzy wzdłuż −z
+  for (const [id, d] of Object.entries(VIEW_DIRS)) if ((f[0] * d[0] + f[1] * d[1] + f[2] * d[2]) / (Math.hypot(...d) * fl) > 0.9995) return id;
+  return null;
+}
 function renderViewPop() {
   renderScenes();
   if ($('#viewPop').hidden) return;
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
-  $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"><span>${n}</span>${k(id)}</button>`).join('');
+  const cur = currentView();
+  $('#viewGrid').innerHTML = VIEWS.map(([id, n]) => `<button data-a="${id}"${id === cur ? ' class="on" aria-current="true"' : ''}><span>${n}</span>${k(id)}</button>`).join('');
   $('#viewGrid').querySelectorAll('button').forEach(b => b.addEventListener('click', () => run(b.dataset.a)));
   $('#viewIcons').innerHTML = VIEW_ICONS.map(i => iconBtn(i, VIEW_ON[i[0]]?.())).join('');
   $('#viewIcons').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (['zoomWin', 'look', 'walk', 'camPos'].includes(b.dataset.a)) closePops(); run(b.dataset.a); }));
