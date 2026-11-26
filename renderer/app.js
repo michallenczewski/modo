@@ -434,8 +434,28 @@ document.addEventListener('pointerover', e => {
 document.addEventListener('pointerout', e => { const el = e.target.closest && e.target.closest('header .ib'); if (el && el === tipFor && !el.contains(e.relatedTarget)) hideTip(); });
 addEventListener('pointerdown', hideTip, true); addEventListener('wheel', hideTip, { passive: true });
 // „tak” (udało się) i „nie” (nie da się) na przycisku; przy „nie” zawsze też podpowiedź u dołu okna
-function ack(el, ok) { if (!el) return; el.classList.remove('tak', 'nie'); void el.offsetWidth; el.classList.add(ok ? 'tak' : 'nie'); }
+// Wzorzec przycisków (wzorzec_przyciskow.html, wspólny dla rodziny programów): jednorazowa animacja przycisku
+// (tak / nie / wlacz / wylacz) — także przy kolejnych kliknięciach pod rząd.
+function zagraj(el, klasa) { if (!el) return; el.classList.remove('tak', 'nie', 'wlacz', 'wylacz'); void el.offsetWidth; el.classList.add(klasa); }
+function ack(el, ok) { zagraj(el, ok ? 'tak' : 'nie'); }
 app.ack = ack;
+// Wciśnięcie: :active trwa tyle co kliknięcie (~0,1 s), więc przy szybkim kliknięciu ugięcia prawie nie widać.
+// Klasa .wcis od pointerdown do puszczenia, ale nie krócej niż 90 ms.
+document.addEventListener('pointerdown', e => {
+  const b = e.target.closest && e.target.closest('.ib'); if (!b || e.button) return;
+  b.classList.add('wcis'); const t0 = performance.now();
+  const up = () => { removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+    setTimeout(() => b.classList.remove('wcis'), Math.max(0, 90 - (performance.now() - t0))); };
+  addEventListener('pointerup', up); addEventListener('pointercancel', up);
+});
+// Przełączniki na górnym pasku: przy zmianie stanu kolor akcentu wyrasta od środka, a ikona „wskakuje” (albo „wyskakuje”
+// przy wyłączeniu). Obserwujemy klasę .on, więc działa to bez względu na to, które miejsce w kodzie przełącza stan.
+{
+  const was = new WeakMap(), watch = [...document.querySelectorAll('#topBar .ib'), document.querySelector('#panelBtn')].filter(Boolean);
+  for (const b of watch) was.set(b, b.classList.contains('on'));
+  const mo = new MutationObserver(list => { for (const r of list) { const b = r.target, on = b.classList.contains('on'); if (was.get(b) === on) continue; was.set(b, on); zagraj(b, on ? 'wlacz' : 'wylacz'); } });
+  for (const b of watch) mo.observe(b, { attributes: true, attributeFilter: ['class'] });
+}
 
 /* ---------- pasek stanu i pole wymiarów ---------- */
 let vcbBuf = '';

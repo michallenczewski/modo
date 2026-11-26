@@ -47,23 +47,33 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 #fileName{font-weight:500;overflow:hidden;text-overflow:ellipsis}
 #saved{color:var(--muted2);font-size:12px}
 .gap{flex:1 1 0;min-width:8px}
-.ib{width:30px;height:28px;border-radius:7px;color:var(--muted);display:flex;align-items:center;justify-content:center;flex:none;transition:background-color .15s,color .15s}
+.ib{position:relative;width:30px;height:28px;border-radius:7px;color:var(--text2);display:flex;align-items:center;justify-content:center;flex:none;transition:background-color .15s,color .15s}
 .ib:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .ib.on,.ib[aria-pressed=true]{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
 /* ruch jak w całej rodzinie programów (WYTYCZNE_INTERAKCJE.md): ikona unosi się przy najechaniu, ugina przy wciśnięciu */
 .ib>svg{width:15px;height:15px;stroke-width:1.3;transition:transform .35s var(--spring)}
 .ib:hover:not(:disabled)>svg{transform:translateY(-1px)}
-.ib:active:not(:disabled)>svg{transform:scale(.86)}
+.ib.wcis:not(:disabled)>svg{transform:scale(.84);transition:transform .09s ease-out}   /* wciśnięcie: klasę .wcis dodaje JS (wzorzec przycisków), nie :active */
 /* przełącznik włączony (podkład, panel, wygląd widoku): tło w kolorze akcentu wyrasta od środka, ikona biała */
 #topBar .ib.on,#panelBtn.on{position:relative;background:transparent;box-shadow:none;color:#fff}
-#topBar .ib.on::before,#panelBtn.on::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--accent);animation:wypelnij .42s var(--spring)}
+#topBar .ib.on::before,#panelBtn.on::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--accent)}
+#topBar .ib.on .fill,#panelBtn.on .fill{fill:currentColor}
+.ib.wlacz::before{animation:wypelnij .42s var(--spring)}
+.ib.wlacz>svg{animation:wbij .48s var(--spring)}
+.ib.wylacz>svg{animation:wyjmij .32s ease-out}
+@keyframes wbij{0%{transform:translateY(-5px) rotate(-28deg)}60%{transform:translateY(1px) rotate(4deg)}100%{transform:none}}
+@keyframes wyjmij{40%{transform:translateY(-3px) rotate(-14deg)}100%{transform:none}}
 #topBar .ib.on>svg,#panelBtn.on>svg{position:relative}
 @keyframes wypelnij{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
 /* „tak” i „nie” */
 .ib.tak{animation:tak .55s ease-out}
 @keyframes tak{0%{background:var(--hover)}100%{background:transparent}}
+.ib.tak>svg>*{transform-box:fill-box;transform-origin:center;animation:wskocz .5s var(--spring) both}
+.ib.tak>svg>:nth-child(2){animation-delay:.03s}.ib.tak>svg>:nth-child(3){animation-delay:.06s}
+.ib.tak>svg>:nth-child(4){animation-delay:.09s}
+@keyframes wskocz{from{transform:translate(-2px,1.5px) rotate(-10deg) scale(.6)}}
 .ib.nie{animation:nie .38s ease-out}
-@keyframes nie{20%{transform:translateX(-3px)}45%{transform:translateX(3px)}70%{transform:translateX(-2px)}}
+@keyframes nie{20%{transform:translateX(-3px)}45%{transform:translateX(3px)}70%{transform:translateX(-2px)}100%{transform:none}}
 .ib.sm{width:26px;height:26px;font-size:16px}
 .tb{height:30px;padding:0 10px;border-radius:7px;color:var(--text2);display:flex;align-items:center;gap:7px;white-space:nowrap;flex:none}
 .tb:hover,.tb.open{background:var(--hover);color:var(--text)}
@@ -85,7 +95,7 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 /* jeden wspólny wskaźnik wybranego narzędzia, przeskakuje ze sprężyną */
 #tools .ind{position:absolute;top:0;left:0;width:30px;height:28px;border-radius:7px;background:var(--toolon);box-shadow:0 0 0 1px var(--cardline),0 1px 2px rgba(0,0,0,.06);transition:transform .42s var(--spring),opacity .15s;pointer-events:none}
 #tools .ib{z-index:1}
-#tools .ib.on{background:transparent;box-shadow:none}
+#tools .ib.on,#tools .ib:hover:not(:disabled){background:transparent;box-shadow:none;color:var(--text)}
 #tools .hsep{height:1px;width:18px;background:var(--line);margin:6px 0;flex:none}
 #tools .grow{flex:1}
 #tools .ib.later{opacity:.32}
