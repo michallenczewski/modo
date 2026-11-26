@@ -361,7 +361,8 @@ function toolCursor(id) {
   else curIcon.hidden = true;
   return on ? DOT_CURSOR : '';
 }
-const moveCurIcon = e => { if (!curIcon.dataset.on || nav) { curIcon.hidden = true; return; } curIcon.hidden = false; curIcon.style.transform = `translate(${e.clientX + 9}px, ${e.clientY + 9}px)`; };
+let lastPtr = [innerWidth / 2, innerHeight / 2];
+const moveCurIcon = e => { lastPtr = [e.clientX, e.clientY]; if (!curIcon.dataset.on || nav) { curIcon.hidden = true; return; } curIcon.hidden = false; curIcon.style.transform = `translate(${e.clientX + 9}px, ${e.clientY + 9}px)`; };
 function hideFlyout() { clearTimeout(flyTimer); if (flyEl) flyEl.remove(); flyEl = null; }
 function setTool(id) {
   if (!tools[id]) return;
@@ -371,7 +372,7 @@ function setTool(id) {
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
-  moveInd();
+  moveInd(); renderMini();
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   $('#view').style.cursor = toolCursor(id);
   viewer.overlayDraw = (c, v) => { syncSubEdges(); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
@@ -417,6 +418,9 @@ const vcbEl = $('#vcb');
 app.updateHint = () => { $('#hint').innerHTML = tool.hint() || ''; };
 app.updateVcb = () => {
   const v = tool.vcb();
+  const typed = document.body.classList.contains('minimal') && !!vcbBuf && v;
+  miniType.classList.toggle('on', !!typed);
+  if (typed) { miniType.innerHTML = `<em>${esc(v.label)}</em><u>${esc(vcbBuf)}</u>`; miniType.style.left = (lastPtr[0] + 16) + 'px'; miniType.style.top = (lastPtr[1] - 32) + 'px'; }
   $('#vcbWrap').style.visibility = v ? '' : 'hidden';
   $('#unitBtn').style.visibility = v ? '' : 'hidden';
   if (!v) return;
@@ -1021,9 +1025,20 @@ $('#panelBtn').addEventListener('click', () => togglePanel());
 // W oknie programu zostaje pusty pasek u góry — trzyma przyciski okna i daje się za niego przeciągać okno.
 function toggleMinimal(v) {
   const on = v ?? !document.body.classList.contains('minimal');
-  if (on) closePops();
+  if (on) { closePops(); hideTip(); }
   document.body.classList.toggle('minimal', on);
-  if (on) toast(_t('Tryb minimalistyczny — Tab przywraca interfejs.'));
+  renderMini(); app.updateVcb();
+}
+// plakietka z bieżącym narzędziem (lewy górny róg, za nią można przeciągać okno) i przypomnienie, jak wrócić
+const miniBadge = document.createElement('div'); miniBadge.id = 'miniBadge'; $('#view').append(miniBadge);
+const miniExit = document.createElement('div'); miniExit.id = 'miniExit'; $('#view').append(miniExit);
+const miniType = document.createElement('div'); miniType.id = 'miniType'; document.body.append(miniType);
+function renderMini() {
+  if (!document.body.classList.contains('minimal')) return;
+  const name = TOOL_NAME[toolId] || ACTIONS.find(a => a.id === toolId)?.name || '';
+  miniBadge.innerHTML = (IC[toolId] ? ic(toolId) : '') + `<span>${esc(name)}</span>`;
+  const k = keysFor('minimal', app.keys.over)[0];
+  miniExit.innerHTML = k ? `<kbd>${prettyCombo(k, isMac)}</kbd> ${_t('pełny widok')}` : '';
 }
 // Sekcje panelu zwijają się kliknięciem w nagłówek; program pamięta, które są zwinięte.
 const FOLD_KEY = 'modo.panelFold';

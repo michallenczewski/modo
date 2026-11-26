@@ -303,16 +303,21 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 .menu{max-height:calc(100vh - 60px);overflow:auto}
 .looklist .lbl{display:block;font-size:11.5px}
 
-/* --- tryb minimalistyczny (Tab): sam widok --- */
-body.minimal{grid-template-columns:0 minmax(0,1fr) 0!important;grid-template-rows:0 minmax(0,1fr) 0}
-.frame-mac body.minimal,.frame-win body.minimal{grid-template-rows:52px minmax(0,1fr) 0}
-body.minimal header>*{visibility:hidden}
-body.minimal #tools,body.minimal #panel{display:none!important}
-body.minimal #view{margin:12px}
-.frame-mac body.minimal #view,.frame-win body.minimal #view{margin:0 12px 12px}
-body.minimal #status{position:fixed;right:24px;bottom:24px;padding:0;z-index:5}
-body.minimal #status>:not(#vcbWrap){display:none!important}
-body.minimal #vcbWrap{background:var(--card);border-radius:9px;padding:4px 4px 4px 10px;box-shadow:0 0 0 1px var(--line),0 4px 14px rgba(0,0,0,.08)}
+/* --- tryb minimalistyczny (Tab): pełna imersja jak w Rysiu — sam widok, plakietka z narzędziem, wymiar przy kursorze --- */
+body.minimal{grid-template-columns:0 minmax(0,1fr) 0!important;grid-template-rows:0 minmax(0,1fr) 0!important}
+body.minimal header,body.minimal #tools,body.minimal #panel,body.minimal #status{visibility:hidden;overflow:hidden}
+body.minimal #view{margin:0;border-radius:0;box-shadow:none}
+#miniBadge{position:absolute;z-index:6;left:12px;top:10px;display:none;align-items:center;gap:7px;height:30px;padding:0 10px 0 8px;border-radius:9px;background:var(--card);box-shadow:var(--menush);font-size:12px;font-weight:500;opacity:.94;-webkit-app-region:drag;pointer-events:none}
+.frame-mac #miniBadge{left:86px}
+.fs.frame-mac #miniBadge{left:12px}
+#miniBadge svg{width:15px;height:15px;stroke-width:1.3;flex:none}
+body.minimal #miniBadge{display:flex}
+#miniExit{position:absolute;z-index:5;right:12px;bottom:10px;display:none;gap:6px;align-items:center;font-size:11px;color:var(--muted);pointer-events:none}
+body.minimal #miniExit{display:flex}
+#miniType{position:fixed;z-index:60;display:none;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:6px;background:var(--card);box-shadow:var(--menush);font-size:12px;pointer-events:none;white-space:nowrap}
+#miniType em{font-style:normal;color:var(--muted)}
+#miniType u{text-decoration:none;border-right:1.5px solid var(--text);padding-right:1px;font-variant-numeric:tabular-nums}
+body.minimal #miniType.on{display:flex}
 .menu .mchk{width:12px;font-style:normal;color:var(--text);flex:none;text-align:center}
 .menu .mver{padding:6px 10px 2px;font-size:11.5px;color:var(--muted2)}
 
