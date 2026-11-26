@@ -6,7 +6,7 @@ import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnde
 import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
-import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
+import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, drawSeg, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
 import { parseDxf } from './dxf.js';
@@ -243,6 +243,25 @@ function makeGroup(kind) {
   app.changed(); app.selectionChanged();
   toast(kind === 'comp' ? _t('Komponent — kopie zmieniają się razem. Dwuklik, żeby edytować.') : _t('Grupa. Dwuklik, żeby edytować.'));
 }
+// Ramka grupy jak w SketchUpie: prostopadłościan otaczający w kierunkach ramy grupy (komponent obrócony — ramka też),
+// niebieska przy zaznaczeniu, cienka przy najechaniu narzędziem Zaznacz.
+function groupBox(g) {
+  const m = app.model, ids = membersOf(m, g.id), pts = [];
+  for (const id of ids) { if (typeof id === 'number') { const s = m.shapes.find(q => q.id === id); if (s && !isHidden(m, s)) pts.push(...vertices(s)); } else if (String(id)[0] === 'l') { const l = m.lines.find(q => 'l' + q.id === id); if (l && !isHidden(m, l)) pts.push(l.a, l.b); } }
+  if (!pts.length) return null;
+  const f = g.frame, E = f ? [f.x, f.y, f.z].map(a => V.norm(a)) : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of pts) for (let k = 0; k < 3; k++) { const t = V.dot(p, E[k]); if (t < lo[k]) lo[k] = t; if (t > hi[k]) hi[k] = t; }
+  const P = (i, j, k) => V.add(V.add(V.mul(E[0], i ? hi[0] : lo[0]), V.mul(E[1], j ? hi[1] : lo[1])), V.mul(E[2], k ? hi[2] : lo[2]));
+  const c = [0, 1].flatMap(i => [0, 1].flatMap(j => [0, 1].map(k => P(i, j, k))));   // indeks i*4 + j*2 + k
+  return [[0, 4], [2, 6], [1, 5], [3, 7], [0, 2], [4, 6], [1, 3], [5, 7], [0, 1], [2, 3], [4, 5], [6, 7]].map(([a, b]) => [c[a], c[b]]);
+}
+function drawGroupBoxes(c, v) {
+  const sel = selectedGroups(), col = viewer.dark ? '#7f9bd0' : '#3f5f99';
+  if (sel.length <= 40) for (const g of sel) for (const [a, b] of groupBox(g) || []) drawSeg(c, v, a, b, col, { width: 1.4 });
+  const h = toolId === 'select' && app.hoverGroup && !sel.includes(app.hoverGroup) ? app.hoverGroup : null;
+  if (h) for (const [a, b] of groupBox(h) || []) drawSeg(c, v, a, b, col, { width: 1, dash: [4, 3] });
+}
 function selectedGroups() { const out = new Set(); for (const id of app.selection) { const g = topUnder(app.model, id, app.editing); if (g) out.add(g); } return [...out]; }
 function explode() {
   const gs = selectedGroups(); if (!gs.length) return toast(_t('Zaznacz grupę albo komponent.'));
@@ -375,7 +394,7 @@ function setTool(id) {
   moveInd(); renderMini();
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   $('#view').style.cursor = toolCursor(id);
-  viewer.overlayDraw = (c, v) => { syncSubEdges(); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
+  viewer.overlayDraw = (c, v) => { syncSubEdges(); drawGroupBoxes(c, v); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }

@@ -797,6 +797,11 @@ export function deleteEdge(m, s, a, b, tidy) {
   if (!s.polys.length) m.shapes = m.shapes.filter(q => q !== s);
 }
 export function hoverShape(app, x, y, id = pickEntity(app, x, y)) {
+  // element zgrupowany (grupa, do której nie wszedłeś): bez podświetlania jego ścian — ramka całej grupy (rysuje app.js)
+  const g = id != null && app.groupAt(id), prev = app.hoverGroup;
+  app.hoverGroup = g || null;
+  if (prev !== app.hoverGroup) app.refresh();
+  if (g) { app.viewer.setHoverFace(null); return; }
   const s = typeof id === 'number' && app.model.shapes.find(q => q.id === id && !q.bill);
   const hit = s && app.viewer.pick(x, y);
   app.viewer.setHoverFace(hit ? faceByKey(s, hit.key)?.verts : null);
