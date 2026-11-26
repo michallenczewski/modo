@@ -1030,8 +1030,11 @@ function closePops() {
   return any;
 }
 document.addEventListener('pointerdown', e => {
-  if (e.target.closest('.pop, .menu, header button, #tools button')) return;
-  if (!e.target.closest('#view')) closePops();
+  // droga zdarzenia z chwili kliknięcia: element pod kursorem mógł już zniknąć (np. łuk słońca przerysowany przy wciśnięciu),
+  // a wtedy e.target.closest nie widzi okienka, w którym kliknięto, i okienko by się zamknęło
+  const path = e.composedPath(), on = sel => path.some(n => n.matches && n.matches(sel));
+  if (on('.pop, .menu, header button, #tools button')) return;
+  if (!on('#view')) closePops();
   // menu (Plik, ustawienia, operacje na bryłach) znika też po kliknięciu w widok; okienka typu słońce zostają, żeby widzieć efekt
   else for (const m of document.querySelectorAll('.menu:not(#flyout)')) if (!m.hidden) { m.hidden = true; document.querySelectorAll('header .open').forEach(b => b.classList.remove('open')); }
 });
