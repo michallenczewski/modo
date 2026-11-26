@@ -12,13 +12,14 @@ import { _t } from './i18n.js';
 /* ---------- style rysunku ---------- */
 export const STYLES = {
   // Szkic: ołówek — cienka, lekko drżąca kreska (dawniej gruby obrys 2,1 px i wyraźne falowanie wyglądały topornie)
-  szkic: { name: _t('Szkic'), paper: '#f3f1ea', ink: '#2e2b26', inkFar: '#9a958a', wSil: 1.45, wIn: 0.7, ext: 0, wobble: 0.45, fade: 0.75, lines: true, shadow: 0.22, tint: 0.3 },
+  // Szkic: ołówek — każda kreska rysowana dwa razy z innym drżeniem (strokes: 2), końce lekko wychodzą za narożnik, ciepły grafit
+  szkic: { name: _t('Szkic'), paper: '#f4f1e8', ink: '#3a352d', inkFar: '#aaa395', wSil: 1.2, wIn: 0.6, ext: 3, wobble: 1.0, fade: 0.8, lines: true, strokes: 2, shadow: 0.2, tint: 0.35 },
   kreska: { name: _t('Kreska'), paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
   model: { name: _t('Model'), paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
 // tryb ciemny: ciemny papier, jasna kreska, przygaszone ściany (kolory jak w ciemnej Gapie)
 const DARK = {
-  szkic: { paper: '#1b1b1a', ink: '#e6e2d8', inkFar: '#77736b', shadow: 0.55, wall: '#4d4b47' },
+  szkic: { paper: '#1c1b19', ink: '#e3ddd0', inkFar: '#7a756b', shadow: 0.55, wall: '#4d4b47' },
   kreska: { paper: '#161616', ink: '#e9e9e7', inkFar: '#77776f', shadow: 0.5, wall: '#4a4a48' },
   model: { paper: '#1d1d1c', ink: '#000000', inkFar: '#000000', shadow: 0.6, wall: '#6a6863' }
 };
@@ -29,10 +30,11 @@ export const styleOf = (name, dark) => dark ? { ...STYLES[name], ...DARK[name] }
 const EDGE_VS = `
 #define BIAS_K 0.0015
 #define BIAS_MAX 0.05
-uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar, sectOn; uniform vec4 sect;
+uniform vec2 res; uniform float px, wSil, wIn, ext, wobble, nearZ, fadeNear, fadeFar, sectOn, seedOff; uniform vec4 sect;
 attribute vec3 ea, eb, n1, n2, col; attribute float t, side, seed, hasN2, wmul, soft;
 varying float vHalf, vD, vFade, vDepth, vAlpha; varying vec3 vCol;
 void main(){
+  float sd = seed + seedOff;
   vec4 va = modelViewMatrix * vec4(ea, 1.0), vb = modelViewMatrix * vec4(eb, 1.0);
   float nz = -nearZ * 1.001;
   if (va.z > nz && vb.z > nz) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
@@ -54,10 +56,10 @@ void main(){
   vec2 nrm = vec2(-dir.y, dir.x);
   vec2 s = cp.xy / cp.w * 0.5 * res;
   float e = ext * px * min(1.0, L / (40.0 * px));
-  if (t <= 0.0 && ta <= 0.0) s -= dir * e * (0.7 + 0.6 * fract(seed * 7.13));
-  if (t >= 1.0 && tb >= 1.0) s += dir * e * (0.7 + 0.6 * fract(seed * 3.71));
-  float amp = wobble * px * (fract(seed * 13.37) - 0.5) * 2.0 * min(1.0, L / (60.0 * px));
-  s += nrm * amp * sin(3.14159 * tt) + nrm * amp * 0.35 * sin(6.28318 * tt + seed * 6.0);
+  if (t <= 0.0 && ta <= 0.0) s -= dir * e * (0.7 + 0.6 * fract(sd * 7.13));
+  if (t >= 1.0 && tb >= 1.0) s += dir * e * (0.7 + 0.6 * fract(sd * 3.71));
+  float amp = wobble * px * (fract(sd * 13.37) - 0.5) * 2.0 * min(1.0, L / (60.0 * px));
+  s += nrm * amp * sin(3.14159 * tt) + nrm * amp * 0.35 * sin(6.28318 * tt + sd * 6.0);
   vec3 wp = mix(ea, eb, tt);
   vec3 vd = normalize(cameraPosition - wp);
   float f1 = dot(n1, vd), f2 = hasN2 > 0.5 ? dot(n2, vd) : -1.0;
@@ -225,7 +227,7 @@ export class Viewer {
       uniforms: {
         res: { value: new THREE.Vector2(1, 1) }, px: { value: 1 }, wSil: { value: 2 }, wIn: { value: 1 }, ext: { value: 8 }, wobble: { value: 1 },
         nearZ: { value: 0.05 }, fadeNear: { value: 10 }, fadeFar: { value: 80 }, ink: { value: new THREE.Color() }, inkFar: { value: new THREE.Color() },
-        fade: { value: 0.8 }, opacity: { value: 1 }, paper: { value: new THREE.Color() }, fogOn: { value: 0 }, fogNear: { value: 1 }, fogFar: { value: 100 }, sectOn: { value: 0 }, sect: { value: new THREE.Vector4() }
+        fade: { value: 0.8 }, opacity: { value: 1 }, paper: { value: new THREE.Color() }, fogOn: { value: 0 }, fogNear: { value: 1 }, fogFar: { value: 100 }, sectOn: { value: 0 }, sect: { value: new THREE.Vector4() }, seedOff: { value: 0 }
       }
     });
     this.edgeMesh = null;
@@ -244,7 +246,12 @@ export class Viewer {
     requestAnimationFrame(loop);
   }
 
-  st() { return styleOf(this.style, this.dark); }
+  st() {
+    const s = styleOf(this.style, this.dark);
+    // styl Model z włączonymi krawędziami: cienkie, spokojne kreski bez drżenia
+    if (this.style === 'model' && this.modelEdges) return { ...s, lines: true, wSil: 1.1, wIn: 0.6, ink: this.dark ? '#d9d6cf' : '#2b2a27', inkFar: this.dark ? '#6f6c66' : '#8c8981', fade: 0.5 };
+    return s;
+  }
   vc() {
     if (!this.ortho) return this.cam;
     const o = this.ocam, f = this.cam.getWorldDirection(new THREE.Vector3());
@@ -444,15 +451,16 @@ export class Viewer {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      const mesh = new THREE.Mesh(geo, this.sides(new THREE.MeshLambertMaterial({
         map, vertexColors: true, side: pk.two ? THREE.DoubleSide : THREE.FrontSide, transparent: pk.glass, opacity: pk.a, depthWrite: !pk.glass,
         polygonOffset: true, polygonOffsetFactor: pk.glass ? GLASS_OFS[0] : pk.flat ? 0.5 : 1.5, polygonOffsetUnits: pk.glass ? GLASS_OFS[1] : pk.flat ? 1 : 2
-      }));
+      })));
       mesh.castShadow = pk.cast; mesh.receiveShadow = true; mesh.frustumCulled = false;
       if (pk.glass) { mesh.renderOrder = 1; anyGlass = true; this.addGlassDepth(mesh); }
       this.modelGroup.add(mesh); this.batches.push({ mesh, ranges });
     }
     if (this.edgeMesh) { this.edgeMesh.geometry.dispose(); this.scene.remove(this.edgeMesh); this.edgeMesh = null; }
+    if (this.edge2Mesh) { this.scene.remove(this.edge2Mesh); this.edge2Mesh = null; }
     if (this.backMesh) { this.scene.remove(this.backMesh); this.backMesh = null; }
     if (this.underMesh) { this.scene.remove(this.underMesh); this.underMesh = null; }
     flush();
@@ -460,6 +468,13 @@ export class Viewer {
       this.edgeMesh = new THREE.Mesh(joinEdges(chunks, done), this.edgeMat);
       this.edgeMesh.frustumCulled = false; this.edgeMesh.renderOrder = 2;
       this.scene.add(this.edgeMesh);
+      // Szkic: drugie, bledsze pociągnięcie tej samej kreski z innym drżeniem — jak ołówek prowadzony dwa razy
+      if (st.strokes === 2) {
+        this.edge2Mat ||= new THREE.ShaderMaterial({ vertexShader: EDGE_VS, fragmentShader: EDGE_FS, transparent: true, depthWrite: false, uniforms: { ...this.edgeMat.uniforms, seedOff: { value: 0.437 }, opacity: { value: 0.45 } } });
+        this.edge2Mesh = new THREE.Mesh(this.edgeMesh.geometry, this.edge2Mat);
+        this.edge2Mesh.frustumCulled = false; this.edge2Mesh.renderOrder = 2.1;
+        this.scene.add(this.edge2Mesh);
+      }
       // Szkło: kreski rysują się dwa razy. Najpierw blado, pod szkłem (szyba je potem przykrywa swoim kolorem),
       // a po szkle jeszcze raz w pełni — ale tylko te, których żadna szyba nie zasłania. Dzięki temu widać, co jest za szybą, a co przed nią.
       if (anyGlass) {
@@ -632,11 +647,19 @@ export class Viewer {
     // prześwit: wszystkie ściany półprzezroczyste, żeby było widać, co jest w środku i z tyłu
     const a0 = (fp && fp.a) ?? s.alpha ?? 1, a = this.xray ? Math.min(a0, 0.32) : a0, glass = a < 0.999;
     const color = fp ? fp.c : s.color, tex = fp ? fp.t : s.tex, map = tex ? this.texture(tex) : null;
-    return new THREE.MeshLambertMaterial({
+    return this.sides(new THREE.MeshLambertMaterial({
       map, color: this.colorFor(s, st, paper, color, !!map), side: flat || glass || s.open ? THREE.DoubleSide : THREE.FrontSide,
       transparent: glass, opacity: a, depthWrite: !glass,
       polygonOffset: true, polygonOffsetFactor: glass ? GLASS_OFS[0] : flat ? 0.5 : 1.5, polygonOffsetUnits: glass ? GLASS_OFS[1] : flat ? 1 : 2
-    });
+    }));
+  }
+  // „Strony ścian”: ściany widać z obu stron, a tył każdej jest niebiesko-szary — od razu widać ściany odwrócone do środka
+  sides(mat) {
+    if (!this.faceSides) return mat;
+    mat.side = THREE.DoubleSide;
+    mat.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.47, 0.56, 0.71);'); };
+    mat.customProgramCacheKey = () => 'modo-sides';
+    return mat;
   }
   // Ściany połączone wygładzoną krawędzią (np. trójkąty, na które złożyła się ściana po przesunięciu wierzchołka)
   // cieniują się jak jedna gładka powierzchnia: normalna w wierzchołku to średnia z tych ścian.
@@ -787,7 +810,7 @@ export class Viewer {
   }
   // mgła, siatka i ukryta geometria: materiały trzeba zbudować na nowo (mgła jest wkompilowana w shader)
   setLook(o) {
-    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides', 'ao']) if (k in o) this[k] = !!o[k];
+    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides', 'ao', 'modelEdges', 'faceSides']) if (k in o) this[k] = !!o[k];
     this.scene.fog = null; this.applyStyleUniforms();
     this.scene.traverse(q => { for (const m of [].concat(q.material || [])) m.needsUpdate = true; });
     if (this.model) this.rebuild(); else this.needs = true;
