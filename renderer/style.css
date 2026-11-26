@@ -270,7 +270,7 @@ body.panel{grid-template-columns:56px minmax(0,1fr) 272px}
 
 /* render przez Gemini */
 #aiKeyBox,#aiMain{display:flex;flex-direction:column;gap:12px}
-#aiPrompt{height:auto;padding:8px 10px;resize:vertical;line-height:1.45;font-size:12px}
+#aiPrompt,#matGenPrompt{height:auto;padding:8px 10px;resize:vertical;line-height:1.45;font-size:12px}
 #aiModal{position:fixed;inset:0;z-index:50}
 #aiModal[hidden]{display:none}
 #aiModal .scrim{position:absolute;inset:0;background:rgba(247,247,245,.6)}
@@ -337,3 +337,8 @@ body.minimal #miniType.on{display:flex}
 #sunArc .sunKnob{transition:transform .2s var(--spring);transform-box:fill-box;transform-origin:center}
 #sunArc:hover .sunKnob{transform:scale(1.08)}
 #sunArc .sunKnob.low{opacity:.55}
+
+#matGen{display:flex;flex-direction:column;gap:8px;margin-top:2px}
+#matGen[hidden]{display:none}
+#matGenMain{display:flex;flex-direction:column;gap:8px}
+#matGenMain[hidden]{display:none}

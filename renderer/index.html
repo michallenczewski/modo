@@ -41,7 +41,17 @@
   <div id="swatches"></div>
   <div id="texSwatches"></div>
   <div class="row" id="matImgRow" hidden><span class="lbl w60">Szerokość</span><input id="matImgW" class="fld grow num" title="Szerokość jednego powtórzenia obrazu"></div>
-  <div class="row"><button class="tb soft" id="matImg">Materiał z obrazu…</button><span class="grow"></span></div>
+  <div class="row"><span class="lbl w60">Dodaj</span><button class="tb soft" id="matImg" title="Materiał z obrazu na dysku">Z obrazu…</button><button class="tb soft" id="matGenBtn" aria-expanded="false" title="Materiał narysowany przez Gemini według opisu">Z opisu…</button><span class="grow"></span></div>
+  <div id="matGen" hidden>
+    <div id="matGenNoKey" class="row"><span class="lbl note grow">Potrzebny jest Twój klucz API Gemini — ten sam co do renderu.</span><button class="tb soft" id="matGenKey">Ustaw klucz</button></div>
+    <div id="matGenMain" hidden>
+      <textarea id="matGenPrompt" class="fld" rows="3" spellcheck="false" placeholder="np. stara czerwona cegła z jasną fugą" aria-label="Opis materiału"></textarea>
+      <div class="row"><span class="lbl w60">Rozmiar</span><input id="matGenW" class="fld grow num" value="2 m" title="Szerokość jednego powtórzenia wzoru"></div>
+      <label class="row"><span class="grow">Bez szwów <span class="lbl">wygładza łączenia powtórzeń</span></span><input type="checkbox" class="tg" id="matGenSeam" role="switch" checked></label>
+      <div class="lbl note">Opis trafia do Gemini (Google); każdy obraz jest płatny według cennika Google. Model jest ten sam co w sekcji Render.</div>
+      <div class="row"><span class="lbl grow ell" id="matGenStatus"></span><button class="primary" id="matGenGo">Wygeneruj</button></div>
+    </div>
+  </div>
   <div class="row"><span class="lbl w60">Własny</span><input type="color" id="paintCustom"></div>
   <div class="row"><span class="lbl w60">Krycie</span><input type="range" id="paintAlpha" min="0.1" max="1" step="0.05" class="grow"><span class="lbl num" id="paintAlphaLbl"></span></div>
   <div class="lbl note">Klik maluje jedną ścianę, z ⇧ — całą bryłę. Krycie (szkło) dotyczy zawsze całej bryły.</div>

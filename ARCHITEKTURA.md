@@ -165,6 +165,8 @@ Style (`STYLES` w `viewer.js`) to zestawy tych parametrów: Szkic (ołówek: ka�
 
 Przycisk Render wysyła bieżący widok (PNG, dłuższy bok 1600 px) do Gemini API: `POST v1beta/models/<model>:generateContent`, w treści opis i obraz (`inline_data`), w `generationConfig` — `responseModalities: ['IMAGE']` oraz `imageConfig` (`aspectRatio` najbliższe proporcjom okna, `imageSize` 1K/2K/4K). Obraz wraca w `candidates[0].content.parts[].inlineData`. W programie zapytanie wysyła proces główny (`gemini-render` w `main.js`), a klucz leży w `ustawienia.json` zaszyfrowany przez `safeStorage`; okno wie tylko, czy klucz jest. W wersji przeglądarkowej klucz leży w `localStorage`, a zapytanie idzie wprost z okna (stąd adres Gemini w `connect-src`). Lista modeli jest w `AI_MODELS` w `app.js` — nazwy modeli Google zmienia często, dlatego jest też pole „Inny model”.
 
+**Materiał z opisu** (panel Materiały → Dodaj → Z opisu…, `genMaterial` w `app.js`) idzie tą samą drogą (`api.geminiRender`, ten sam klucz i model co w renderze): sam tekst (`MAT_PROMPT` — opis plus prośba o płaski, powtarzalny wzór z podanym rozmiarem), `aspectRatio` 1:1, `imageSize` 1K. Przełącznik „Bez szwów” przepuszcza obraz przez `seamlessBlob` (`textures.js`: mieszanka z kopią przesuniętą o pół obrazu, kopia tylko w pasie przy brzegach), potem obraz jest zwykłym materiałem z obrazu (`app.images`, JPEG do 1024 px, w rekordzie zostaje `prompt`).
+
 ## Biblioteki zewnętrzne
 
 Wszystkie leżą w `renderer/vendor/` jako gotowe pliki, żeby program i wersja przeglądarkowa działały bez budowania. Ciężkie moduły (OpenSKP, LibreDWG) ładują się dopiero przy pierwszym użyciu.

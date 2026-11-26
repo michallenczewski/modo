@@ -3,7 +3,7 @@
 import { Viewer, STYLES, DEFAULT_COLOR } from './viewer.js';
 import { Snapper, setAxes } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
-import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat } from './textures.js';
+import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat, seamlessBlob } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
 import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces } from './geo.js';
 import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, drawSeg, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
@@ -1674,6 +1674,58 @@ async function addImageMaterial() {
   app.setPaint(im.avg, 1, 'img:' + id); setTool('paint'); showSec('mat');
   toast(_t('Materiał z obrazu dodany (szerokość 2 m). Wymiar zmienisz w panelu Materiały, a ułożenie na ścianie — po zaznaczeniu ściany w panelu Element.'));
 }
+// materiał z opisu: Gemini rysuje kwadratowy wzór (model i klucz te same co w renderze), potem jak materiał z obrazu
+const MAT_PROMPT = (d, w) => `Seamless tileable texture of: ${d}. A flat, straight-on orthographic view of the surface that fills the whole square frame edge to edge. Even, diffuse lighting with no cast shadows, no perspective, no vignette, no text, no logos, no borders and no objects in front of the surface. The pattern must continue across the left/right and top/bottom edges so the image tiles without visible seams. The whole image shows about ${String(w).replace(',', '.')} m of the real surface.`;
+let matGenBusy = false;
+async function renderMatGen(focus) {
+  const has = await api.geminiHasKey();
+  $('#matGenNoKey').hidden = has; $('#matGenMain').hidden = !has;
+  $('#matGenGo').disabled = matGenBusy;
+  if (focus && has && !$('#matGen').hidden) $('#matGenPrompt').focus();
+}
+$('#matGenBtn').addEventListener('click', () => {
+  const box = $('#matGen'), open = box.hidden; box.hidden = !open; $('#matGenBtn').setAttribute('aria-expanded', String(open));
+  $('#matGenBtn').classList.toggle('open', open);
+  if (open) renderMatGen(true);
+});
+$('#matGenKey').addEventListener('click', () => { showSec('render'); renderAi(true); });
+for (const id of ['#matGenPrompt', '#matGenW']) $(id).addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && (id === '#matGenW' || e.metaKey || e.ctrlKey)) { e.preventDefault(); $('#matGenGo').click(); } });
+$('#matGenW').addEventListener('change', e => { const L = parseLength(e.target.value); e.target.value = fmtM(L > 0 ? L : 2); });
+async function genMaterial() {
+  if (matGenBusy) return;
+  const desc = $('#matGenPrompt').value.trim(); if (!desc) { $('#matGenPrompt').focus(); return toast(_t('Opisz materiał, np. „jasny dąb, deski szerokości 15 cm”.')); }
+  const L = parseLength($('#matGenW').value), w = L > 0 ? L : 2;
+  const model = (aiGet('model', AI_MODELS[0][0]) || '').trim() || AI_MODELS[0][0];
+  const images = app.images;   // szkic, dla którego zamówiono wzór (otwarcie innego podmienia tę tablicę)
+  matGenBusy = true; $('#matGenGo').disabled = true; $('#matGenStatus').textContent = _t('Gemini rysuje wzór… zwykle kilkanaście sekund');
+  try {
+    const r = await api.geminiRender({ model, body: {
+      contents: [{ parts: [{ text: MAT_PROMPT(desc, w) }] }],
+      generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '1:1', imageSize: '1K' } }
+    } });
+    if (r.error) { if (r.code === 'NO_KEY') renderMatGen(); throw new Error(r.error); }
+    const parts = r.json?.candidates?.[0]?.content?.parts || [];
+    const img = parts.map(p => p.inlineData || p.inline_data).find(Boolean);
+    if (!img || !img.data) {
+      const why = r.json?.promptFeedback?.blockReason || r.json?.candidates?.[0]?.finishReason, txt = parts.map(p => p.text).filter(Boolean).join(' ').slice(0, 200);
+      throw new Error(_t('Gemini nie zwrócił obrazu') + (why ? ' (' + why + ')' : '') + (txt ? ': ' + txt : '.'));
+    }
+    const bin = atob(img.data), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    if (app.images !== images) { $('#matGenStatus').textContent = ''; return toast(_t('Wzór z Gemini przyszedł po otwarciu innego szkicu — nie dodałem go.')); }
+    let blob = new Blob([u], { type: img.mimeType || img.mime_type || 'image/png' });
+    if ($('#matGenSeam').checked) blob = await seamlessBlob(blob);
+    // kwadrat 1K wystarcza na teksturę; JPEG trzyma plik szkicu w rozsądnym rozmiarze
+    const im = await loadImageFile(new Uint8Array(await blob.arrayBuffer()), 'image/jpeg', 1024);
+    const id = Math.random().toString(36).slice(2, 10), name = desc.length > 40 ? desc.slice(0, 39) + '…' : desc;
+    const rec = { id, name, data: im.data, px: im.px, avg: im.avg, size: [w, w * im.px[1] / im.px[0]], prompt: desc };
+    app.images.push(rec); registerImages([rec]); app.markDirty();
+    app.setPaint(im.avg, 1, 'img:' + id); setTool('paint'); showSec('mat');
+    $('#matGenStatus').textContent = '';
+    toast(_t`Materiał „${name}” gotowy — maluj wiaderkiem. Szerokość zmienisz w panelu Materiały.`);
+  } catch (err) { $('#matGenStatus').textContent = ''; toast(_t('Nie udało się wygenerować materiału: ') + (err.message || err)); }
+  finally { matGenBusy = false; $('#matGenGo').disabled = false; }
+}
+$('#matGenGo').addEventListener('click', genMaterial);
 $('#underPick').addEventListener('click', () => pickUnderlay());
 $('#underClose').addEventListener('click', () => closePops());
 $('#underReload').addEventListener('click', () => (app.underlay?.path || api.web) ? pickUnderlay(app.underlay?.path) : pickUnderlay());
@@ -1832,7 +1884,7 @@ function renderSwatches() {
     if (isImageMat(id) && !app.images.some(im => 'img:' + im.id === id)) continue;   // obrazy z innych szkiców
     if (!texThumb.has(id)) texThumb.set(id, T.image || textureCanvas(id).toDataURL());
     const b = document.createElement('button'); b.className = 'sw tex' + (app.paintTex === id ? ' on' : '');
-    b.style.backgroundImage = `url(${texThumb.get(id)})`; b.innerHTML = `<span>${T.name}</span>`;
+    b.style.backgroundImage = `url(${texThumb.get(id)})`; b.innerHTML = `<span>${esc(T.name)}</span>`;
     b.addEventListener('click', () => { app.setPaint(T.avg, 1, id); setTool('paint'); });
     tb.append(b);
   }
@@ -2216,7 +2268,7 @@ async function renderAi(forceKey) {
   $('#aiGo').disabled = aiBusy; if (!aiBusy) $('#aiStatus').textContent = '';
 }
 $('#aiKey').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') $('#aiKeySave').click(); });
-$('#aiKeySave').addEventListener('click', async () => { const k = $('#aiKey').value.trim(); if (!k) return; await api.geminiSetKey(k); $('#aiKey').value = ''; renderAi(); });
+$('#aiKeySave').addEventListener('click', async () => { const k = $('#aiKey').value.trim(); if (!k) return; await api.geminiSetKey(k); $('#aiKey').value = ''; renderAi(); renderMatGen(); });
 $('#aiKeyChange').addEventListener('click', () => renderAi(true));
 $('#aiModel').addEventListener('change', e => { if (e.target.value) aiSet('model', e.target.value); else aiSet('model', $('#aiCustom').value.trim()); renderAi(); });
 $('#aiCustom').addEventListener('keydown', e => e.stopPropagation());

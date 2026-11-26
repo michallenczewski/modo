@@ -140,3 +140,29 @@ export async function loadImageFile(bytes, type, max = 4096) {
     return { data: cv.toDataURL(png ? 'image/png' : 'image/jpeg', 0.9), px: [W, H], avg };
   } finally { URL.revokeObjectURL(url); }
 }
+
+// Wzór bez szwów, w dwóch przejściach. Najpierw w poziomie: obraz zmieszany z kopią przesuniętą o pół szerokości —
+// kopia ma na lewym i prawym brzegu to, co oryginał miał w środku, więc te brzegi się łączą; bierzemy ją tylko w pasie
+// przy brzegu (szósta część obrazu), a jej własny szew wypada w środku, gdzie zostaje oryginał. Potem to samo w pionie
+// na wyniku (przesunięcie w pionie nie psuje połączenia lewo–prawo). Zwraca obraz PNG (Blob) o tym samym rozmiarze.
+export async function seamlessBlob(blob) {
+  const bmp = await createImageBitmap(blob);
+  try {
+    const W = bmp.width, H = bmp.height, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(bmp, 0, 0);
+    const ss = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+    const pass = (horiz) => {
+      const A = c.getImageData(0, 0, W, H), N = horiz ? W : H, half = N >> 1, band = N / 6, out = c.createImageData(W, H);
+      const wt = new Float32Array(N); for (let k = 0; k < N; k++) wt[k] = ss(Math.min(k, N - 1 - k) / band);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4, m = wt[horiz ? x : y];
+        const j = horiz ? (y * W + (x + half) % W) * 4 : (((y + half) % H) * W + x) * 4;
+        for (let k = 0; k < 3; k++) out.data[i + k] = A.data[i + k] * m + A.data[j + k] * (1 - m);
+        out.data[i + 3] = 255;
+      }
+      c.putImageData(out, 0, 0);
+    };
+    pass(true); pass(false);
+    return await new Promise(res => cv.toBlob(res, 'image/png'));
+  } finally { bmp.close && bmp.close(); }
+}
