@@ -13,7 +13,7 @@ const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
 const { absorb, reverseFaces, orientFaces, facesOfPolys, curveEdges, curveInfo, respaceCurve } = await import(R + 'geo.js');
-const { deleteEdge, deleteFace, curveOf } = await import(R + 'tools.js');
+const { deleteEdge, deleteFace, curveOf, moveSub, subFaces } = await import(R + 'tools.js');
 const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
 /* ---------- szkic i kroki ---------- */
@@ -315,6 +315,16 @@ przypadek('odcinki okręgu i łuku', 'Walec r=1 z 24 odcinków zmieniony na 8: o
   w2.edit(() => respaceCurve(w2.geo, krzywa(w2.geo, [0.99, 0.13, 0]), 36));
   const g2 = w2.geo, miekkie = (g2.softs || []).length, czerwone = g2.polys.filter((_, i) => g2.fc && g2.fc['p:' + i] && g2.fc['p:' + i].c === '#ff0000').length;
   return { 'walec 36: gładkie krawędzie boku': [miekkie, 36], 'walec 36: czerwony tylko w miejscu starego boku': [czerwone > 0 && czerwone <= 3, true], 'walec: podstawa górna': [gora, 8], 'walec: dolna': [dol, 8], 'walec: ściany': [scW, 10], 'walec: objętość < π·2': [w.volume < Math.PI * 2 && w.volume > 5.6, true], 'okrąg w prostokącie: ściany': [o.faces, 2], 'okrąg: odcinki': [curveInfo(krzywa(o.geo, [2.997, 1.54, 0]))?.segs, 36], 'łuk rozpoznany (6, 90°)': [luk && luk.segs === 6 && Math.round(luk.sweep * 180 / Math.PI) === 90, true], 'łuk po zmianie: ściany': [z.faces, 9], otwarte: [z.open, 0] };
+});
+// skalowanie samej ściany (narzędzie Skaluj z zaznaczoną ścianą): ściana zostaje w geometrii, bryła się odkształca
+przypadek('skalowanie górnej ściany walca', 'Walec r=1, h=2 (24 odcinki), górna ściana zmniejszona o połowę od środka: stożek ścięty, nadal jedna zamknięta bryła (26 ścian), objętość ok. 2π/3·1,75.', () => {
+  const s = new Szkic().circle([0, 0, 0], [1, 0, 0], [0, 1, 0], 1, 24); wyciagnij(s, [0, 0, 0], 2);
+  const g = s.geo, i = s.faceAt([0, 0, 2]), sub = subFaces(g, [i])[0], pts = sub.pts;
+  const f = p => [p[0] * 0.5, p[1] * 0.5, p[2]];
+  s.edit(m => moveSub(m, m.shapes.find(q => q.id === g.id), { id: g.id, pts, polys: sub.polys }, () => f));
+  const v = Math.round(s.volume * 100) / 100, oczek = Math.round(2 * Math.PI / 3 * 1.75 * 24 / (2 * Math.PI) * Math.sin(2 * Math.PI / 24) * 100) / 100;
+  const gl = s.geo.softs || [], naBoku = gl.filter(([a, b]) => Math.abs(a[2]) < 1e-6 && Math.abs(b[2] - 2) < 1e-6 && Math.abs(Math.hypot(b[0], b[1]) - 0.5) < 1e-6).length;
+  return { 'boki gładkie po skalowaniu': [naBoku, 24], ściany: [s.faces, 26], otwarte: [s.open, 0], 'jedna bryła': [s.m.shapes.length, 1], objętość: [v, oczek], 'górna ściana mniejsza': [s.faceArea([0, 0, 2]) < 0.8, true] };
 });
 przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });

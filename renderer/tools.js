@@ -752,7 +752,11 @@ export function moveSub(m, s, sub, fk, copies = 0) {
     return;
   }
   const f = fk(1), has = p => sub.pts.some(q => V.dist(p, q) < 1e-5);
+  // krawędzie wygładzone i ukryte idą za swoimi punktami (inaczej boki walca po zmianie pokazują wszystkie krawędzie);
+  // liczone z list sprzed zmiany — przesunięcie całej bryły przesuwa je samo
+  const flags = Object.fromEntries(['softs', 'hid'].filter(k => Array.isArray(s[k])).map(k => [k, s[k]]));
   mapPoints(s, sub.pts, f);
+  for (const [k, L] of Object.entries(flags)) s[k] = L.map(([a, b]) => [has(a) ? f(a) : a, has(b) ? f(b) : b]);
   for (const l of m.lines) if ((l.g ?? null) === (s.g ?? null) && !l.locked) { if (has(l.a)) l.a = f(l.a); if (has(l.b)) l.b = f(l.b); }
 }
 // płaska ściana znika, a jej krawędzie (poza `skip`) zostają jako linie
@@ -2095,9 +2099,35 @@ const boxPoint = (b, sg) => { let p = b.c; for (let i = 0; i < 3; i++) p = V.add
 export class ScaleTool extends Tool {
   reset() { this.active = null; this.hover = null; this.cur = null; this.k = 1; this.downAt = null; }
   targets() { return new Set(this.app.selection); }
+  // Same ściany albo krawędzie wspólnej geometrii (bez obiektów): skalują się ich punkty, a bryła się odkształca —
+  // jak w SketchUpie i jak w Przesuń / Obróć (moveSub). Ramka leży w płaszczyźnie płaskiego zaznaczenia.
+  subTarget() {
+    const S = this.app.sub; if (!S.length || this.app.selection.size) return null;
+    const id = S[0].id, pts = [];
+    for (const q of S) if (q.id === id) for (const p of q.pts) if (!pts.some(r => V.dist(r, p) < 1e-5)) pts.push(p.slice());
+    if (pts.length < 2) return null;
+    return { id, pts, polys: S.filter(q => q.id === id && q.kind === 'face').flatMap(q => q.polys), edges: subEdges(S, id) };
+  }
+  subBox(sub) {
+    let E = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    const P = sub.polys[0];
+    if (P) {
+      const n = newell(P);
+      if (sub.pts.every(p => Math.abs(V.dot(V.sub(p, P[0]), n)) < 1e-6) && Math.abs(Math.abs(n[2]) - 1) > 1e-9) {
+        const u = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : V.norm(V.cross([0, 0, 1], n));
+        E = [u, V.cross(n, u), n];
+      }
+    }
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const p of sub.pts) for (let i = 0; i < 3; i++) { const t = V.dot(p, E[i]); lo[i] = Math.min(lo[i], t); hi[i] = Math.max(hi[i], t); }
+    let c = [0, 0, 0]; for (let i = 0; i < 3; i++) c = V.add(c, V.mul(E[i], (lo[i] + hi[i]) / 2));
+    return { E, half: [0, 1, 2].map(i => (hi[i] - lo[i]) / 2), c };
+  }
   box() {
-    // zaznaczone ściany wspólnej geometrii skalują się jako osobna bryła (wraca do wspólnej po odznaczeniu)
-    if (!this.active && this.app.sub.some(q => q.kind === 'face')) { this.app.liftSub(); this.app.selectionChanged(); }
+    if (this.active) return this.active.box;
+    const sub = this.subTarget(); if (sub) return this.subBox(sub);
+    // ściany razem z obiektami: ściany idą jako osobna bryła (wraca do wspólnej po odznaczeniu)
+    if (this.app.sub.some(q => q.kind === 'face')) { this.app.liftSub(); this.app.selectionChanged(); }
     return this.app.selection.size ? targetBox(this.model, this.targets()) : null;
   }
   grips(b) {
@@ -2113,7 +2143,7 @@ export class ScaleTool extends Tool {
   hint() {
     const k = copyKey(this.app);
     if (this.active) return _t`Przesuń i kliknij albo wpisz współczynnik (np. <kbd>2</kbd>, <kbd>0,5</kbd>; <kbd>-1</kbd> odbija) albo wymiar z jednostką (np. <kbd>6m</kbd>). <kbd>${k}</kbd> — ${this.copy ? _t('<b>od środka</b>') : _t('od środka')}, <kbd>⇧</kbd> — jednolicie.`;
-    if (!this.app.selection.size) return _t('Kliknij bryłę, linię albo grupę, którą chcesz skalować.');
+    if (!this.app.selection.size && !this.app.sub.length) return _t('Kliknij bryłę, linię albo grupę, którą chcesz skalować.');
     return _t`Chwyć uchwyt ramki: narożnik skaluje całość, środek krawędzi — dwa kierunki, środek ściany — jeden kierunek. <kbd>${k}</kbd> — ${this.copy ? _t('<b>włączone: od środka</b>') : _t('od środka')}, <kbd>⇧</kbd> — jednolicie.`;
   }
   lastValid() { return this.last && this.last.seq === this.app.opSeq; }
@@ -2145,14 +2175,17 @@ export class ScaleTool extends Tool {
     A.d0 = V.dist(A.pos, A.anchor); A.dir = V.mul(V.sub(A.pos, A.anchor), 1 / A.d0);
   }
   begin(g, b) {
-    this.active = { start: cloneModel(this.model), targets: this.targets(), box: b, sg: g.sg, pos: g.pos, act: g.act };
+    this.active = { start: cloneModel(this.model), targets: this.targets(), sub: this.subTarget(), box: b, sg: g.sg, pos: g.pos, act: g.act };
     this.aim(this.active); this.k = 1; this.kv = [1, 1, 1];
   }
   apply(k) {
     const A = this.active; if (!A) return;
     if (Math.abs(k) < 1e-3) k = k < 0 ? -1e-3 : 1e-3;
     const kv = A.act.map(on => on || this.shift ? k : 1), m = cloneModel(A.start);
-    scaleTargets(m, A.targets, A.anchor, A.box.E, kv);
+    if (A.sub) {
+      const E = A.box.E, c = A.anchor, f = p => { const d = V.sub(p, c); let q = c; for (let i = 0; i < 3; i++) q = V.add(q, V.mul(E[i], V.dot(d, E[i]) * kv[i])); return q; };
+      const s = m.shapes.find(q => q.id === A.sub.id); if (s) moveSub(m, s, A.sub, () => f);
+    } else scaleTargets(m, A.targets, A.anchor, A.box.E, kv);
     this.k = k; this.kv = kv;
     this.app.setModelLive(m);
   }
@@ -2177,6 +2210,14 @@ export class ScaleTool extends Tool {
     this.active = null; this.hover = null;
     if (Math.abs(this.k - 1) < 1e-9) { this.app.setModelLive(A.start); this.app.refresh(); return; }
     this.app.commitLive(A.start);
+    // zaznaczone ściany zostają zaznaczone (w nowym miejscu), żeby można było skalować dalej
+    if (A.sub && A.sub.polys.length) {
+      const E = A.box.E, c = A.anchor, kv = this.kv, f = p => { const d = V.sub(p, c); let q = c; for (let i = 0; i < 3; i++) q = V.add(q, V.mul(E[i], V.dot(d, E[i]) * kv[i])); return q; };
+      const np = A.sub.pts.map(f), on = p => np.some(q => V.dist(p, q) < 1e-5);
+      const g = this.model.shapes.find(q => q.id === A.sub.id && Array.isArray(q.polys));
+      const idx = g ? g.polys.map((P, i) => P.every(on) ? i : -1).filter(i => i >= 0) : [];
+      if (idx.length) { this.app.sub = subFaces(g, idx); this.app.selectionChanged(); }
+    }
     this.last = { ...A, k: this.k, shift: this.shift, center: this.copy, seq: this.app.opSeq };
   }
   value(str) {
