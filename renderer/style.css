@@ -336,3 +336,4 @@ body.minimal #miniType.on{display:flex}
 #sunArc.drag{cursor:grabbing}
 #sunArc .sunKnob{transition:transform .2s var(--spring);transform-box:fill-box;transform-origin:center}
 #sunArc:hover .sunKnob{transform:scale(1.08)}
+#sunArc .sunKnob.low{opacity:.55}

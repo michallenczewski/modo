@@ -1501,13 +1501,13 @@ function renderSun() {
   const hs = $('#sunHour'); hs.min = h0; hs.max = h1; hs.value = c.hour; setRangeFill(hs);
   const pts = []; let maxA = 10;
   for (let i = 0; i <= 80; i++) { const t = h0 + (h1 - h0) * i / 80, a = sunPosition(c.date, t, c.lat, c.lon, c.tz).alt; pts.push([t, a]); maxA = Math.max(maxA, a); }
-  const sx = t => 10 + 268 * (t - h0) / (h1 - h0), sy = a => 70 - Math.max(a, -6) * (58 / maxA);
+  const sx = t => 10 + 268 * (t - h0) / (h1 - h0), sy = a => a >= 0 ? 70 - a * (58 / maxA) : 70 + Math.min(-a, 6) / 6 * 10; // pod horyzontem najwyżej 10 px niżej, żeby słońce nie wyszło poza okienko
   const d = pts.map(([t, a], i) => (i ? 'L' : 'M') + sx(t).toFixed(1) + ' ' + sy(a).toFixed(1)).join(' ');
   const cx = sx(Math.max(h0, Math.min(h1, c.hour))), cy = sy(p.alt);
   sunArcRange = { h0, h1 };
   // słońce z promieniami — chwyć i przesuń po łuku (pionowa kreska pokazuje wysokość nad horyzontem)
   const rays = [...Array(8)].map((_, i) => { const a = i * Math.PI / 4, x1 = cx + Math.cos(a) * 8.5, y1 = cy + Math.sin(a) * 8.5, x2 = cx + Math.cos(a) * 11.5, y2 = cy + Math.sin(a) * 11.5; return `M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`; }).join('');
-  $('#sunArc').innerHTML = `<path d="M4 70h280" style="stroke:var(--line)"/><path d="${d}" fill="none" style="stroke:var(--muted2)" stroke-width="1.2" stroke-dasharray="2 3"/><line x1="${cx.toFixed(1)}" y1="${(cy + 12).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" style="stroke:var(--text)" stroke-dasharray="1.5 2.5"/><g class="sunKnob"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="14" style="fill:transparent"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5.5" style="fill:var(--card);stroke:var(--text)" stroke-width="1.4"/><path d="${rays}" style="stroke:var(--text)" stroke-width="1.4" stroke-linecap="round"/></g>`;
+  $('#sunArc').innerHTML = `<path d="M4 70h280" style="stroke:var(--line)"/><path d="${d}" fill="none" style="stroke:var(--muted2)" stroke-width="1.2" stroke-dasharray="2 3"/>${p.alt > 0 && cy + 12 < 70 ? `<line x1="${cx.toFixed(1)}" y1="${(cy + 12).toFixed(1)}" x2="${cx.toFixed(1)}" y2="70" style="stroke:var(--text)" stroke-dasharray="1.5 2.5"/>` : ''}<g class="sunKnob${p.alt > 0 ? '' : ' low'}"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="14" style="fill:transparent"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5.5" style="fill:var(--card);stroke:var(--text)" stroke-width="1.4"/><path d="${rays}" style="stroke:var(--text)" stroke-width="1.4" stroke-linecap="round"/></g>`;
 }
 // przeciąganie słońca po łuku: położenie w poziomie to godzina (co 15 minut), cienie zmieniają się na bieżąco
 var sunArcRange = { h0: 0, h1: 24 };
