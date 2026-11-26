@@ -74,6 +74,7 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .seg{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--soft);flex:none}
 .seg button{height:26px;padding:0 10px;border-radius:6px;color:var(--muted);font-size:12px}
 .seg button:hover{color:var(--text)}
+.seg button:focus-visible{outline-width:1.5px;outline-offset:-1.5px}
 .seg button.on{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
 .seg.stretch button{flex:1}
 .sep{width:1px;height:16px;background:var(--line);margin:0 6px;flex:none}

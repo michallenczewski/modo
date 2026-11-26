@@ -1032,6 +1032,13 @@ function closePops() {
   document.querySelectorAll('header .open').forEach(b => b.classList.remove('open'));
   return any;
 }
+// Przycisk kliknięty myszą nie zatrzymuje fokusu: inaczej następny skrót klawiszowy zapala na nim ramkę fokusu, a spacja
+// albo Enter klikają go jeszcze raz. Z klawiatury (Tab, detail 0) fokus zostaje jak zwykle.
+document.addEventListener('click', e => {
+  if (e.detail === 0) return;
+  const b = e.target.closest && e.target.closest('button, input[type="checkbox"]');
+  if (b && document.activeElement === b) b.blur();
+}, true);
 document.addEventListener('pointerdown', e => {
   // droga zdarzenia z chwili kliknięcia: element pod kursorem mógł już zniknąć (np. łuk słońca przerysowany przy wciśnięciu),
   // a wtedy e.target.closest nie widzi okienka, w którym kliknięto, i okienko by się zamknęło
