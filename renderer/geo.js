@@ -205,3 +205,50 @@ export function absorb(m, G = null) {
   finish(geo);
   return { geo, gone };
 }
+
+/* ---------- strony ścian ---------- */
+// Strona ściany wynika z kolejności punktów jej wielokątów (przód tam, skąd obieg jest przeciwny do wskazówek zegara).
+// Odwrócenie ściany to odwrócenie kolejności — numery ścian (fid) zostają, bo podpis nie zależy od kolejności. Tablice
+// polys i fc są nowe, bo widok i pamięć krawędzi poznają zmianę po tożsamości tablic. Oś tekstury liczona z normalnej
+// po odwróceniu idzie w drugą stronę (w pionie oś pozioma, w poziomie pionowa), więc tekstura dostaje znacznik odbicia
+// (tx.fu / tx.fw) i wygląda tak samo jak przedtem.
+export function reverseFaces(s, idx) {
+  const R = new Set(idx); if (!R.size) return 0;
+  const fc = s.fc ? { ...s.fc } : null;
+  s.polys = s.polys.map((P, i) => {
+    if (!R.has(i)) return P;
+    const k = 'p:' + i, f = fc && fc[k];
+    if (f && f.t) { const n = newell(P), L = Math.hypot(n[0], n[1], n[2]) || 1, tx = { ...(f.tx || {}) }, a = Math.abs(n[2] / L) > 0.9 ? 'fw' : 'fu';
+      if (tx[a]) delete tx[a]; else tx[a] = true; fc[k] = { ...f, tx }; }
+    return P.slice().reverse();
+  });
+  if (fc) s.fc = fc;
+  return R.size;
+}
+// „Ujednolić orientację” (jak w SketchUpie): od wielokątów `seeds` przez wspólne krawędzie do sąsiadów — sąsiad ma przejść
+// wspólną krawędź w przeciwną stronę, inaczej trzeba go odwrócić. Krawędzie, na których styka się więcej niż dwie ściany,
+// nie przenoszą orientacji (nie wiadomo, która strona jest właściwa). Ziarno, do którego doszło już wcześniejsze,
+// nie zmienia wyniku (decyduje pierwsza zaznaczona ściana). Zwraca numery wielokątów do odwrócenia (nic nie zmienia).
+export function orientFaces(s, seeds) {
+  const at = new Map();   // krawędź (bez kierunku) → [[wielokąt, kierunek zgodny z kluczem]]
+  s.polys.forEach((P, i) => P.forEach((a, k) => {
+    const b = P[(k + 1) % P.length], x = VK(a), y = VK(b); if (x === y) return;
+    const key = x < y ? x + '|' + y : y + '|' + x; let L = at.get(key); if (!L) at.set(key, L = []); L.push([i, x < y]);
+  }));
+  const flip = new Map();
+  for (const pi of [].concat(seeds)) {
+    if (flip.has(pi) || !s.polys[pi]) continue;
+    flip.set(pi, false); const q = [pi];
+    while (q.length) {
+      const i = q.pop(), fi = flip.get(i), P = s.polys[i];
+      P.forEach((a, k) => {
+        const b = P[(k + 1) % P.length], x = VK(a), y = VK(b); if (x === y) return;
+        const L = at.get(x < y ? x + '|' + y : y + '|' + x); if (!L || L.length !== 2) return;
+        const [me, other] = L[0][0] === i ? L : [L[1], L[0]]; if (other[0] === i || flip.has(other[0])) return;
+        // ten sam kierunek obu wielokątów na wspólnej krawędzi = przeciwne strony; uwzględniamy, czy ten już jest odwracany
+        flip.set(other[0], (me[1] === other[1]) !== fi); q.push(other[0]);
+      });
+    }
+  }
+  return [...flip].filter(([, f]) => f).map(([i]) => i);
+}

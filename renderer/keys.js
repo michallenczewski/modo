@@ -45,6 +45,8 @@ export const ACTIONS = [
   { group: _t('Edycja'), id: 'paint', name: _t('Wiaderko (kolor i materiał)'), keys: ['M'] },
   { group: _t('Edycja'), id: 'soften', name: _t('Wygładź krawędzie (ściany pod kątem do 30°)'), keys: [] },
   { group: _t('Edycja'), id: 'unsoften', name: _t('Przywróć wygładzone krawędzie'), keys: [] },
+  { group: _t('Edycja'), id: 'reverseFaces', name: _t('Odwróć ściany'), keys: [] },
+  { group: _t('Edycja'), id: 'orientFaces', name: _t('Ujednolić orientację ścian (według zaznaczonej)'), keys: [] },
   { group: _t('Edycja'), id: 'selSameMat', name: _t('Zaznacz ściany z tym samym materiałem'), keys: [] },
   { group: _t('Edycja'), id: 'cleanLines', name: _t('Usuń luźne krawędzie (z wolnym końcem)'), keys: [] },
   { group: _t('Edycja'), id: 'makeFaces', name: _t('Ściany z zaznaczonych linii'), keys: [] },

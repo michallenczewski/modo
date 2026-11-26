@@ -707,7 +707,7 @@ export class Viewer {
       it.tri.forEach((p, k) => {
         const m = (it.ns && it.ns[k]) || n; pos.push(p[0], p[1], p[2]); nor.push(m[0], m[1], m[2]);
         let U = V.dot(p, u), W = V.dot(p, w);
-        if (tx) { U -= tx.x || 0; W -= tx.y || 0; const U2 = U * rc - W * rs, W2 = U * rs + W * rc; U = U2 / (tx.sx || 1); W = W2 / (tx.sy || 1); }
+        if (tx) { if (tx.fu) U = -U; if (tx.fw) W = -W; U -= tx.x || 0; W -= tx.y || 0; const U2 = U * rc - W * rs, W2 = U * rs + W * rc; U = U2 / (tx.sx || 1); W = W2 / (tx.sy || 1); }
         uv.push(U, W);
       });
       keys.push(it.key); ids.push(it.id);

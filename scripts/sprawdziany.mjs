@@ -12,7 +12,7 @@ globalThis.localStorage ??= { getItem: () => null, setItem: () => {} };
 const R = new URL('../renderer/', import.meta.url).href;
 const { V, newModel, cloneModel, makeShape, pushPull, circlePts } = await import(R + 'model.js');
 const { stitch } = await import(R + 'stitch.js');
-const { absorb } = await import(R + 'geo.js');
+const { absorb, reverseFaces, orientFaces, facesOfPolys } = await import(R + 'geo.js');
 const { deleteEdge, deleteFace, curveOf } = await import(R + 'tools.js');
 const { regions, regionOf, meshVolume, newell, inPoly, meshEdges } = await import(R + 'mesh.js');
 
@@ -285,6 +285,18 @@ przypadek('przecinające się okręgi — gumka na łukach', 'Dwa okręgi (r 0,7
   const f1 = s.faces, frontOsobno = s.faceArea([0.5, 0, 0.5], mY) < 18 - 1;
   s.push([2.9, 0, 1.5], -0.3, mY);
   return { 'ściany po narysowaniu': [f0, 6 + 3], 'ściany po gumce': [f1, 6 + 1], 'front osobno od okręgów': [frontOsobno, true], otwarte: [s.open, 0], 'dno wnęki': [s.has([2.9, 0.3, 1.5], mY), true], 'dno wnęki pod łukami': [s.has([2.5, 0.3, 1.0], mY), true] };
+});
+// strony ścian: „Odwróć ściany” i „Ujednolić orientację” (jak w SketchUpie)
+przypadek('strony ścian — odwróć i ujednolić', 'Pudło 4×3×2: dach odwrócony patrzy w dół, objętość i ściany bez zmian; ujednolicenie od podłogi przywraca dach; odwrócony sam front i ujednolicenie od niego odwraca całą resztę.', () => {
+  const s = new Szkic().rectXY(0, 0, 0, 4, 3); wyciagnij(s, [2, 1.5, 0], 2);
+  const g = () => s.geo, v0 = meshVolume(g()), f0 = s.faces, dach = () => facesOfPolys(g(), [s.faceAt([2, 1.5, 2])])[0].idx;
+  const stare = g().polys; reverseFaces(g(), dach()); const nowa = stare !== g().polys;
+  const wDol = s.has([2, 1.5, 2], mZ), ileDach = s.faces;
+  const r1 = orientFaces(g(), [s.faceAt([2, 1.5, 0])]), n1 = reverseFaces(g(), r1);
+  const wGore = s.has([2, 1.5, 2], Z), v1 = meshVolume(g());
+  reverseFaces(g(), facesOfPolys(g(), [s.faceAt([2, 0, 1])])[0].idx);
+  const n2 = reverseFaces(g(), orientFaces(g(), [s.faceAt([2, 0, 1], Y)]));
+  return { 'nowa tablica ścian (widok ją przebuduje)': [nowa, true], 'dach w dół po odwróceniu': [wDol, true], 'ściany po odwróceniu': [ileDach, f0], 'ujednolicenie odwraca dach': [n1 > 0 && wGore, true], 'objętość po ujednoliceniu': [Math.round(v1 * 1e6) / 1e6, Math.round(v0 * 1e6) / 1e6], 'całość odwrócona od frontu': [Math.round(meshVolume(g()) * 1e6) / 1e6, -Math.round(v0 * 1e6) / 1e6], 'odwróconych przy całości': [n2 > 0, true] };
 });
 przypadek('okno, potem usunięty dach', 'Prostokąt okna na froncie, potem usunięty dach: okno zostaje (6 ścian).', () => {
   const s = dom(); s.rectXZ(2, 0, 1, 1, 1); s.edit(m => { const g = m.shapes.find(q => q.geo), i = g.polys.findIndex(P => P.every(p => Math.abs(p[2] - 3) < 1e-9)); deleteFace(m, g, [g.polys[i]]); });

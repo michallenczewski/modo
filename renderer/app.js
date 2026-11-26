@@ -5,7 +5,7 @@ import { Snapper, setAxes } from './snap.js';
 import { V, newModel, cloneModel, fixModel, similar, membersOf, groupOf, topUnder, insideGroup, chainOf, subtreeIds, IDENT, syncComponent, pruneGroups, instancesOf, vertices, facesFromLines, edges as edgeList } from './model.js';
 import { TEXTURES, textureCanvas, registerImages, loadImageFile, isImageMat } from './textures.js';
 import { stitch, intersectFaces } from './stitch.js';
-import { absorb, component, facesOfPolys, liftFaces, eraseFaces } from './geo.js';
+import { absorb, component, facesOfPolys, liftFaces, eraseFaces, reverseFaces, orientFaces } from './geo.js';
 import { subFaces, subAt, scaleTargets, targetBox, pickEntity, deleteFace, deleteEdge, Arc3Tool, FreehandTool, LookTool, WalkTool, CamPosTool, PlaceTool, SectionTool, DimTool, TextTool, ProtractorTool, PolygonTool, RotRectTool, CenterArcTool, SelectTool, LineTool, RectTool, PushTool, PaintTool, NavTool, ZoomWinTool, CircleTool, ArcTool, drawSeg, MoveTool, RotateTool, ScaleTool, OffsetTool, TapeTool, EraserTool, ImageScaleTool, AxesTool, noteMove, TIP_DELAY } from './tools.js';
 import { ACTIONS, loadKeys, saveKeyOverride, keysFor, comboOf, prettyCombo } from './keys.js';
 import { sunPosition, sunRiseSet, fmtHour } from './sun.js';
@@ -634,6 +634,8 @@ function run(act) {
     case 'soften': softenSel(true); break;
     case 'unsoften': softenSel(false); break;
     case 'selSameMat': selectSameMaterial(); break;
+    case 'reverseFaces': faceSidesOp(false); break;
+    case 'orientFaces': faceSidesOp(true); break;
     case 'intersect': intersectSel(); break;
     case 'underToLines': underlayToLines(); break;
     case 'selectNone': app.selection.clear(); app.sub = []; app.selectionChanged(); break;
@@ -996,7 +998,8 @@ $('#setBtn').innerHTML = ic('gear');
 const OPS = [[['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')]],
   [['solidUnion', _t('Suma brył')], ['solidIntersect', _t('Część wspólna')], ['solidSubtract', _t('Odejmij od pierwszej')], ['solidTrim', _t('Przytnij pierwszą')]],
   [['intersect', _t('Przetnij ściany brył')], ['makeFaces', _t('Ściany z zaznaczonych linii')], ['cleanLines', _t('Usuń luźne krawędzie')]],
-  [['soften', _t('Wygładź krawędzie (do 30°)')], ['unsoften', _t('Przywróć wygładzone krawędzie')]]];
+  [['soften', _t('Wygładź krawędzie (do 30°)')], ['unsoften', _t('Przywróć wygładzone krawędzie')]],
+  [['reverseFaces', _t('Odwróć ściany')], ['orientFaces', _t('Ujednolić orientację ścian')]]];
 function openOps(btn) {
   const m = $('#opsMenu'); const was = !m.hidden; closePops(); hideTip(); if (was) return;
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
@@ -1750,6 +1753,28 @@ function softenSel(on) {
   }
   app.noStitch = true; app.changed(); app.noStitch = false;
 }
+// Strony ścian: „Odwróć ściany” zamienia przód z tyłem w zaznaczonych ścianach, „Ujednolić orientację” ustawia ściany
+// połączone z zaznaczoną tak samo jak ona (jak w SketchUpie). Zaznaczenie zostaje.
+function faceSidesOp(orient) {
+  const faces = app.sub.filter(q => q.kind === 'face');
+  if (!faces.length) return toast(orient ? _t('Zaznacz ścianę, według której ustawię sąsiednie.') : _t('Zaznacz ściany do odwrócenia.'));
+  const by = new Map(); for (const q of faces) { let a = by.get(q.id); if (!a) by.set(q.id, a = []); a.push(+q.key.split(':')[1]); }
+  // najpierw plan (co odwrócić), dopiero potem krok cofania — bez zmian nie ma pustego kroku ani utraconego „ponów”
+  const plan = [], keep = [];
+  for (const [id, first] of by) {
+    const s = app.model.shapes.find(x => x.id === id); if (!s || !s.polys) continue;
+    const idx = facesOfPolys(s, first).flatMap(f => f.idx); keep.push([id, idx]);
+    const rev = orient ? orientFaces(s, idx) : idx; if (rev.length) plan.push([id, rev]);
+  }
+  if (!plan.length) return toast(orient ? _t('Ściany połączone z zaznaczoną są już zwrócone tak samo.') : _t('Tych ścian nie da się odwrócić.'));
+  app.checkpoint();
+  for (const [id, rev] of plan) reverseFaces(app.model.shapes.find(x => x.id === id), rev);
+  app.noStitch = true; app.changed(); app.noStitch = false;
+  // zaznaczenie z modelu po zmianie (bryła mogła wejść do wspólnej geometrii — wtedy go nie odtwarzamy)
+  app.sub = keep.flatMap(([id, idx]) => { const s = app.model.shapes.find(x => x.id === id); return s && s.polys && idx.every(i => i < s.polys.length) ? subFaces(s, idx) : []; });
+  app.selectionChanged();
+  toast(orient ? _t('Ujednolicona orientacja ścian.') : _t('Odwrócone ściany.'));
+}
 // wszystkie ściany geometrii w tym samym kolorze, materiale i kryciu co zaznaczona
 function selectSameMaterial() {
   const q = app.sub.find(x => x.kind === 'face'); if (!q) return toast(_t('Zaznacz ścianę, a zaznaczę wszystkie z tym samym materiałem.'));
@@ -1932,7 +1957,7 @@ function openContext(x, y, cx, cy) {
     items.push(null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], ['zoomSel', _t('Pokaż zaznaczenie')], null, ['delete', _t('Usuń')]);
   } else if (app.sub.length) {
     // zaznaczone ściany albo krawędzie wspólnej geometrii
-    if (app.sub.some(q => q.kind === 'face')) items.push(['selSameMat', _t('Zaznacz ściany z tym samym materiałem')], ['soften', _t('Wygładź krawędzie')], ['unsoften', _t('Przywróć wygładzone krawędzie')], null, ['group', _t('Utwórz grupę')], ['comp', _t('Utwórz komponent')], null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], null, ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], null);
+    if (app.sub.some(q => q.kind === 'face')) items.push(['selSameMat', _t('Zaznacz ściany z tym samym materiałem')], ['soften', _t('Wygładź krawędzie')], ['unsoften', _t('Przywróć wygładzone krawędzie')], null, ['reverseFaces', _t('Odwróć ściany')], ['orientFaces', _t('Ujednolić orientację ścian')], null, ['group', _t('Utwórz grupę')], ['comp', _t('Utwórz komponent')], null, ['flipX', _t('Odbij wzdłuż osi czerwonej')], ['flipY', _t('Odbij wzdłuż osi zielonej')], ['flipZ', _t('Odbij wzdłuż osi niebieskiej')], null, ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null, ['hideSel', _t('Ukryj')], ['hideRest', _t('Ukryj resztę')], ['lock', _t('Zablokuj')], null);
     else items.push(['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej')], null);
     items.push(['delete', _t('Usuń')]);
   } else {
