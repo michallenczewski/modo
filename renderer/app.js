@@ -34,7 +34,7 @@ api.onFullscreen(v => document.documentElement.classList.toggle('fs', v));
 /* ---------- ikony narzędzi ---------- */
 const IC = {
   eye: '<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>',
-  gear: '<path d="M2.5 4.5h4M9.5 4.5h4M2.5 11.5h7M12.5 11.5h1"/><circle cx="8" cy="4.5" r="1.5"/><circle cx="11" cy="11.5" r="1.5"/>',
+  gear: '<path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.8" fill="var(--bg)"/><circle cx="10.5" cy="10.5" r="1.8" fill="var(--bg)"/>',
   ops: '<path d="M2.5 6.5h7v7h-7z"/><path d="M6.5 2.5h7v7h-3"/><path d="M9.5 9.5v-3h-3" stroke-dasharray="1.3 1.5"/>',
   select: '<path d="M4 2.5v10.2l2.9-2.5 1.9 4.1 1.7-.8-1.9-4h3.9z"/>',
   line: '<path d="M4 12 12 4"/><circle cx="3.2" cy="12.8" r="1.2"/><circle cx="12.8" cy="3.2" r="1.2"/>',
@@ -309,6 +309,13 @@ for (const t of TOOLBAR) {
   });
   toolsEl.append(b);
 }
+// wspólny wskaźnik wybranego narzędzia (WYTYCZNE_INTERAKCJE.md, p. 3): przeskakuje pod kliknięte narzędzie
+const toolInd = document.createElement('div'); toolInd.className = 'ind'; toolsEl.prepend(toolInd);
+function moveInd() {
+  const on = toolsEl.querySelector('.ib.on'); toolInd.style.opacity = on ? 1 : 0;
+  if (on) toolInd.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
+}
+addEventListener('resize', moveInd);
 // wysuwane menu wariantów
 let flyEl = null, flyTimer = null;
 function showFlyout(b, fam) {
@@ -364,21 +371,45 @@ function setTool(id) {
   const fam = famOf(id);
   if (fam) { famCur[fam] = id; const fb = toolsEl.querySelector(`[data-family="${fam}"]`); if (fb) { fb.querySelector('svg').outerHTML = ic(id); fb.setAttribute('aria-label', TOOL_NAME[id]); } }
   for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === id || (!!fam && b.dataset.family === fam));
+  moveInd();
   $('#view').className = ['place', 'section', 'dim', 'text', 'protractor', 'line', 'rect', 'rrect', 'polygon', 'carc', 'pie', 'circle', 'arc', 'push', 'move', 'rotate', 'scale', 'offset', 'tape', 'eraser', 'paint', 'zoomWin', 'arc3', 'freehand', 'camPos'].includes(id) ? 'c-draw' : ['orbit', 'pan', 'look', 'walk'].includes(id) ? 'c-grab' : '';
   $('#view').style.cursor = toolCursor(id);
   viewer.overlayDraw = (c, v) => { syncSubEdges(); drawTrace(c, v); tool.draw(c, v); if (!!tool.copy !== !!curIcon.dataset.copy) toolCursor(toolId); };
   viewer.annotDraw = (c, proj, scale, o = {}) => drawAnnotations(c, proj, app.model, { scale, dark: o.dark ?? viewer.dark, paper: 'paper' in o ? o.paper : viewer.st().paper, selected: scale === 1 ? app.selection : null });
   app.refresh();
 }
-let tipEl = null;
+// Podpowiedź przy przycisku (WYTYCZNE_INTERAKCJE.md, p. 6): po 1,5 s bez ruchu, a po przejściu na sąsiedni przycisk
+// (do 0,4 s od zniknięcia poprzedniej) — od razu. Lewy pasek: obok przycisku; górny pasek: pod nim (albo nad, gdy brak miejsca).
+let tipEl = null, tipT = 0, tipFor = null, tipLast = 0;
 function showTip(el, text, key) {
-  hideTip(); const r = el.getBoundingClientRect();
-  tipEl = document.createElement('div'); tipEl.className = 'tip';
-  tipEl.innerHTML = text + (key ? ' <kbd>' + prettyCombo(key, isMac) + '</kbd>' : '');
-  tipEl.style.left = (r.right + 8) + 'px'; tipEl.style.top = (r.top + r.height / 2 - 14) + 'px';
-  document.body.append(tipEl);
+  clearTimeout(tipT); if (tipEl) { tipEl.remove(); tipEl = null; tipLast = Date.now(); }
+  tipFor = el;
+  tipT = setTimeout(() => {
+    if (tipFor !== el || !el.isConnected) return;
+    const r = el.getBoundingClientRect();
+    tipEl = document.createElement('div'); tipEl.className = 'tip'; tipEl.setAttribute('role', 'tooltip');
+    tipEl.innerHTML = esc(text) + (key ? ' <kbd>' + prettyCombo(key, isMac) + '</kbd>' : '');
+    document.body.append(tipEl);
+    const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    if (el.closest('#tools')) { tipEl.style.left = (r.right + 8) + 'px'; tipEl.style.top = (r.top + r.height / 2 - h / 2) + 'px'; }
+    else { const below = r.bottom + 8 + h < innerHeight; tipEl.style.left = Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + 'px'; tipEl.style.top = (below ? r.bottom + 6 : r.top - h - 6) + 'px'; }
+    requestAnimationFrame(() => tipEl && tipEl.classList.add('on'));
+  }, Date.now() - tipLast < 400 ? 0 : 1500);
 }
-function hideTip() { if (tipEl) tipEl.remove(); tipEl = null; }
+function hideTip() { clearTimeout(tipT); if (tipEl) { tipEl.remove(); tipEl = null; tipLast = Date.now(); } tipFor = null; }
+// przyciski górnego paska: zamiast systemowego dymka (title) ta sama podpowiedź, ze skrótem polecenia
+const TIP_ACT = { viewBtn: 'views', panelBtn: 'panel', pngBtn: 'png', aiBtn: 'render', underBtn: 'underlay', libBtn: 'library', undoBtn: 'undo', redoBtn: 'redo' };
+document.addEventListener('pointerover', e => {
+  const el = e.target.closest && e.target.closest('header .ib'); if (!el || el === tipFor) return;
+  if (el.title) { el.dataset.tip = el.title; el.removeAttribute('title'); }
+  const t = el.dataset.tip || el.getAttribute('aria-label'); if (!t) return;
+  showTip(el, t, TIP_ACT[el.id] ? keysFor(TIP_ACT[el.id], app.keys.over)[0] : null);
+});
+document.addEventListener('pointerout', e => { const el = e.target.closest && e.target.closest('header .ib'); if (el && el === tipFor && !el.contains(e.relatedTarget)) hideTip(); });
+addEventListener('pointerdown', hideTip, true); addEventListener('wheel', hideTip, { passive: true });
+// „tak” (udało się) i „nie” (nie da się) na przycisku; przy „nie” zawsze też podpowiedź u dołu okna
+function ack(el, ok) { if (!el) return; el.classList.remove('tak', 'nie'); void el.offsetWidth; el.classList.add(ok ? 'tak' : 'nie'); }
+app.ack = ack;
 
 /* ---------- pasek stanu i pole wymiarów ---------- */
 let vcbBuf = '';
@@ -762,7 +793,7 @@ function deleteSelection() {
 function regeo() { for (const s of app.model.shapes) delete s.apart; try { absorb(app.model, app.editing ?? null); } catch (e) { console.error('absorb', e); } }
 function undo() {
   if (tool.active || tool.anchor || tool.p0) tool.cancel();
-  if (!app.undo.length) return;
+  if (!app.undo.length) { ack($('#undoBtn'), false); return toast(_t('Nie ma czego cofnąć.')); }
   app.clearSub();
   app.opSeq++;
   app.redo.push(cloneModel(app.model)); app.model = app.undo.pop();
@@ -770,7 +801,7 @@ function undo() {
   if (app.editing && !app.model.groups.some(g => g.id === app.editing)) app.exitGroup();
 }
 function redo() {
-  if (!app.redo.length) return;
+  if (!app.redo.length) { ack($('#redoBtn'), false); return toast(_t('Nie ma czego ponowić.')); }
   app.clearSub();
   app.opSeq++;
   app.undo.push(cloneModel(app.model)); app.model = app.redo.pop();
@@ -1870,7 +1901,7 @@ async function openFileMenu() {
   try { recent = (await api.recentList()).filter(r => r.path !== app.file.path).slice(0, 8); lost = await api.autosaveList(auto.key); } catch (e) {}
   const items = [['new', _t('Nowy szkic')], ['open', _t('Otwórz…')], null, ['save', _t('Zapisz')], ['saveAs', _t('Zapisz jako…')], ['saveCopy', _t('Zapisz kopię jako…')]];
   if (app.file.path) items.push(['revert', _t('Przywróć zapisaną wersję')]);
-  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['imageUnder', _t('Podkład z obrazu…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], ['dxf', _t('Eksport DXF (CAD)…')], ['dae', _t('Eksport DAE…')], ['stl', _t('Eksport STL…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')], ['updateCheck', _t('Sprawdź aktualizacje')]);
+  items.push(null, ['importSkp', _t('Importuj SketchUp (.skp)…')], ['underlay', _t('Podkład DXF / DWG…')], ['imageUnder', _t('Podkład z obrazu…')], ['png', _t('Eksport PNG…')], ['obj', _t('Eksport OBJ (3ds Max)…')], ['dxf', _t('Eksport DXF (CAD)…')], ['dae', _t('Eksport DAE…')], ['stl', _t('Eksport STL…')], null, ['clearGuides', _t('Usuń wszystkie prowadnice')], ['newWindow', _t('Nowe okno')]);
   // Edycja: schowek, zaznaczenie, ukrywanie i blokada (dawne okienko Edycja)
   items.push('edit', ['cutClip', _t('Wytnij')], ['copy', _t('Kopiuj')], ['paste', _t('Wklej (wskaż miejsce)')], ['pasteInPlace', _t('Wklej w tym samym miejscu')], null,
     ['selectAll', _t('Zaznacz wszystko')], ['selectNone', _t('Odznacz wszystko')], ['selectInvert', _t('Odwróć zaznaczenie')], null,
@@ -1898,9 +1929,21 @@ async function openFileMenu() {
 $('#setBtn').addEventListener('click', () => {
   const m = $('#menu'); const was = !m.hidden && m.dataset.owner === 'set'; closePops(); if (was) return; m.dataset.owner = 'set';
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
-  const items = [['theme', _t('Wygląd: ') + THEME_NAME[theme]], ['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['keys', _t('Skróty klawiszowe')]];   // i18n-ok
-  m.innerHTML = items.map(([a, n]) => `<button role="menuitem" data-a="${a}"><span>${n}</span>${k(a)}</button>`).join('');
-  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { closePops(); run(b.dataset.a); }));
+  // jak w całej rodzinie programów (WYTYCZNE_INTERAKCJE.md, p. 8): motyw, skróty, opcje Modo, wersja i aktualizacje
+  const chk = on => `<i class="mchk">${on ? '✓' : ''}</i>`, u = updState || {};
+  const groups = [
+    [['theme:light', _t('Jasny motyw'), theme === 'light'], ['theme:dark', _t('Ciemny motyw'), theme === 'dark'], ['theme:auto', _t('Motyw jak w systemie'), theme === 'auto']],
+    [['keys', _t('Skróty klawiszowe')]],
+    [['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]]]   // i18n-ok
+  ];
+  const ver = u.current ? `<div class="mver">Modo ${u.current}</div>` : '';
+  const upd = api.web ? '' : u.state === 'available' ? `<button role="menuitem" data-a="updInstall"><span>${_t('Zainstaluj wersję ')}${u.version}</span></button>` : `<button role="menuitem" data-a="updateCheck"><span>${_t('Sprawdź aktualizacje')}</span></button>`;
+  m.innerHTML = groups.map(g => g.map(([a, n, on]) => `<button role="menuitem" data-a="${a}">${on === undefined ? '' : chk(on)}<span>${n}</span>${on === undefined ? k(a) : ''}</button>`).join('')).join('<div class="msep"></div>')
+    + (ver || upd ? '<div class="msep"></div>' + ver + upd : '');
+  m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    closePops(); const a = b.dataset.a;
+    if (a.startsWith('theme:')) setTheme(a.slice(6)); else if (a === 'updInstall') api.updateInstall(); else run(a);
+  }));
   m.hidden = false;
   const r = $('#setBtn').getBoundingClientRect();
   m.style.left = Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth) + 'px'; m.style.top = (r.bottom + 6) + 'px';
@@ -2172,7 +2215,9 @@ app.importSkp = importSkp;
 api.onSaveThenClose(async () => { if (await saveSketch(false)) api.closeNow(); });
 
 /* ---------- aktualizacje ---------- */
+let updState = null;
 function renderUpd(s) {
+  if (s) updState = s;
   const b = $('#updBtn');
   if (s && s.state === 'available') { b.hidden = false; b.textContent = _t('Nowa wersja ') + s.version + _t(' — zainstaluj'); }
   else if (s && s.state === 'downloading') { b.hidden = false; b.textContent = _t('Pobieram ') + Math.round(100 * s.got / (s.size || 1)) + '%'; }
@@ -2197,7 +2242,6 @@ $('#editChip').addEventListener('click', () => app.editSolid != null ? app.exitS
 $('#orthoChip').addEventListener('click', () => run(viewer.ortho ? 'persp' : 'twoPoint'));
 
 /* ---------- wygląd: automatyczny (jak system), jasny, ciemny ---------- */
-const THEME_NAME = { auto: _t('automatyczny'), light: _t('jasny'), dark: _t('ciemny') };
 let theme = 'auto';
 try { theme = localStorage.getItem('modo.theme') || 'auto'; } catch (e) {}
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -2208,16 +2252,14 @@ function applyTheme() {
   api.setTheme?.(dark);
   $('#pngDarkRow').hidden = !dark;
 }
-function cycleTheme() {
-  theme = { auto: 'light', light: 'dark', dark: 'auto' }[theme] || 'auto';
-  try { localStorage.setItem('modo.theme', theme); } catch (e) {}
-  applyTheme(); toast(_t('Wygląd: ') + THEME_NAME[theme]);
-}
+function setTheme(t) { theme = t; try { localStorage.setItem('modo.theme', theme); } catch (e) {} applyTheme(); }
+// skrót ⌘⇧D / Ctrl+Shift+D: kolejno jak w systemie → jasny → ciemny
+function cycleTheme() { setTheme({ auto: 'light', light: 'dark', dark: 'auto' }[theme] || 'auto'); toast({ auto: _t('Motyw jak w systemie'), light: _t('Jasny motyw'), dark: _t('Ciemny motyw') }[theme]); }
 mq.addEventListener('change', () => { if (theme === 'auto') applyTheme(); });
 applyTheme();
 
 /* ---------- start ---------- */
-setStyle('szkic');
+setStyle('kreska');
 setTool('select');
 renderSun();
 setFile(null, _t('Bez nazwy')); app.markDirty(false);

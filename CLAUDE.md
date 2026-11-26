@@ -14,6 +14,7 @@ Tu są tylko zasady. Procedury krok po kroku są w umiejętnościach (`.claude/s
 - Przed większą zmianą przeczytaj `ARCHITEKTURA.md`.
 - Każdą zmianę w geometrii (wypychanie, ściany, krawędzie, rysowanie) sprawdź umiejętnością `sprawdziany-modelowania` (`node scripts/sprawdziany.mjs` musi przejść), a zgłoszony błąd modelowania najpierw dopisz jako przypadek.
 - Każdą zmianę widoczną w interfejsie sprawdź w wersji przeglądarkowej — umiejętność `test-w-przegladarce` (polecenia `window.modoTest`). Zmiany w wyświetlaniu, zaznaczaniu, przyciąganiu i cofaniu sprawdź też umiejętnością `sprawdzian-wydajnosci`.
+- Przyciski, przełączniki, podpowiedzi, menu ustawień i ruch w interfejsie: według `WYTYCZNE_INTERAKCJE.md` (wspólne dla całej rodziny programów — Gapa, Blat, Modo, Rysio); sprawdź w jasnym i ciemnym motywie.
 - Nowy albo zmieniony napis interfejsu: umiejętność `tlumaczenia`; przed zapisem `node scripts/tlumaczenia.mjs` musi przejść.
 - Zmianę zrobioną skryptem albo dużą zmianę daj przed zapisem pomocnikowi `recenzent`.
 - Node leży w `~/.local/node/bin`, `gh` w `~/.local/bin` (dopisz do `PATH` w każdym poleceniu). Gdy `git push` wisi, uruchom go z limitem czasu (`perl -e 'alarm 50; exec @ARGV' git push origin main`).

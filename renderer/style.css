@@ -3,6 +3,7 @@
   --bg:#f7f7f5; --text:#1a1a19; --text2:#4a4945; --muted:#706f6a; --muted2:#8f8e89;
   --soft:#efeeea; --hover:#ecebe7; --line:#e6e5e1; --card:#fff; --pill:#fff; --pillsh:0 1px 2px rgba(0,0,0,.08);
   --menush:0 0 0 1px rgba(0,0,0,.06),0 10px 30px rgba(0,0,0,.10); --kbd:#f3f2ef; --ring:#1a1a19; --tip:#1a1a19; --tiptext:#f7f7f5;
+  --spring:cubic-bezier(.34,1.56,.64,1); --toolon:#fff; --cardline:rgba(0,0,0,.07); --accent:#3f5f99;
   color-scheme:light;
 }
 /* tryb ciemny — kolory jak w ciemnej Gapie */
@@ -10,6 +11,7 @@
   --bg:#161616; --text:#e9e9e7; --text2:#c4c4c1; --muted:#8d8d89; --muted2:#6f6f6c;
   --soft:#222221; --hover:#242423; --line:#2a2a29; --card:#1d1d1c; --pill:#363635; --pillsh:0 1px 2px rgba(0,0,0,.4);
   --menush:0 0 0 1px rgba(255,255,255,.07),0 12px 36px rgba(0,0,0,.5); --kbd:#2e2e2d; --ring:#e9e9e7; --tip:#e9e9e7; --tiptext:#161616;
+  --toolon:#3a3a38; --cardline:rgba(255,255,255,.06); --accent:#5d7fbf;
   color-scheme:dark;
 }
 [data-theme=dark] .tip kbd{background:#d6d6d3;color:#161616}
@@ -45,9 +47,23 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 #fileName{font-weight:500;overflow:hidden;text-overflow:ellipsis}
 #saved{color:var(--muted2);font-size:12px}
 .gap{flex:1 1 0;min-width:8px}
-.ib{width:32px;height:32px;border-radius:7px;color:var(--muted);display:flex;align-items:center;justify-content:center;flex:none}
+.ib{width:30px;height:28px;border-radius:7px;color:var(--muted);display:flex;align-items:center;justify-content:center;flex:none;transition:background-color .15s,color .15s}
 .ib:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .ib.on,.ib[aria-pressed=true]{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
+/* ruch jak w całej rodzinie programów (WYTYCZNE_INTERAKCJE.md): ikona unosi się przy najechaniu, ugina przy wciśnięciu */
+.ib>svg{width:15px;height:15px;stroke-width:1.3;transition:transform .35s var(--spring)}
+.ib:hover:not(:disabled)>svg{transform:translateY(-1px)}
+.ib:active:not(:disabled)>svg{transform:scale(.86)}
+/* przełącznik włączony (podkład, panel, wygląd widoku): tło w kolorze akcentu wyrasta od środka, ikona biała */
+#topBar .ib.on,#panelBtn.on{position:relative;background:transparent;box-shadow:none;color:#fff}
+#topBar .ib.on::before,#panelBtn.on::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--accent);animation:wypelnij .42s var(--spring)}
+#topBar .ib.on>svg,#panelBtn.on>svg{position:relative}
+@keyframes wypelnij{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+/* „tak” i „nie” */
+.ib.tak{animation:tak .55s ease-out}
+@keyframes tak{0%{background:var(--hover)}100%{background:transparent}}
+.ib.nie{animation:nie .38s ease-out}
+@keyframes nie{20%{transform:translateX(-3px)}45%{transform:translateX(3px)}70%{transform:translateX(-2px)}}
 .ib.sm{width:26px;height:26px;font-size:16px}
 .tb{height:30px;padding:0 10px;border-radius:7px;color:var(--text2);display:flex;align-items:center;gap:7px;white-space:nowrap;flex:none}
 .tb:hover,.tb.open{background:var(--hover);color:var(--text)}
@@ -63,7 +79,11 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .sep{width:1px;height:16px;background:var(--line);margin:0 6px;flex:none}
 
 /* --- narzędzia --- */
-#tools{grid-column:1;grid-row:2/4;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0 12px}
+#tools{grid-column:1;grid-row:2/4;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0 12px;position:relative}
+/* jeden wspólny wskaźnik wybranego narzędzia, przeskakuje ze sprężyną */
+#tools .ind{position:absolute;top:0;left:0;width:30px;height:28px;border-radius:7px;background:var(--toolon);box-shadow:0 0 0 1px var(--cardline),0 1px 2px rgba(0,0,0,.06);transition:transform .42s var(--spring),opacity .15s;pointer-events:none}
+#tools .ib{z-index:1}
+#tools .ib.on{background:transparent;box-shadow:none}
 #tools .hsep{height:1px;width:18px;background:var(--line);margin:6px 0;flex:none}
 #tools .grow{flex:1}
 #tools .ib.later{opacity:.32}
@@ -293,3 +313,10 @@ body.minimal #view{margin:12px}
 body.minimal #status{position:fixed;right:24px;bottom:24px;padding:0;z-index:5}
 body.minimal #status>:not(#vcbWrap){display:none!important}
 body.minimal #vcbWrap{background:var(--card);border-radius:9px;padding:4px 4px 4px 10px;box-shadow:0 0 0 1px var(--line),0 4px 14px rgba(0,0,0,.08)}
+.menu .mchk{width:12px;font-style:normal;color:var(--text);flex:none;text-align:center}
+.menu .mver{padding:6px 10px 2px;font-size:11.5px;color:var(--muted2)}
+
+/* podpowiedź: nazwa i przygaszony skrót, po 1,5 s bez ruchu */
+.tip{opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .2s var(--spring)}
+.tip.on{opacity:.94;transform:none}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
