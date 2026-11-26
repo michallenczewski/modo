@@ -468,6 +468,7 @@ export default {
  "Krawędzie tylne (zasłonięte widać blado)": "Back Edges (hidden edges shown faintly)",
  "Powiększ (przeciąganiem)": "Zoom Window (drag)",
  "Panel: element, warstwy, struktura": "Panel: entity, layers, outliner",
+ "Pokaż osie": "Show axes",
  "Wzór z Gemini przyszedł po otwarciu innego szkicu — nie dodałem go.": "The pattern from Gemini arrived after another sketch was opened — it was not added.",
  "Materiał z obrazu na dysku": "Material from an image file",
  "Materiał narysowany przez Gemini według opisu": "Material drawn by Gemini from a description",

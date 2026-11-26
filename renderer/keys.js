@@ -107,7 +107,7 @@ export const ACTIONS = [
   { group: _t('Widok'), id: 'style1', name: _t('Styl: Szkic'), keys: ['Shift+1'] },
   { group: _t('Widok'), id: 'style2', name: _t('Styl: Kreska'), keys: ['Shift+2'] },
   { group: _t('Widok'), id: 'style3', name: _t('Styl: Model'), keys: ['Shift+3'] },
-  { group: _t('Widok'), id: 'axes', name: _t('Pokaż / ukryj osie'), keys: ['Shift+A'] },
+  { group: _t('Widok'), id: 'showAxes', name: _t('Pokaż / ukryj osie'), keys: ['Shift+A'] },
   { group: _t('Widok'), id: 'theme', name: _t('Wygląd: automatyczny / jasny / ciemny'), keys: ['Mod+Shift+D'] },
   { group: _t('Plik'), id: 'new', name: _t('Nowy szkic'), keys: ['Mod+N'] },
   { group: _t('Plik'), id: 'open', name: _t('Otwórz'), keys: ['Mod+O'] },

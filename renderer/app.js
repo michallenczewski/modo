@@ -745,7 +745,7 @@ function run(act) {
     case 'style1': setStyle('szkic'); break;
     case 'style2': setStyle('kreska'); break;
     case 'style3': setStyle('model'); break;
-    case 'axes': viewer.showAxes = !viewer.showAxes; viewer.redraw(); break;
+    case 'showAxes': viewer.showAxes = !viewer.showAxes; viewer.redraw(); app.markDirtySoft(); renderViewPop(); break;
     case 'new': newSketch(); break;
     case 'open': openSketch(); break;
     case 'save': saveSketch(false); break;
@@ -1470,6 +1470,7 @@ function renderViewPop() {
   const secs = app.model.sections || [];
   $('#secRow').hidden = !secs.length;
   $('#secOn').checked = secs.some(q => q.on); $('#secPlanes').checked = viewer.showSectPlanes;
+  $('#axesOn').checked = viewer.showAxes;
 }
 // sceny są w panelu (sekcja Sceny)
 function renderScenes() {
@@ -1495,7 +1496,8 @@ $('#fovRange').addEventListener('input', e => { viewer.setFov(+e.target.value); 
 $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
-const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
+$('#axesOn').addEventListener('change', e => { if (e.target.checked !== viewer.showAxes) run('showAxes'); });
+const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
 const okThumb = t => typeof t === 'string' && /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(t);
 // miniatura sceny: mały obraz bieżącego widoku (JPEG, zapisywany w pliku razem ze sceną)
 async function sceneThumb(sc) {
@@ -1519,6 +1521,7 @@ function showScene(i) {
   viewer.setCamera(sc.camera);
   if (sc.style && STYLES[sc.style]) setStyle(sc.style);
   if ('fog' in sc) { viewer.setLook({ fog: sc.fog, wire: sc.wire }); syncLook(); }
+  if ('axes' in sc) { viewer.showAxes = sc.axes !== false; viewer.redraw(); }
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
