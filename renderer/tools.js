@@ -1528,18 +1528,21 @@ export class MoveTool extends Tool {
     if (V.len(this.d) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
     if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
-    this.last = { start: this.start, targets: this.targets, d: this.d, copy: this.copy, count: this.count, sub: this.sub, seq: this.app.opSeq };
+    // orig — pierwotne przesunięcie (z myszy albo z wpisanej długości): szyk „x5” i podział „/6” zawsze liczą się od niego,
+    // więc zmiana zdania przed następną czynnością (najpierw /4, potem /6) dzieli cały pierwotny odcinek, a nie jego część
+    this.last = { start: this.start, targets: this.targets, d: this.d, orig: this.orig || this.d, copy: this.copy, count: this.count, sub: this.sub, seq: this.app.opSeq };
+    this.orig = null;
     this.reset();
   }
-  redo(d, count) {
+  redo(d, count, orig) {
     // powtórzenie ostatniej operacji z nowym wymiarem albo liczbą kopii
     if (!this.lastValid() || !this.app.revertLast()) return false;
     const l = this.last; this.start = l.start; this.targets = l.targets; this.sub = l.sub;
-    this.apply(d, count, l.copy); this.copy = l.copy; this.finish(); this.copy = false; return true;
+    this.apply(d, count, l.copy); this.copy = l.copy; this.orig = orig || null; this.finish(); this.copy = false; return true;
   }
   value(str) {
     const n = parseCount(str), dv = parseDivide(str);
-    if ((n || dv) && this.lastValid() && this.last.copy) return n ? this.redo(this.last.d, n) : this.redo(V.mul(this.last.d, 1 / dv), dv);
+    if ((n || dv) && this.lastValid() && this.last.copy) { const o = this.last.orig; return n ? this.redo(o, n, o) : this.redo(V.mul(o, 1 / dv), dv, o); }
     const L = parseLength(str); if (L == null) return false;
     if (this.p0 && this.cur) { const d = V.sub(this.cur.p, this.p0); if (V.len(d) < 1e-9) return false; this.apply(V.mul(V.norm(d), L)); this.finish(); return true; }
     if (this.lastValid()) return this.redo(V.mul(V.norm(this.last.d), L), this.last.count);
@@ -1653,17 +1656,19 @@ export class RotateTool extends Tool {
     if (Math.abs(this.ang) < 1e-9) { this.app.setModelLive(this.start); this.reset(); this.app.refresh(); return; }
     this.app.commitLive(this.start);
     if (!this.sub) { this.app.selection.clear(); this.result.forEach(i => this.app.selection.add(i)); this.app.selectionChanged(); }
-    this.last = { start: this.start, targets: this.targets, sub: this.sub, c: this.c, n: this.n, ref: this.ref, ang: this.ang, copy: this.copy, count: this.count, seq: this.app.opSeq };
+    this.last = { start: this.start, targets: this.targets, sub: this.sub, c: this.c, n: this.n, ref: this.ref, ang: this.ang, orig: this.orig ?? this.ang, copy: this.copy, count: this.count, seq: this.app.opSeq };
+    this.orig = null;
     this.reset();
   }
   value(str) {
     const n = parseCount(str), dv = parseDivide(str);
-    const redo = (a, count) => {
+    const redo = (a, count, orig) => {
       if (!this.lastValid() || !this.app.revertLast()) return false;
       const l = this.last; Object.assign(this, { start: l.start, targets: l.targets, sub: l.sub, c: l.c, n: l.n, ref: l.ref });
-      this.apply(a, count, l.copy); const keep = this.copy; this.copy = l.copy; this.finish(); this.copy = keep; return true;
+      this.apply(a, count, l.copy); const keep = this.copy; this.copy = l.copy; this.orig = orig ?? null; this.finish(); this.copy = keep; return true;
     };
-    if ((n || dv) && this.lastValid() && this.last.copy) return n ? redo(this.last.ang, n) : redo(this.last.ang / dv, dv);
+    // jak w Przesuń: szyk i podział zawsze od pierwotnego kąta (zmiana zdania przed następną czynnością)
+    if ((n || dv) && this.lastValid() && this.last.copy) { const o = this.last.orig; return n ? redo(o, n, o) : redo(o / dv, dv, o); }
     const deg = parseFloat(String(str).replace(',', '.').replace('°', ''));
     if (!isFinite(deg)) return false;
     if (this.ref) { this.apply(deg * Math.PI / 180); this.finish(); return true; }
