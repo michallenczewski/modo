@@ -442,12 +442,27 @@ app.ack = ack;
 // Wciśnięcie: :active trwa tyle co kliknięcie (~0,1 s), więc przy szybkim kliknięciu ugięcia prawie nie widać.
 // Klasa .wcis od pointerdown do puszczenia, ale nie krócej niż 90 ms.
 document.addEventListener('pointerdown', e => {
-  const b = e.target.closest && e.target.closest('.ib'); if (!b || e.button) return;
+  const b = e.target.closest && e.target.closest('.ib, .tb, .primary, .menu button, .seg > button'); if (!b || e.button || b.disabled) return;
   b.classList.add('wcis'); const t0 = performance.now();
   const up = () => { removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
     setTimeout(() => b.classList.remove('wcis'), Math.max(0, 90 - (performance.now() - t0))); };
   addEventListener('pointerup', up); addEventListener('pointercancel', up);
 });
+// Po kliknięciu przycisku z tekstem — „tak”: tło błyska kolorem najechania (na głównym ciemnym przycisku przezroczystość).
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.tb, .primary'); if (b && !b.disabled) zagraj(b, 'tak'); });
+// Zakładki (.seg): wspólny wskaźnik przeskakuje pod wybraną opcję. Pilnuje go zmiana klasy .on i zmiana rozmiaru.
+for (const seg of document.querySelectorAll('.seg')) {
+  const ind = document.createElement('div'); ind.className = 'ind cicho'; seg.prepend(ind); seg.classList.add('zind');
+  let first = true;
+  const move = () => {
+    const on = seg.querySelector(':scope > button.on'); ind.style.opacity = on ? 1 : 0; if (!on || !on.offsetWidth) return;
+    ind.style.width = on.offsetWidth + 'px'; ind.style.transform = `translateX(${on.offsetLeft}px)`;
+    if (first) { first = false; requestAnimationFrame(() => requestAnimationFrame(() => ind.classList.remove('cicho'))); }
+  };
+  new MutationObserver(move).observe(seg, { subtree: true, attributes: true, attributeFilter: ['class'], childList: true });
+  new ResizeObserver(() => { ind.classList.add('cicho'); move(); requestAnimationFrame(() => ind.classList.remove('cicho')); }).observe(seg);
+  move();
+}
 // Przełączniki na górnym pasku: przy zmianie stanu kolor akcentu wyrasta od środka, a ikona „wskakuje” (albo „wyskakuje”
 // przy wyłączeniu). Obserwujemy klasę .on, więc działa to bez względu na to, które miejsce w kodzie przełącza stan.
 {

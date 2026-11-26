@@ -86,7 +86,21 @@ header button,header input,header .seg{-webkit-app-region:no-drag}
 .seg button:hover{color:var(--text)}
 .seg button:focus-visible{outline-width:1.5px;outline-offset:-1.5px}
 .seg button.on{background:var(--pill);box-shadow:var(--pillsh);color:var(--text)}
-.seg.stretch button{flex:1}
+/* zakładki: jeden wspólny wskaźnik przeskakuje pod wybraną (jak w grupie narzędzi); buttons nad nim */
+.seg{position:relative;overflow:hidden}
+.seg>.ind{position:absolute;top:2px;left:0;height:26px;border-radius:6px;background:var(--pill);box-shadow:var(--pillsh);pointer-events:none;transition:transform .42s var(--spring),width .42s var(--spring)}
+.seg>.ind.cicho{transition:none}
+.seg.zind>button{position:relative;z-index:1}
+.seg.zind>button.on{background:transparent;box-shadow:none}
+/* przyciski z samym tekstem (wzorzec przycisków, „.tx”): uginają się całe do 0,97 i wracają sprężyną */
+.tb,.primary,.menu button,.seg>button{transition:background-color .15s,color .15s,opacity .15s,transform .35s var(--spring)}
+.tb.wcis,.primary.wcis,.menu button.wcis,.seg>button.wcis{transform:scale(.97);transition:transform .09s ease-out}
+.tb.tak{animation:takTx .55s ease-out}
+@keyframes takTx{0%{background:var(--hover)}}
+.primary.tak{animation:takPri .55s ease-out}
+@keyframes takPri{0%{opacity:.6}100%{opacity:1}}
+.seg.stretch button{flex:1;padding:0 6px}
+.seg>button{white-space:nowrap}
 .sep{width:1px;height:16px;background:var(--line);margin:0 6px;flex:none}
 
 /* --- narzędzia --- */
