@@ -661,7 +661,7 @@ function run(act) {
     case 'makeFaces': makeFaces(); break;
     case 'cleanLines': cleanLines(); break;
     case 'backEdges': viewer.setLook({ backEdges: !viewer.backEdges }); renderViewPop(); syncLook(); toast(viewer.backEdges ? _t('Krawędzie tylne widoczne (blado)') : _t('Krawędzie tylne schowane')); break;
-    case 'ao': viewer.setLook({ ao: viewer.ao === false }); try { localStorage.setItem('modo.ao', viewer.ao === false ? '0' : '1'); } catch (e) {} toast(viewer.ao === false ? _t('Cień otoczenia wyłączony') : viewer.style === 'model' ? _t('Cień otoczenia włączony') : _t('Cień otoczenia włączony — widać go w stylu Model')); syncLook(); break;
+    case 'ao': viewer.setLook({ ao: viewer.ao === false }); try { localStorage.setItem('modo.ao', viewer.ao === false ? '0' : '1'); } catch (e) {} toast(viewer.ao === false ? _t('Cienie w narożnikach wyłączone') : viewer.style === 'model' ? _t('Cienie w narożnikach włączone') : _t('Cienie w narożnikach włączone — widać je w stylu Model')); syncLook(); break;
     case 'modelEdges': viewer.setLook({ modelEdges: !viewer.modelEdges }); try { localStorage.setItem('modo.modelEdges', viewer.modelEdges ? '1' : ''); } catch (e) {} toast(viewer.modelEdges ? (viewer.style === 'model' ? _t('Model z krawędziami') : _t('Krawędzie włączone — widać je w stylu Model')) : _t('Model bez krawędzi')); syncLook(); break;
     case 'faceSides': viewer.setLook({ faceSides: !viewer.faceSides }); toast(viewer.faceSides ? _t('Strony ścian: tył każdej ściany jest niebieski') : _t('Strony ścian wyłączone')); syncLook(); break;
     case 'guides': viewer.setLook({ showGuides: viewer.showGuides === false }); renderViewPop(); toast(viewer.showGuides === false ? _t('Prowadnice ukryte') : _t('Prowadnice widoczne')); syncLook(); break;
@@ -1024,7 +1024,7 @@ const LOOK_GROUPS = () => {
   return [
     [draw ? _t('Rysunek') : _t('Model'), draw
       ? [['pencil', _t('Ołówek'), _t('drżąca, podwójna kreska na kremowym papierze'), () => !!viewer.pencil]]
-      : [['modelEdges', _t('Krawędzie'), _t('cienka, spokojna kreska'), () => !!viewer.modelEdges], ['ao', _t('Cień otoczenia'), _t('przyciemnione narożniki i styki'), () => viewer.ao !== false]]],
+      : [['modelEdges', _t('Krawędzie'), _t('cienka, spokojna kreska'), () => !!viewer.modelEdges], ['ao', _t('Cienie w narożnikach'), _t('miękkie przyciemnienie styków i zagłębień'), () => viewer.ao !== false]]],
     [_t('Krawędzie i ściany'), [
       ...(edges ? [['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges]] : []),
       ['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire],
@@ -2161,9 +2161,10 @@ function renderMatEdit(cur, list) {
   $('#paintCustom').value = cur.c || '#ffffff'; $('#meHex').textContent = (cur.c || DEFAULT_COLOR).toUpperCase();
   const pa = $('#paintAlpha'); pa.value = cur.a; setRangeFill(pa); $('#paintAlphaLbl').textContent = Math.round(cur.a * 100) + '%';
   const T = cur.t && TEXTURES[cur.t], im = cur.t && isImageMat(cur.t) && app.images.find(q => 'img:' + q.id === cur.t);
-  $('#meSizeRow').hidden = !T; $('#matImgW').hidden = !im; $('#meSizeRO').hidden = !!im;
-  if (im && document.activeElement !== $('#matImgW')) $('#matImgW').value = fmtM(im.size[0]);
-  if (T) $('#meSizeRO').textContent = fmtM(T.size[0]) + ' × ' + fmtM(T.size[1]);
+  // rozmiar jednego powtórzenia wzoru: szerokość do wpisania, wysokość wynika z proporcji wzoru
+  $('#meSizeRow').hidden = !T;
+  if (T && document.activeElement !== $('#matImgW')) $('#matImgW').value = fmtM(T.size[0]);
+  const def = T && TEX_DEFAULT[cur.t]; $('#meSizeReset').hidden = !def || (Math.abs(def[0] - T.size[0]) < 1e-9 && Math.abs(def[1] - T.size[1]) < 1e-9);
   if ($('#matEdit').hidden) return;
   const n = usesOf(cur); $('#meUse').textContent = n ? nFaces(n) : _t('nie użyty'); $('#meSel').disabled = !n;
   // podmiana: materiał zmieniony w edytorze, a ten, od którego zaczęto, jest na ścianach modelu
@@ -2242,11 +2243,28 @@ $('#meDel').addEventListener('click', () => {
 });
 $('#matImg').addEventListener('click', () => addImageMaterial());
 $('#matImgW').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); });
+// wbudowane wzory: domyślne rozmiary (zmiana w szkicu trafia do app.texSizes i do pliku)
+const TEX_DEFAULT = Object.fromEntries(Object.entries(TEXTURES).filter(([k]) => !isImageMat(k)).map(([k, T]) => [k, T.size.slice()]));
+app.texSizes = {};
+function setTexSize(id, size) {
+  const T = TEXTURES[id]; if (!T) return;
+  T.size = size.slice();
+  if (isImageMat(id)) { const im = app.images.find(q => 'img:' + q.id === id); if (im) { im.size = size.slice(); registerImages([im]); } }
+  else { const d = TEX_DEFAULT[id]; if (d && Math.abs(d[0] - size[0]) < 1e-9 && Math.abs(d[1] - size[1]) < 1e-9) delete app.texSizes[id]; else app.texSizes[id] = size.slice(); }
+  viewer.refreshTexture(id);
+}
+// po otwarciu albo nowym szkicu: wbudowane wzory wracają do domyślnych, potem rozmiary zapisane w pliku
+function applyTexSizes(sizes) {
+  for (const [k, d] of Object.entries(TEX_DEFAULT)) { TEXTURES[k].size = d.slice(); viewer.refreshTexture(k); }
+  app.texSizes = {};
+  for (const [k, v] of Object.entries(sizes || {})) if (TEX_DEFAULT[k] && Array.isArray(v) && v[0] > 0 && v[1] > 0) setTexSize(k, [+v[0], +v[1]]);
+}
 $('#matImgW').addEventListener('change', e => {
-  const im = app.images.find(q => 'img:' + q.id === app.paintTex), L = parseLength(e.target.value);
-  if (im && L > 0) { im.size = [L, L * im.px[1] / im.px[0]]; registerImages([im]); viewer.refreshTexture('img:' + im.id); app.markDirty(); }
+  const id = app.paintTex, T = id && TEXTURES[id], L = parseLength(e.target.value);
+  if (T && L > 0) { setTexSize(id, [L, L * T.size[1] / T.size[0]]); app.markDirty(); }
   renderSwatches();
 });
+$('#meSizeReset').addEventListener('click', () => { const id = app.paintTex; if (TEX_DEFAULT[id]) { setTexSize(id, TEX_DEFAULT[id]); app.markDirty(); renderSwatches(); } });
 // po zmianie modelu: lista „W modelu” i liczby w edytorze (z opóźnieniem — po serii zmian jedno przeliczenie)
 let matsTimer = 0;
 app.matsChanged = () => { useMemo.clear(); if (!app.panel || folded.has('mat') || (matCat !== 'model' && matTab !== 'edit')) return; clearTimeout(matsTimer); matsTimer = setTimeout(renderSwatches, 250); };
@@ -2458,7 +2476,7 @@ function adoptImages() {
 function serialize() {
   adoptImages();
   return JSON.stringify({
-    images: app.images.length ? app.images : undefined, colors: app.colors.length ? app.colors : undefined, imageUnder: app.imageUnder || undefined,
+    images: app.images.length ? app.images : undefined, colors: app.colors.length ? app.colors : undefined, texSizes: Object.keys(app.texSizes).length ? app.texSizes : undefined, imageUnder: app.imageUnder || undefined,
     app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.styleName(),
     sun: viewer.sunCfg, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, eye: app.eyeH, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
@@ -2478,7 +2496,7 @@ function load(text, name, path) {
   viewer.showAxes = d.axes !== false;
   viewer.setLook({ fog: !!d.fog, wire: !!d.wire, showHidden: false }); if (d.eye > 0) app.eyeH = d.eye; syncLook();
   app.underlay = d.underlay || null;
-  app.images = d.images || []; app.colors = Array.isArray(d.colors) ? d.colors.filter(u => u && typeof u.c === 'string' && /^#[0-9a-f]{6}$/i.test(u.c)).map(u => ({ id: String(u.id || ''), name: String(u.name || ''), c: u.c, ...(u.a > 0 && u.a < 1 ? { a: +u.a } : {}) })) : []; app.paintUser = null; app.matFrom = null; useMemo.clear(); renderSwatches(); registerImages(app.images); for (const im of app.images) viewer.refreshTexture('img:' + im.id); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
+  app.images = d.images || []; app.colors = Array.isArray(d.colors) ? d.colors.filter(u => u && typeof u.c === 'string' && /^#[0-9a-f]{6}$/i.test(u.c)).map(u => ({ id: String(u.id || ''), name: String(u.name || ''), c: u.c, ...(u.a > 0 && u.a < 1 ? { a: +u.a } : {}) })) : []; app.paintUser = null; app.matFrom = null; useMemo.clear(); registerImages(app.images); applyTexSizes(d.texSizes); renderSwatches(); for (const im of app.images) viewer.refreshTexture('img:' + im.id); app.imageUnder = d.imageUnder || null; viewer.setImageUnder(app.imageUnder); applyUnderlay();
   app.scenes = d.scenes || []; app.scene = -1;
   if (d.camera) viewer.setCamera(d.camera); else viewer.zoomExtents();
   setFile(path, name); app.markDirty(false); renderSun(); setTool('select'); renderViewChip();
@@ -2489,7 +2507,7 @@ async function confirmDiscard() { return !app.file.dirty || confirm(_t('Szkic ma
 async function newSketch() {
   if (!(await confirmDiscard())) return;
   app.editing = null; viewer.editGroup = null; app.clearSub();
-  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; app.images = []; app.colors = []; app.paintUser = null; app.matFrom = null; useMemo.clear(); renderSwatches(); app.imageUnder = null; viewer.setImageUnder(null); applyUnderlay(); app.scenes = []; app.scene = -1;
+  app.model = newModel(); app.undo = []; app.redo = []; app.selection.clear(); app.underlay = null; app.images = []; app.colors = []; app.paintUser = null; app.matFrom = null; useMemo.clear(); applyTexSizes(null); renderSwatches(); app.imageUnder = null; viewer.setImageUnder(null); applyUnderlay(); app.scenes = []; app.scene = -1;
   app.opSeq++; viewer.setModel(app.model); setFile(null, _t('Bez nazwy')); app.markDirty(false); setTool('select');
   app.docId = Math.random().toString(36).slice(2); camReset(); renderViewChip();
 }

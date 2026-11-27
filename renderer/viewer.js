@@ -949,7 +949,7 @@ export class Viewer {
     A.quad.material = A.ao; r.setRenderTarget(A.rtA); r.render(A.qs, A.qc);
     const Bu = A.blur.uniforms; Bu.uInvProj.value.copy(cam.projectionMatrixInverse); Bu.uTexel.value.set(1 / hw, 1 / hh); Bu.uRadius.value = radius;
     A.quad.material = A.blur; r.setRenderTarget(A.rtB); r.render(A.qs, A.qc);
-    A.mul.uniforms.uStrength.value = this.dark ? 0.75 : 0.9;
+    A.mul.uniforms.uStrength.value = this.dark ? 0.4 : 0.5;   // dawniej 0,75 / 0,9 — przyciemnienie było za mocne
     A.quad.material = A.mul; r.autoClear = false; r.setRenderTarget(target); r.render(A.qs, A.qc);
     r.autoClear = keepAuto; r.setRenderTarget(keepRT);
   }
