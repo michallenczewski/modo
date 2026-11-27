@@ -13,8 +13,8 @@ import { _t } from './i18n.js';
 export const STYLES = {
   // Szkic: ołówek — cienka, lekko drżąca kreska (dawniej gruby obrys 2,1 px i wyraźne falowanie wyglądały topornie)
   // Szkic: ołówek — każda kreska rysowana dwa razy z innym drżeniem (strokes: 2), końce lekko wychodzą za narożnik, ciepły grafit
-  szkic: { name: _t('Szkic'), paper: '#f4f1e8', ink: '#3a352d', inkFar: '#aaa395', wSil: 1.2, wIn: 0.6, ext: 3, wobble: 1.0, fade: 0.8, lines: true, strokes: 2, shadow: 0.2, tint: 0.35 },
-  kreska: { name: _t('Kreska'), paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
+  szkic: { name: _t('Rysunek ołówkiem'), paper: '#f4f1e8', ink: '#3a352d', inkFar: '#aaa395', wSil: 1.2, wIn: 0.6, ext: 3, wobble: 1.0, fade: 0.8, lines: true, strokes: 2, shadow: 0.2, tint: 0.35 },
+  kreska: { name: _t('Rysunek'), paper: '#ffffff', ink: '#1f1f1d', inkFar: '#9a9893', wSil: 1.6, wIn: 0.8, ext: 0, wobble: 0, fade: 0.6, lines: true, shadow: 0.16, tint: 0.15 },
   model: { name: _t('Model'), paper: '#efede8', ink: '#000000', inkFar: '#000000', wSil: 0, wIn: 0, ext: 0, wobble: 0, fade: 0, lines: false, shadow: 0.3, tint: 0 }
 };
 // tryb ciemny: ciemny papier, jasna kreska, przygaszone ściany (kolory jak w ciemnej Gapie)
@@ -232,7 +232,7 @@ export class Viewer {
     });
     this.edgeMesh = null;
 
-    this.style = 'szkic';
+    this.style = 'kreska'; this.pencil = false;   // dwa style: Rysunek ('kreska', z ołówkiem = parametry 'szkic') i Model
     this.sunCfg = { date: new Date().toISOString().slice(0, 10), hour: 13, lat: 52.23, lon: 21.01, tz: 'Europe/Warsaw', shadows: true, soft: 0.45, light: 0.7 };
     this.model = null; this.selected = new Set(); this.hover = null;
     this.showAxes = true;
@@ -247,7 +247,7 @@ export class Viewer {
   }
 
   st() {
-    const s = styleOf(this.style, this.dark);
+    const s = styleOf(this.style === 'kreska' && this.pencil ? 'szkic' : this.style, this.dark);
     // styl Model z włączonymi krawędziami: cienkie, spokojne kreski bez drżenia
     if (this.style === 'model' && this.modelEdges) return { ...s, lines: true, wSil: 1.1, wIn: 0.6, ink: this.dark ? '#d9d6cf' : '#2b2a27', inkFar: this.dark ? '#6f6c66' : '#8c8981', fade: 0.5 };
     return s;
@@ -805,13 +805,17 @@ export class Viewer {
   }
 
   /* ---------- styl i słońce ---------- */
+  // nazwa do zapisu w pliku i scenie (jak dawniej: 'szkic', 'kreska', 'model')
+  styleName() { return this.style === 'kreska' && this.pencil ? 'szkic' : this.style; }
+  // 'szkic' z dawnych plików i scen = Rysunek z ołówkiem
   setStyle(name) {
+    if (name === 'szkic') { name = 'kreska'; this.pencil = true; }
     this.style = name;
     if (this.model) this.rebuild(); else this.needs = true;
   }
   // mgła, siatka i ukryta geometria: materiały trzeba zbudować na nowo (mgła jest wkompilowana w shader)
   setLook(o) {
-    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides', 'ao', 'modelEdges', 'faceSides']) if (k in o) this[k] = !!o[k];
+    for (const k of ['fog', 'wire', 'showHidden', 'backEdges', 'showGuides', 'ao', 'modelEdges', 'faceSides', 'pencil']) if (k in o) this[k] = !!o[k];
     this.scene.fog = null; this.applyStyleUniforms();
     this.scene.traverse(q => { for (const m of [].concat(q.material || [])) m.needsUpdate = true; });
     if (this.model) this.rebuild(); else this.needs = true;

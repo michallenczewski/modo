@@ -415,3 +415,5 @@ body.minimal #miniType.on{display:flex}
 .scene.dropA::before{top:-3px}.scene.dropB::after{bottom:-3px}
 .ailast.tak{animation:takTx .55s ease-out}
 .scene .thumb.wcis{transform:scale(.97);transition:transform .09s ease-out}
+/* okienko oka: grupy przełączników (opcje stylu, krawędzie i ściany, pozostałe) */
+#lookList .lookgrp{font-size:11px;margin:2px 0 -2px}

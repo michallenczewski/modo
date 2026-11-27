@@ -662,7 +662,7 @@ function run(act) {
     case 'cleanLines': cleanLines(); break;
     case 'backEdges': viewer.setLook({ backEdges: !viewer.backEdges }); renderViewPop(); syncLook(); toast(viewer.backEdges ? _t('Krawędzie tylne widoczne (blado)') : _t('Krawędzie tylne schowane')); break;
     case 'ao': viewer.setLook({ ao: viewer.ao === false }); try { localStorage.setItem('modo.ao', viewer.ao === false ? '0' : '1'); } catch (e) {} toast(viewer.ao === false ? _t('Cień otoczenia wyłączony') : viewer.style === 'model' ? _t('Cień otoczenia włączony') : _t('Cień otoczenia włączony — widać go w stylu Model')); syncLook(); break;
-    case 'modelEdges': viewer.setLook({ modelEdges: !viewer.modelEdges }); try { localStorage.setItem('modo.modelEdges', viewer.modelEdges ? '1' : ''); } catch (e) {} toast(viewer.modelEdges ? (viewer.style === 'model' ? _t('Krawędzie w stylu Model widoczne') : _t('Krawędzie w stylu Model — widać je po przełączeniu na Model')) : _t('Styl Model bez krawędzi')); syncLook(); break;
+    case 'modelEdges': viewer.setLook({ modelEdges: !viewer.modelEdges }); try { localStorage.setItem('modo.modelEdges', viewer.modelEdges ? '1' : ''); } catch (e) {} toast(viewer.modelEdges ? (viewer.style === 'model' ? _t('Model z krawędziami') : _t('Krawędzie włączone — widać je w stylu Model')) : _t('Model bez krawędzi')); syncLook(); break;
     case 'faceSides': viewer.setLook({ faceSides: !viewer.faceSides }); toast(viewer.faceSides ? _t('Strony ścian: tył każdej ściany jest niebieski') : _t('Strony ścian wyłączone')); syncLook(); break;
     case 'guides': viewer.setLook({ showGuides: viewer.showGuides === false }); renderViewPop(); toast(viewer.showGuides === false ? _t('Prowadnice ukryte') : _t('Prowadnice widoczne')); syncLook(); break;
     case 'soften': softenSel(true); break;
@@ -742,8 +742,9 @@ function run(act) {
     case 'selectAll': app.selection.clear(); app.sub = []; app.model.shapes.forEach(s => { if (!s.locked) app.selection.add(s.id); }); app.model.lines.forEach(l => { if (!l.locked) app.selection.add('l' + l.id); }); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
-    case 'style1': setStyle('szkic'); break;
-    case 'style2': setStyle('kreska'); break;
+    case 'style1': setStyle('kreska', true); break;
+    case 'style2': setStyle('kreska', false); break;
+    case 'pencil': setStyle('kreska', !(viewer.style === 'kreska' && viewer.pencil)); toast(viewer.pencil ? _t('Rysunek ołówkiem') : _t('Rysunek czystą kreską')); break;
     case 'style3': setStyle('model'); break;
     case 'showAxes': viewer.showAxes = !viewer.showAxes; viewer.redraw(); app.markDirtySoft(); renderViewPop(); break;
     case 'new': newSketch(); break;
@@ -1002,25 +1003,45 @@ function viewStep(d) {
 }
 
 /* ---------- styl ---------- */
-function setStyle(s) {
+// Dwa style: Rysunek (kreska na papierze; przełącznik Ołówek — drżąca, podwójna kreska) i Model (kolory, cienie,
+// cień otoczenia; przełącznik Krawędzie). s: 'kreska' / 'model', albo dawne 'szkic' = Rysunek z ołówkiem;
+// pencil: true / false ustawia ołówek, undefined zostawia jak był.
+function setStyle(s, pencil) {
+  if (s === 'szkic') { s = 'kreska'; pencil = true; }
+  if (pencil !== undefined) viewer.pencil = pencil;
   viewer.setStyle(s);
   for (const b of document.querySelectorAll('#styleSeg button')) b.classList.toggle('on', b.dataset.style === s);
-  $('#pngStyle').textContent = 'styl: ' + STYLES[s].name;
+  $('#pngStyle').textContent = _t('styl: ') + STYLES[viewer.styleName()].name;
+  syncLook();
 }
 document.querySelectorAll('#styleSeg button').forEach(b => b.addEventListener('click', () => { setStyle(b.dataset.style); }));
 // prześwit (wszystkie krawędzie widać przez ściany) i siatka (same krawędzie) — pod ręką obok stylu
 // Wygląd widoku (prześwit, krawędzie tylne, siatka, mgła, ukryta geometria, prowadnice): jedno okienko z przełącznikami.
 // Przycisk na pasku jest podświetlony, gdy coś odbiega od zwykłego widoku.
-const LOOK = [['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges],
-  ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire], ['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden],
-  ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false], ['ao', _t('Cień otoczenia'), _t('w stylu Model'), () => viewer.ao !== false], ['modelEdges', _t('Krawędzie w stylu Model'), '', () => !!viewer.modelEdges], ['faceSides', _t('Strony ścian'), _t('tył ściany na niebiesko'), () => !!viewer.faceSides]];
+// [id, nazwa, podpis, czy włączone, kiedy działa] — przełącznik pokazuje się tylko tam, gdzie coś zmienia
+const LOOK_GROUPS = () => {
+  const draw = viewer.style !== 'model', edges = draw || !!viewer.modelEdges;
+  return [
+    [draw ? _t('Rysunek') : _t('Model'), draw
+      ? [['pencil', _t('Ołówek'), _t('drżąca, podwójna kreska na kremowym papierze'), () => !!viewer.pencil]]
+      : [['modelEdges', _t('Krawędzie'), _t('cienka, spokojna kreska'), () => !!viewer.modelEdges], ['ao', _t('Cień otoczenia'), _t('przyciemnione narożniki i styki'), () => viewer.ao !== false]]],
+    [_t('Krawędzie i ściany'), [
+      ...(edges ? [['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges]] : []),
+      ['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire],
+      ['faceSides', _t('Strony ścian'), _t('tył ściany na niebiesko'), () => !!viewer.faceSides]]],
+    [_t('Pozostałe'), [['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden], ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false]]]
+  ];
+};
+// przycisk oka podświetlony, gdy widok odbiega od zwykłego (prowadnice, cień otoczenia, krawędzie i ołówek to opcje stylu, nie odstępstwa)
+const LOOK_ODD = [['xray', () => viewer.xray], ['backEdges', () => viewer.backEdges && (viewer.style !== 'model' || !!viewer.modelEdges)], ['wire', () => viewer.wire], ['fog', () => !!viewer.fog], ['hiddenGeo', () => !!viewer.showHidden], ['faceSides', () => !!viewer.faceSides]];
 function syncLook() {
-  $('#lookBtn').classList.toggle('on', LOOK.some(([id, , , on]) => id !== 'guides' && id !== 'ao' && id !== 'modelEdges' && on()));
+  $('#lookBtn').classList.toggle('on', LOOK_ODD.some(([, on]) => on()));
   if (!$('#lookPop').hidden) renderLookPop();
 }
 function renderLookPop() {
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
-  $('#lookList').innerHTML = LOOK.map(([id, name, sub, on]) => `<label class="row"><span class="grow">${name}${sub ? ' <span class="lbl">' + sub + '</span>' : ''}</span>${k(id)}<input type="checkbox" class="tg" role="switch" data-a="${id}"${on() ? ' checked' : ''}></label>`).join('');
+  $('#lookList').innerHTML = LOOK_GROUPS().map(([title, items], gi) => (gi ? '<div class="hr"></div>' : '') + `<div class="lbl lookgrp">${esc(title)}</div>`
+    + items.map(([id, name, sub, on]) => `<label class="row"><span class="grow">${name}${sub ? ' <span class="lbl">' + sub + '</span>' : ''}</span>${k(id)}<input type="checkbox" class="tg" role="switch" data-a="${id}"${on() ? ' checked' : ''}></label>`).join('')).join('');
   $('#lookList').querySelectorAll('input').forEach(i => i.addEventListener('change', () => run(i.dataset.a)));
 }
 $('#lookBtn').innerHTML = ic('eye');
@@ -1605,7 +1626,7 @@ $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
 $('#axesOn').addEventListener('change', e => { if (e.target.checked !== viewer.showAxes) run('showAxes'); });
-const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.style, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
+const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.styleName(), axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
 const okThumb = t => typeof t === 'string' && /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(t);
 // miniatura sceny: mały obraz bieżącego widoku (JPEG, zapisywany w pliku razem ze sceną)
 async function sceneThumb(sc) {
@@ -1627,7 +1648,7 @@ function showScene(i) {
   const sc = app.scenes[i]; if (!sc) return;
   app.scene = i;
   viewer.setCamera(sc.camera);
-  if (sc.style && STYLES[sc.style]) setStyle(sc.style);
+  if (sc.style && STYLES[sc.style]) setStyle(sc.style, sc.style === 'kreska' ? false : undefined);
   if ('fog' in sc) { viewer.setLook({ fog: sc.fog, wire: sc.wire }); syncLook(); }
   if ('axes' in sc) { viewer.showAxes = sc.axes !== false; viewer.redraw(); }
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
@@ -2438,7 +2459,7 @@ function serialize() {
   adoptImages();
   return JSON.stringify({
     images: app.images.length ? app.images : undefined, colors: app.colors.length ? app.colors : undefined, imageUnder: app.imageUnder || undefined,
-    app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.style,
+    app: 'Modo', format: 1, model: app.model, camera: viewer.getCamera(), style: viewer.styleName(),
     sun: viewer.sunCfg, axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, eye: app.eyeH, units: getUnit(), underlay: app.underlay, scenes: app.scenes
   });
 }
@@ -2451,7 +2472,7 @@ function load(text, name, path) {
   try { absorb(app.model, null); } catch (e) { console.error('absorb', e); }   // starsze szkice: luźne bryły zlewają się we wspólną geometrię
   viewer.setModel(app.model);
   if (d.sun) viewer.setSun(d.sun);
-  if (d.style && STYLES[d.style]) setStyle(d.style);
+  if (d.style && STYLES[d.style]) setStyle(d.style, d.style === 'kreska' ? false : undefined);
   if (d.units) { setUnit(d.units); renderUnit(); }
   app.opSeq++;
   viewer.showAxes = d.axes !== false;

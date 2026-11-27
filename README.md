@@ -17,7 +17,7 @@ Lekki szkicownik brył architektonicznych dla Windows i Maca. Rysuje się jak w 
 - Wymiary z klawiatury w trakcie i po zakończeniu operacji (np. `3,5`, `350cm`, `6;4`, kąt `15`); po kopii `x3` robi szyk, `/3` dzieli odstęp. Liczba bez jednostki jest w jednostce szkicu (m, cm albo mm — przełącznik obok pola wymiarów).
 - `Ctrl` (Windows) albo `⌥` (Mac): przy wypychaniu nowa bryła z zostawieniem istniejących krawędzi, przy przesuwaniu i obracaniu kopia.
 - Zamknięte obrysy z linii i łuków same zamieniają się w ściany; okręgi po wypchnięciu dają walce z miękkimi krawędziami.
-- Słońce według daty i godziny (domyślnie Warszawa), miękkie cienie; trzy style: Szkic, Kreska, Model (`⇧1`, `⇧2`, `⇧3`); wygląd automatyczny, jasny albo ciemny.
+- Słońce według daty i godziny (domyślnie Warszawa), miękkie cienie; dwa style: Rysunek (z opcją ołówka) i Model (`⇧1` rysunek ołówkiem, `⇧2` rysunek, `⇧3` model); wygląd automatyczny, jasny albo ciemny.
 - Podkład z DXF i DWG (warstwy, wysokość, krycie, przyklejanie). DWG czyta wbudowany LibreDWG, także w wersji przeglądarkowej.
 - Import modeli SketchUpa (`.skp`, menu Plik): grupy i komponenty z zagnieżdżeniami, warstwy, sceny, kolory i przezroczystość materiałów, miękkie krawędzie. Bez tekstur. Model trafia do szkicu jako jedna grupa.
 - Operacje na bryłach i wycięcia liczy Manifold — wynik jest zawsze szczelną bryłą.
