@@ -1,20 +1,17 @@
 # Modo — wskazówki dla asystenta
 
-Tu są tylko zasady. Procedury krok po kroku są w umiejętnościach (`.claude/skills/`), a stali pomocnicy w `.claude/agents/` — wczytuj je, gdy zadanie ich dotyczy.
+Tu są tylko zasady Modo. Zasady wspólne dla wszystkich programów Michała (współpraca, interfejs, wydania, technika) są w `../rodzina/claude/CLAUDE.md` — na Macu wczytują się same jako `~/.claude/CLAUDE.md`; jeśli ich nie widzisz, przeczytaj ten plik. Procedury krok po kroku są w umiejętnościach (`.claude/skills/`), a stali pomocnicy w `.claude/agents/` — wczytuj je, gdy zadanie ich dotyczy.
 
 ## Współpraca z Michałem
 
-- Rozmawiamy po polsku. Michał woli pełne zdania niż skróty i oszczędny, nieozdobny wygląd interfejsu — ten sam język wizualny co w Gapie (michallenczewski/gapa).
-- Zmiany commituj i wypychaj sam (gałąź `main`). **Nowej wersji nie wydawaj po każdej poprawce** — tylko gdy Michał o to poprosi (umiejętność `wydanie`).
-- Michał pracuje na Windows w biurze i na Macu w domu: opisy skrótów i podpowiedzi muszą się zgadzać dla obu systemów (⌘/⌥ i Ctrl/Alt).
-- Domyślne skróty to układ Michała (Q zaznacz, W przesuń, E obróć, R skaluj, A linia, S gumka, D prostokąt, F ukryj resztę, G ukryj podobne, Z pokaż wszystko, X push/pull, C perspektywa/równoległy, M wiaderko) — w `renderer/keys.js`. Nie zmieniaj ich bez jego prośby; nowe polecenia dostają wolne klawisze albo żadnego.
+- Domyślne skróty Modo to układ Michała (Q zaznacz, W przesuń, E obróć, R skaluj, A linia, S gumka, D prostokąt, F ukryj resztę, G ukryj podobne, Z pokaż wszystko, X push/pull, C perspektywa/równoległy, M wiaderko) — w `renderer/keys.js`. Nie zmieniaj ich bez jego prośby; nowe polecenia dostają wolne klawisze albo żadnego.
 
 ## Jak pracujemy
 
 - Przed większą zmianą przeczytaj `ARCHITEKTURA.md`.
 - Każdą zmianę w geometrii (wypychanie, ściany, krawędzie, rysowanie) sprawdź umiejętnością `sprawdziany-modelowania` (`node scripts/sprawdziany.mjs` musi przejść), a zgłoszony błąd modelowania najpierw dopisz jako przypadek.
 - Każdą zmianę widoczną w interfejsie sprawdź w wersji przeglądarkowej — umiejętność `test-w-przegladarce` (polecenia `window.modoTest`). Zmiany w wyświetlaniu, zaznaczaniu, przyciąganiu i cofaniu sprawdź też umiejętnością `sprawdzian-wydajnosci`.
-- Przyciski, przełączniki, podpowiedzi, menu ustawień i ruch w interfejsie: według `WYTYCZNE_INTERAKCJE.md` (wspólne dla całej rodziny programów — Gapa, Blat, Modo, Rysio); reakcje przycisków kopiuj dosłownie z `wzorzec_przyciskow.html` (bloki „KOPIUJ”); sprawdź w jasnym i ciemnym motywie.
+- Wygląd i zachowanie interfejsu: umiejętność `rodzina-interfejs` (wytyczne i wzorzec przycisków leżą w `../rodzina/`).
 - Nowy albo zmieniony napis interfejsu: umiejętność `tlumaczenia`; przed zapisem `node scripts/tlumaczenia.mjs` musi przejść.
 - Zmianę zrobioną skryptem albo dużą zmianę daj przed zapisem pomocnikowi `recenzent`.
 - Node leży w `~/.local/node/bin`, `gh` w `~/.local/bin` (dopisz do `PATH` w każdym poleceniu). Gdy `git push` wisi, uruchom go z limitem czasu (`perl -e 'alarm 50; exec @ARGV' git push origin main`).
@@ -23,8 +20,8 @@ Tu są tylko zasady. Procedury krok po kroku są w umiejętnościach (`.claude/s
 
 - Model jest jak w SketchUpie: wszystko narysowane luzem w jednym kontekście to jedna wspólna geometria (bryła z flagą `geo`, `renderer/geo.js`); obiektem jest tylko grupa albo komponent. Nowe narzędzie nie tworzy trwałych osobnych brył — tworzy bryłę albo płaską ścianę, a `absorb` w `postEdit` zlewa ją z resztą. Zaznaczone ściany leżą w `app.sub`; polecenie działające na obiektach najpierw woła `app.liftSub()`.
 - Nowe miejsce, które pomija ukryte elementy, musi korzystać z `isHidden(model, e)` (warstwy, ukrywanie, chowanie reszty modelu), a nie z samego pola `hidden`.
-- Interfejs jest dwujęzyczny: każdy napis widoczny dla użytkownika idzie przez `_t` z `renderer/i18n.js`, a jego angielska wersja do `renderer/lang/en.js`.
-- Program sam sprawdza nowe wersje w wydaniach GitHuba (`releases/latest`) i szuka plików `Modo-<wersja>-win-x64.exe` i `Modo-<wersja>-mac-<arm64|x64>.dmg`. Nie zmieniaj tych nazw.
+- Napisy: `_t` z `renderer/i18n.js`, angielska wersja w `renderer/lang/en.js`.
+- Instalatory: `Modo-<wersja>-win-x64.exe` i `Modo-<wersja>-mac-<arm64|x64>.dmg` (tych nazw szuka sprawdzanie aktualizacji).
 
 ## Biblioteki i licencje
 
