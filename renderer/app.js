@@ -746,7 +746,7 @@ function run(act) {
     case 'style2': setStyle('kreska', false); break;
     case 'pencil': setStyle('kreska', !(viewer.style === 'kreska' && viewer.pencil)); toast(viewer.pencil ? _t('Rysunek ołówkiem') : _t('Rysunek czystą kreską')); break;
     case 'style3': setStyle('model'); break;
-    case 'showAxes': viewer.showAxes = !viewer.showAxes; viewer.redraw(); app.markDirtySoft(); renderViewPop(); break;
+    case 'showAxes': viewer.showAxes = !viewer.showAxes; viewer.redraw(); app.markDirtySoft(); syncLook(); toast(viewer.showAxes ? _t('Osie widoczne') : _t('Osie ukryte')); break;
     case 'new': newSketch(); break;
     case 'open': openSketch(); break;
     case 'save': saveSketch(false); break;
@@ -1029,7 +1029,7 @@ const LOOK_GROUPS = () => {
       ...(edges ? [['backEdges', _t('Krawędzie tylne'), _t('zasłonięte krawędzie blado'), () => viewer.backEdges]] : []),
       ['xray', _t('Prześwit'), _t('półprzezroczyste ściany'), () => viewer.xray], ['wire', _t('Siatka'), _t('same krawędzie'), () => viewer.wire],
       ['faceSides', _t('Strony ścian'), _t('tył ściany na niebiesko'), () => !!viewer.faceSides]]],
-    [_t('Pozostałe'), [['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden], ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false]]]
+    [_t('Pozostałe'), [['fog', _t('Mgła'), '', () => !!viewer.fog], ['hiddenGeo', _t('Ukryta geometria'), _t('schowane elementy blado'), () => !!viewer.showHidden], ['guides', _t('Prowadnice'), '', () => viewer.showGuides !== false], ['showAxes', _t('Osie'), '', () => viewer.showAxes !== false]]]
   ];
 };
 // przycisk oka podświetlony, gdy widok odbiega od zwykłego (prowadnice, cień otoczenia, krawędzie i ołówek to opcje stylu, nie odstępstwa)
@@ -1569,7 +1569,6 @@ function renderViewPop() {
   const secs = app.model.sections || [];
   $('#secRow').hidden = !secs.length;
   $('#secOn').checked = secs.some(q => q.on); $('#secPlanes').checked = viewer.showSectPlanes;
-  $('#axesOn').checked = viewer.showAxes;
 }
 // sceny są w panelu (sekcja Sceny)
 function renderScenes() {
@@ -1634,7 +1633,6 @@ $('#fovRange').addEventListener('input', e => { viewer.setFov(+e.target.value); 
 $('#sceneAdd').addEventListener('click', addScene);
 $('#secOn').addEventListener('change', () => sectionToggle());
 $('#secPlanes').addEventListener('change', () => run('sectionPlanes'));
-$('#axesOn').addEventListener('change', e => { if (e.target.checked !== viewer.showAxes) run('showAxes'); });
 const captureScene = () => ({ camera: viewer.getCamera(), style: viewer.styleName(), axes: viewer.showAxes, fog: !!viewer.fog, wire: !!viewer.wire, sun: { ...viewer.sunCfg }, section: (app.model.sections || []).find(q => q.on)?.id ?? null });
 const okThumb = t => typeof t === 'string' && /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(t);
 // miniatura sceny: mały obraz bieżącego widoku (JPEG, zapisywany w pliku razem ze sceną)
@@ -1659,7 +1657,7 @@ function showScene(i) {
   viewer.setCamera(sc.camera);
   if (sc.style && STYLES[sc.style]) setStyle(sc.style, sc.style === 'kreska' ? false : undefined);
   if ('fog' in sc) { viewer.setLook({ fog: sc.fog, wire: sc.wire }); syncLook(); }
-  if ('axes' in sc) { viewer.showAxes = sc.axes !== false; viewer.redraw(); }
+  if ('axes' in sc) { viewer.showAxes = sc.axes !== false; viewer.redraw(); syncLook(); }
   if (sc.sun) { viewer.setSun(sc.sun); renderSun(); }
   if ('section' in sc && app.model.sections?.length) { for (const q of app.model.sections) q.on = q.id === sc.section; viewer.rebuild(); }
   renderViewChip(); renderViewPop();
