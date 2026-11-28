@@ -512,9 +512,12 @@ export class PaintTool extends Tool {
     // grupa albo komponent (poza edycją) dostaje kolor w całości
     const ids = this.app.expand(s.id).filter(i => typeof i === 'number');
     const a = this.app.paintAlpha >= 0.999 ? undefined : this.app.paintAlpha, c = this.app.paint || null, t = this.app.paintTex || null;
-    const whole = !s.geo && (e.shiftKey || ids.length > 1 || s.bill || hit.shapeId !== s.id || (!isMesh(s) && s.h === 0) || a !== undefined || (s.alpha ?? 1) < 0.999);
+    // klik w grupę albo komponent, do którego nie weszliśmy (inny kontekst niż edytowany) — maluje się cała grupa, jak w SketchUpie;
+    // pojedyncze ściany w grupie maluje się po wejściu do niej (dwuklik)
+    const inGroup = (s.g ?? null) !== (this.app.editing ?? null);
+    const whole = inGroup || (!s.geo && (e.shiftKey || ids.length > 1 || s.bill || hit.shapeId !== s.id || (!isMesh(s) && s.h === 0) || a !== undefined || (s.alpha ?? 1) < 0.999));
     this.app.checkpoint();
-    if (s.geo) {
+    if (s.geo && !whole) {
       // wspólna geometria: kolor, materiał i krycie należą do ściany; z ⇧ — do wszystkich połączonych ścian
       const i = +hit.key.split(':')[1], idx = e.shiftKey ? component(s, i) : regionOf(s, i), v = { c, t }; if (a !== undefined) v.a = a;
       s.fc = { ...(s.fc || {}) };
