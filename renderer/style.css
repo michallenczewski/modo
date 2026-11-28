@@ -418,3 +418,11 @@ body.minimal #miniType.on{display:flex}
 /* okienko oka: grupy przełączników (opcje stylu, krawędzie i ściany, pozostałe) */
 #lookList .lookgrp{font-size:11px;margin:2px 0 -2px}
 #lookList .w36{width:36px;flex:none;text-align:right}
+/* własne przyciski okna (Windows, opcja): na końcu górnego paska zamiast miejsca na systemowe; w trybie minimalistycznym w pastylce */
+.frame-win.own-btns header{padding-right:10px}
+.wbs{display:flex;align-items:center;gap:2px;flex:none;-webkit-app-region:no-drag}
+#winBtns .wsep{width:1px;height:18px;background:var(--line);margin:0 6px 0 4px}
+.wb[data-w=close]:hover{background:#E81123;color:#fff}
+#winMini{display:none;position:fixed;z-index:30;top:8px;right:8px;padding:2px;border-radius:10px;background:var(--card);box-shadow:var(--menush)}
+.own-btns body.minimal #winMini{display:flex}
+@media (max-width:460px){.own-btns #winBtns [data-w=min],.own-btns #winBtns [data-w=max]{display:none}}

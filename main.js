@@ -43,17 +43,32 @@ const dirty = new WeakMap();   // okno → czy są niezapisane zmiany
 const autoKeys = new WeakMap(); // okno → klucz jego autozapisu
 const liveKeys = new Set();     // klucze autozapisu okien, które teraz działają
 const crashed = new WeakSet();  // okna, w których padł proces rysujący (ich autozapis zostaje)
+// Własne przyciski okna na Windows (opcja „Przyciski okna w stylu Modo”, wytyczne rodziny p. 8a): okno bez systemowej
+// nakładki, przyciski rysuje Modo na końcu górnego paska. Ustawienie działa od utworzenia okna, więc zmiana uruchamia Modo ponownie.
+const ownBtns = () => isWin && !!settings.ownButtons;
+ipcMain.on('own-buttons', e => { const w = BrowserWindow.fromWebContents(e.sender); e.returnValue = !!(w && w.ownBtns); });
+ipcMain.handle('own-buttons-set', (e, v) => { settings.ownButtons = !!v; saveSettings(); app.relaunch(); app.quit(); return true; });
+ipcMain.on('win-ctl', (e, cmd) => {
+  const w = BrowserWindow.fromWebContents(e.sender); if (!w) return;
+  if (cmd === 'min') w.minimize();
+  else if (cmd === 'max') w.isMaximized() ? w.unmaximize() : w.maximize();
+  else if (cmd === 'close') w.close();
+});
 function createWindow(openPath) {
-  const b = settings.bounds || { width: 1440, height: 900 };
+  const b = settings.bounds || { width: 1440, height: 900 }, own = ownBtns();
   const win = new BrowserWindow({
     ...b, minWidth: 820, minHeight: 520, show: false,
     title: 'Modo', backgroundColor: '#f7f7f5', autoHideMenuBar: true,
     // pasek tytułu schowany — przyciski okna rysuje system w górnym pasku programu (jak w Gapie)
     ...(isMac
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 19 } }
+      : own ? { titleBarStyle: 'hidden' }
       : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f7f7f5', symbolColor: '#4a4945', height: 52 } }),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
+  win.ownBtns = own;
+  const maxState = () => { if (!win.isDestroyed()) win.webContents.send('win-max', win.isMaximized()); };
+  win.on('maximize', maxState); win.on('unmaximize', maxState);
   wins.add(win);
   if (settings.maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
@@ -90,7 +105,7 @@ ipcMain.on('new-window', () => createWindow(null));
 ipcMain.on('theme', (e, dark) => {
   const w = BrowserWindow.fromWebContents(e.sender); if (!w) return;
   w.setBackgroundColor(dark ? '#161616' : '#f7f7f5');
-  if (isWin) try { w.setTitleBarOverlay({ color: dark ? '#161616' : '#f7f7f5', symbolColor: dark ? '#c4c4c1' : '#4a4945' }); } catch (err) {}
+  if (isWin && !w.ownBtns) try { w.setTitleBarOverlay({ color: dark ? '#161616' : '#f7f7f5', symbolColor: dark ? '#c4c4c1' : '#4a4945' }); } catch (err) {}
 });
 ipcMain.handle('platform', () => process.platform);
 ipcMain.handle('set-lang', (e, l) => { if (l === 'en' || l === 'pl') { settings.lang = l; saveSettings(); } return true; });

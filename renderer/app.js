@@ -33,6 +33,8 @@ api.onFullscreen(v => document.documentElement.classList.toggle('fs', v));
 
 /* ---------- ikony narzędzi ---------- */
 const IC = {
+  wmin: '<path d="M3.5 8.5h9"/>', wmax: '<rect x="3.5" y="3.5" width="9" height="9" rx="1"/>',
+  wrest: '<rect x="3.5" y="5.5" width="7" height="7" rx="1"/><path d="M5.5 5.5v-1a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/>', wclose: '<path d="M4 4l8 8M12 4l-8 8"/>',
   eye: '<path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/>',
   gear: '<path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.8" fill="var(--bg)"/><circle cx="10.5" cy="10.5" r="1.8" fill="var(--bg)"/>',
   ops: '<path d="M2.5 6.5h7v7h-7z"/><path d="M6.5 2.5h7v7h-3"/><path d="M9.5 9.5v-3h-3" stroke-dasharray="1.3 1.5"/>',
@@ -737,6 +739,7 @@ function run(act) {
     case 'clearGuides': if (app.model.guides.length) { app.checkpoint(); app.model.guides = []; app.changed(); } break;
     case 'theme': cycleTheme(); break;
     case 'lang': switchLang(); break;
+    case 'ownButtons': toggleOwnButtons(); break;
     case 'extents': viewer.zoomExtents(); break;
     case 'delete': deleteSelection(); break;
     case 'selectAll': app.selection.clear(); app.sub = []; app.model.shapes.forEach(s => { if (!s.locked) app.selection.add(s.id); }); app.model.lines.forEach(l => { if (!l.locked) app.selection.add('l' + l.id); }); app.model.guides.forEach(g => app.selection.add('g' + g.id)); app.selectionChanged(); break;
@@ -2446,6 +2449,31 @@ async function openFileMenu() {
   $('#fileBtn').classList.add('open');
 }
 // Ustawienia: wygląd programu, język, skróty
+/* ---------- własne przyciski okna (Windows, opcja w ustawieniach; wytyczne rodziny p. 8a) ---------- */
+// Na końcu górnego paska, za ustawieniami, oddzielone kreską; w trybie minimalistycznym — w pastylce przy prawym górnym rogu.
+let winMax = false;
+function winBtnsHtml() {
+  const b = (w, n, t) => `<button class="ib wb" data-w="${w}" title="${t}" aria-label="${t}">${ic(n)}</button>`;
+  return b('min', 'wmin', _t('Minimalizuj') + ' (Win+↓)') + b('max', winMax ? 'wrest' : 'wmax', (winMax ? _t('Przywróć') : _t('Maksymalizuj')) + (winMax ? ' (Win+↓)' : ' (Win+↑)')) + b('close', 'wclose', _t('Zamknij') + ' (Alt+F4)');
+}
+function applyOwnButtons(v) {
+  document.documentElement.classList.toggle('own-btns', !!v);
+  for (const id of ['winBtns', 'winMini']) $('#' + id)?.remove();
+  if (!v) return;
+  const h = document.createElement('div'); h.id = 'winBtns'; h.className = 'wbs'; h.innerHTML = '<span class="wsep"></span>' + winBtnsHtml(); $('header').appendChild(h);
+  const p = document.createElement('div'); p.id = 'winMini'; p.className = 'wbs'; p.innerHTML = winBtnsHtml(); document.body.appendChild(p);
+  for (const el of document.querySelectorAll('.wbs .wb')) el.addEventListener('click', e => { e.stopPropagation(); api.winCtl(el.dataset.w); });
+}
+function toggleOwnButtons() {
+  const v = !api.ownButtons;
+  if (api.web) { api.setOwnButtons(v); applyOwnButtons(v); return; }
+  // ustawienie działa od utworzenia okna — Modo uruchamia się ponownie (jak przy zmianie języka: najpierw zapis)
+  if (app.file.dirty) return toast(_t('Najpierw zapisz szkic — zmiana przycisków okna uruchamia Modo ponownie.'));
+  toast(_t('Modo uruchomi się ponownie z nowymi przyciskami okna…'));
+  setTimeout(() => api.setOwnButtons(v), 600);
+}
+if (!isMac && api.ownButtons) applyOwnButtons(true);
+if (api.onWinMax) api.onWinMax(v => { winMax = !!v; if (api.ownButtons) applyOwnButtons(true); });
 $('#setBtn').addEventListener('click', () => {
   const m = $('#menu'); const was = !m.hidden && m.dataset.owner === 'set'; closePops(); if (was) return; m.dataset.owner = 'set';
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
@@ -2454,7 +2482,7 @@ $('#setBtn').addEventListener('click', () => {
   const groups = [
     [['theme:light', _t('Jasny motyw'), theme === 'light'], ['theme:dark', _t('Ciemny motyw'), theme === 'dark'], ['theme:auto', _t('Motyw jak w systemie'), theme === 'auto']],
     [['keys', _t('Skróty klawiszowe')]],
-    [['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ['geminiKey', _t('Klucz API Gemini…')]]   // i18n-ok
+    [['lang', 'Język / Language: ' + LANGS.find(l => l[0] === lang)[1]], ...(!isMac && api.winCtl ? [['ownButtons', _t('Przyciski okna w stylu Modo'), !!api.ownButtons]] : []), ['geminiKey', _t('Klucz API Gemini…')]]   // i18n-ok
   ];
   const ver = u.current ? `<div class="mver">Modo ${u.current}</div>` : '';
   const upd = api.web ? '' : u.state === 'available' ? `<button role="menuitem" data-a="updInstall"><span>${_t('Zainstaluj wersję ')}${u.version}</span></button>` : `<button role="menuitem" data-a="updateCheck"><span>${_t('Sprawdź aktualizacje')}</span></button>`;

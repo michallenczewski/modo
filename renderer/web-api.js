@@ -48,6 +48,7 @@
     showInFolder() {}, openExternal(url) { window.open(url, '_blank'); },
     setDirty() {}, closeNow() {}, newWindow() { window.open(location.href, '_blank'); },
     onSaveThenClose() {}, onFullscreen() {}, onUpdate() {},
+    ownButtons: false, _winCtl: null, setOwnButtons(v) { this.ownButtons = !!v; return true; }, winCtl(c) { this._winCtl = c; }, onWinMax() {},
     async updateGet() { return { state: 'idle' }; }, async updateCheck() { return { state: 'idle' }; }, async updateInstall() { return false; }
   };
 })();
