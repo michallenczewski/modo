@@ -132,6 +132,8 @@ Cofanie to kopie całego modelu (model jest mały). Plik `.modo` to JSON: model,
 
 **Osie rysowania** (`model.axes`: początek `o` i kierunki `x`, `y`; `z = x × y`) ustawia narzędzie Osie (trzy kliknięcia, jak w SketchUpie). `setAxes` zmienia tablice `AXES` i `ORIGIN` w miejscu, więc przyciąganie, blokada strzałkami, linie śledzenia i kierunek prostokąta, okręgu i kątomierza (`planeU`) idą za nowymi osiami; `app.refresh` (`syncAxes`) wyrównuje je z modelem po każdej zmianie, cofnięciu i wczytaniu. Rdzeń geometrii liczy dalej w osiach świata.
 
+**Ikona programu** (wariant „Wypychanie”, płyta i strzałka w górę; makieta `makieta/ikona.html`): jedno źródło `build/icon.svg` według `../rodzina/ikony/WYTYCZNE_IKONY.md`. `scripts/ikona.js` (uruchamiany Electronem: `node_modules/.bin/electron scripts/ikona.js`) robi z niego `build/icon-win.png` (Windows, tło na całe płótno 1024 px) i `build/icon.png` (Mac, 824 px z marginesem 100 px). Ikona plików `.modo` (`build/modo-file.*`) jest osobna.
+
 **Język interakcji** jest wspólny dla rodziny programów (`../rodzina/WYTYCZNE_INTERAKCJE.md`): krzywa „sprężyna” (`--spring`), przyciski z ikoną unoszą się i uginają, jeden przeskakujący wskaźnik wybranego narzędzia na lewym pasku (`moveInd`), przełączniki włączone w kolorze akcentu, podpowiedzi po 1,5 s (`showTip`), „tak” i „nie” na przyciskach (`ack`), menu ustawień jako ostatni przycisk górnego paska: motyw, skróty, język, wersja i aktualizacje.
 
 **Tryb Tab** (`toggleMinimal`): pełna imersja jak w Rysiu — sam widok na całe okno, plakietka z bieżącym narzędziem (`#miniBadge`, za nią przeciąga się okno), przypomnienie „Tab — pełny widok” i wpisywany wymiar przy kursorze (`#miniType`).

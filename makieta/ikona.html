@@ -1,0 +1,41 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Modo — uproszczona ikona</title>
+<style>
+:root{--bg:#f4f2ee;--card:#fff;--text:#1f1f1d;--muted:#8a877f;--line:#e4e1da}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:28px 24px 48px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}p{margin:0 0 20px;color:var(--muted);max-width:760px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;max-width:1100px}
+.card{background:var(--card);border-radius:14px;box-shadow:0 0 0 1px var(--line);padding:18px}
+.card h2{font-size:15px;margin:0 0 2px}.card .lbl{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+.big svg{width:160px;height:160px;display:block;margin:0 auto 14px}
+.row{display:flex;align-items:flex-end;gap:14px;justify-content:center;padding:12px;border-radius:10px}
+.row.l{background:#e9e7e2}.row.d{background:#1e1e1e;margin-top:8px}
+.dock{max-width:1100px;margin-top:22px}
+.dock .row{justify-content:flex-start;gap:10px;padding:10px 14px}
+.dock .t{font-size:12px;color:var(--muted);margin:14px 0 6px}
+</style></head><body>
+<h1>Modo — uproszczona ikona</h1>
+<p>Warianty w kolorze Modo, według wytycznych ikon rodziny: jednolite tło bez cienia, jeden znak w środku, czytelny w 24 i 32 px. Poniżej każdy wariant w rozmiarach 64, 32 i 24 px na jasnym i ciemnym tle, a na dole obok ikon Gapy, Blatu i Rysia — tak, jak będą stały na pasku.</p>
+<div class="grid" id="grid"></div>
+<div class="dock" id="dock"></div>
+<script>
+const BG = '<rect width="160" height="160" rx="38" fill="#C6F432"/>';
+const K = '#161616';
+const V = {
+  'Obecna': { opis: 'dla porównania: bryła, przerywana linia, strzałka', svg: BG + `<polygon points="80,30 120,53 80,76 40,53" fill="#fff" stroke="${K}" stroke-width="4" stroke-linejoin="round"/><polygon points="40,53 80,76 80,132 40,109" fill="${K}" stroke="${K}" stroke-width="4" stroke-linejoin="round"/><polygon points="80,76 120,53 120,109 80,132" fill="#fff" stroke="${K}" stroke-width="4" stroke-linejoin="round"/><path d="M80 102 L120 79" stroke="${K}" stroke-width="3" stroke-dasharray="5 5" fill="none"/><path d="M80 62 V44 M73 51 L80 44 L87 51" stroke="${K}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'A. Bryła': { opis: 'ta sama bryła, bez linii i strzałki, grubszy obrys', svg: BG + `<g stroke="${K}" stroke-width="9" stroke-linejoin="round"><polygon points="80,30 123,55 80,80 37,55" fill="#fff"/><polygon points="37,55 80,80 80,130 37,105" fill="${K}"/><polygon points="80,80 123,55 123,105 80,130" fill="#fff"/></g>` },
+  'B. Wypychanie': { opis: 'płyta i gruba strzałka w górę — jak narzędzie Wypchnij', svg: BG + `<g stroke="${K}" stroke-width="9" stroke-linejoin="round"><polygon points="80,84 123,108 80,132 37,108" fill="#fff"/><polygon points="37,108 80,132 80,138 37,114" fill="${K}"/><polygon points="80,132 123,108 123,114 80,138" fill="#fff"/></g><path d="M80 104 V32 M58 54 L80 32 L102 54" stroke="${K}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'B1. Wypychanie, wyważone': { opis: 'mniejsza płyta wyżej, znak w polu 24–133 (środek 78)', svg: BG + `<g stroke="${K}" stroke-width="9" stroke-linejoin="round"><polygon points="80,85 114,104 80,123 46,104" fill="#fff"/><polygon points="46,104 80,123 80,128 46,109" fill="${K}"/><polygon points="80,123 114,104 114,109 80,128" fill="#fff"/></g><path d="M80 100 V30 M59 51 L80 30 L101 51" stroke="${K}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'B2. Wypychanie, szersza płyta': { opis: 'płyta szersza od grotu — spokojniejsza sylwetka, znak w polu 24–133', svg: BG + `<g stroke="${K}" stroke-width="9" stroke-linejoin="round"><polygon points="80,79 120,101 80,123 40,101" fill="#fff"/><polygon points="40,101 80,123 80,128 40,106" fill="${K}"/><polygon points="80,123 120,101 120,106 80,128" fill="#fff"/></g><path d="M80 97 V31 M58 53 L80 31 L102 53" stroke="${K}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'B3. Wypychanie, płaska płyta': { opis: 'jak B2, ale płyta bez grubości — bez „cienia” pod spodem', svg: BG + `<polygon points="80,82 120,104 80,126 40,104" fill="#fff" stroke="${K}" stroke-width="9" stroke-linejoin="round"/><path d="M80 100 V30 M58 52 L80 30 L102 52" stroke="${K}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'B4. Wypychanie, sam obrys': { opis: 'płyta tylko obrysem, jak znaki Gapy, Blatu i Rysia', svg: BG + `<polygon points="80,82 120,104 80,126 40,104" fill="none" stroke="${K}" stroke-width="11" stroke-linejoin="round"/><path d="M80 100 V30 M58 52 L80 30 L102 52" stroke="${K}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+  'C. Kostka z linii': { opis: 'sama kreska, jak znaki Gapy, Blatu i Rysia', svg: BG + `<g fill="none" stroke="${K}" stroke-width="12" stroke-linejoin="round" stroke-linecap="round"><polygon points="80,30 123,55 123,105 80,130 37,105 37,55"/><path d="M37 55 L80 80 L123 55 M80 80 V130"/></g>` }
+};
+const svg = (inner, px) => `<svg viewBox="0 0 160 160" width="${px}" height="${px}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+const sizes = px => [64, 32, 24].map(s => svg(px, s)).join('');
+document.getElementById('grid').innerHTML = Object.entries(V).map(([n, v]) => `<div class="card"><h2>${n}</h2><div class="lbl">${v.opis}</div><div class="big">${svg(v.svg, 160)}</div><div class="row l">${sizes(v.svg)}</div><div class="row d">${sizes(v.svg)}</div></div>`).join('');
+const GAPA = '<rect width="160" height="160" rx="38" fill="#fafafa"/><g transform="translate(0 -3)"><circle cx="50" cy="70" r="16" fill="none" stroke="#1c1c1f" stroke-width="11"/><circle cx="110" cy="70" r="16" fill="none" stroke="#1c1c1f" stroke-width="11"/><path d="M64 112H96" stroke="#1c1c1f" stroke-width="11" stroke-linecap="round"/></g>';
+const BLAT = '<rect width="160" height="160" rx="38" fill="#FF6B1A"/><g stroke="#161616" stroke-width="24" stroke-linecap="round" fill="none"><path d="M62 44 V128 M98 44 V128 M38 68 H122 M38 104 H122"/><path d="M62 41 V125 M98 41 V125 M38 65 H122 M38 101 H122"/><path d="M62 38 V122 M98 38 V122 M38 62 H122 M38 98 H122"/></g><path d="M62 36 V120 M98 36 V120 M38 60 H122 M38 96 H122" stroke="#ECEBE6" stroke-width="15" stroke-linecap="round" fill="none"/>';
+const RYSIO = '<rect width="160" height="160" rx="38" fill="#F1ECE1"/><g transform="translate(80 80) scale(0.817) translate(-79.3 -80.55)"><path d="M26 124C40 60 62 28 92 34C128 42 122 98 88 104C56 110 52 70 80 62C104 56 126 74 136 128" fill="none" stroke="#161616" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/><rect x="16" y="114" width="20" height="20" fill="#FFFFFF" stroke="#161616" stroke-width="5.5"/></g>';
+document.getElementById('dock').innerHTML = Object.entries(V).filter(([n]) => n !== 'Obecna').map(([n, v]) => `<div class="t">${n} — obok Gapy, Blatu i Rysia (48 i 32 px)</div><div class="row l">${[GAPA, BLAT, v.svg, RYSIO].map(x => svg(x, 48)).join('')}<span style="width:24px"></span>${[GAPA, BLAT, v.svg, RYSIO].map(x => svg(x, 32)).join('')}</div>`).join('');
+</script></body></html>
