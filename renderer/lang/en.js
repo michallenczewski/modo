@@ -459,6 +459,8 @@ export default {
  "Krawędzie tylne (zasłonięte widać blado)": "Back Edges (hidden edges shown faintly)",
  "Powiększ (przeciąganiem)": "Zoom Window (drag)",
  "Panel: element, warstwy, struktura": "Panel: entity, layers, outliner",
+ "Siła": "Strength",
+ "Siła cieni w narożnikach": "Corner shadow strength",
  "Cienie w narożnikach wyłączone": "Corner shadows off",
  "Cienie w narożnikach włączone": "Corner shadows on",
  "Cienie w narożnikach włączone — widać je w stylu Model": "Corner shadows on — visible in the Model style",

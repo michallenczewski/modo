@@ -417,3 +417,4 @@ body.minimal #miniType.on{display:flex}
 .scene .thumb.wcis{transform:scale(.97);transition:transform .09s ease-out}
 /* okienko oka: grupy przełączników (opcje stylu, krawędzie i ściany, pozostałe) */
 #lookList .lookgrp{font-size:11px;margin:2px 0 -2px}
+#lookList .w36{width:36px;flex:none;text-align:right}

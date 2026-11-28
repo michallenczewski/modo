@@ -117,7 +117,7 @@ const app = {
   keys: loadKeys()
 };
 const viewer = app.viewer = new Viewer($('#view'));
-try { viewer.ao = localStorage.getItem('modo.ao') !== '0'; viewer.modelEdges = !!localStorage.getItem('modo.modelEdges'); } catch (e) {}
+try { viewer.ao = localStorage.getItem('modo.ao') !== '0'; viewer.modelEdges = !!localStorage.getItem('modo.modelEdges'); const k = parseFloat(localStorage.getItem('modo.aoStrength')); if (k >= 0 && k <= 1) viewer.aoStrength = k; } catch (e) {}
 const snapper = app.snapper = new Snapper(viewer);
 viewer.selected = app.selection;
 viewer.setModel(app.model);
@@ -1040,9 +1040,18 @@ function syncLook() {
 }
 function renderLookPop() {
   const k = id => { const c = keysFor(id, app.keys.over)[0]; return c ? '<kbd>' + prettyCombo(c, isMac) + '</kbd>' : ''; };
+  // siła cieni w narożnikach: suwak pod przełącznikiem, gdy są włączone
+  const aoK = Math.round((viewer.aoStrength ?? 0.5) * 100);
+  const extra = id => id === 'ao' && viewer.ao !== false ? `<div class="row"><span class="lbl w60">${_t('Siła')}</span><input type="range" id="aoRange" min="0" max="100" step="5" value="${aoK}" class="grow" aria-label="${_t('Siła cieni w narożnikach')}"><span class="lbl num w36" id="aoLbl">${aoK}%</span></div>` : '';
   $('#lookList').innerHTML = LOOK_GROUPS().map(([title, items], gi) => (gi ? '<div class="hr"></div>' : '') + `<div class="lbl lookgrp">${esc(title)}</div>`
-    + items.map(([id, name, sub, on]) => `<label class="row"><span class="grow">${name}${sub ? ' <span class="lbl">' + sub + '</span>' : ''}</span>${k(id)}<input type="checkbox" class="tg" role="switch" data-a="${id}"${on() ? ' checked' : ''}></label>`).join('')).join('');
-  $('#lookList').querySelectorAll('input').forEach(i => i.addEventListener('change', () => run(i.dataset.a)));
+    + items.map(([id, name, sub, on]) => `<label class="row"><span class="grow">${name}${sub ? ' <span class="lbl">' + sub + '</span>' : ''}</span>${k(id)}<input type="checkbox" class="tg" role="switch" data-a="${id}"${on() ? ' checked' : ''}></label>` + extra(id)).join('')).join('');
+  $('#lookList').querySelectorAll('input[type=checkbox]').forEach(i => i.addEventListener('change', () => run(i.dataset.a)));
+  const ar = $('#aoRange');
+  if (ar) {
+    setRangeFill(ar);
+    ar.addEventListener('input', () => { viewer.aoStrength = +ar.value / 100; setRangeFill(ar); $('#aoLbl').textContent = ar.value + '%'; viewer.needs = true; });
+    ar.addEventListener('change', () => { try { localStorage.setItem('modo.aoStrength', String(viewer.aoStrength)); } catch (e) {} });
+  }
 }
 $('#lookBtn').innerHTML = ic('eye');
 $('#lookBtn').addEventListener('click', () => openPop('#lookPop', $('#lookBtn')));
